@@ -13,7 +13,31 @@ Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen
 
 ---
 
-## 🚀 The v0.7.1 Driver Latency Advisory Engine
+## What's New in v1.0.0
+
+v1.0.0 is the first release where every change is **provably reversible** and the app **repairs itself**
+after a driver update wipes its work.
+
+| Feature | Why it matters |
+| :--- | :--- |
+| **Write-ahead-log journaling** | Each tweak's previous value is flushed to `journal.json` *before* the system is touched, and `undo-all.ps1` is regenerated in the same step. A crash mid-apply can no longer leave a machine changed with no record of how it was, and a failed write aborts the tweak instead of proceeding blind. |
+| **Degraded-journal protection** | If `journal.json` cannot be parsed at startup, the app latches into a protection mode: it refuses to overwrite the journal or your `undo-all.ps1`, because between them they are the only record of what your PC was. |
+| **Drift Watcher & 1-click auto-heal** | A driver install (DDU, Adrenalin, a Windows cumulative update) silently wipes `Interrupt Management`, `MessageSignaledInterruptProperties` and the GPU class keys, putting every interrupt back on CPU 0. The app fingerprints your driver set when tweaks are written, re-scans on startup, and reports **"Driver Update Detected - N applied tweaks were reset to stock"** with the affected subsystems and a **Re-Apply Now** button. Re-applying keeps the original factory baseline, so Revert still works. |
+| **SMT-aware NDIS RSS alignment** | `*MaxRssProcessors` counts *logical* processors, not cores. The old code wrote "2 processors starting at 20", which is LPs 20 and 21 - the two threads of **one** core. RSS spans are now derived from real topology and the queue count is sized to fill the span, so receive queues land on distinct physical cores. |
+| **Hybrid P/E placement policy** | On Intel hybrid CPUs, non-game devices used to be forced onto E-cores even when the core benchmark measured P-cores as steadier. Three policies are now selectable: **E-cores for audio/network** (default, maximum game isolation), **P-cores when there is room**, and **let the benchmark decide**. Every hybrid row states which kind of core it landed on and why. |
+| **Shared xHCI root-hub escalation** | A root hub raises one interrupt for every port on it, so a mouse and a USB DAC on the same controller already share an ISR. That controller now gets a second core when cores are spare - with a budget guard that never pushes another device into sharing - and the plan tells you the real fix is moving the DAC to a different controller. |
+| **28-architecture verification matrix** | Every planner decision is asserted against 28 synthetic topologies. Three real traps were found and fixed this way: Strix Point's 16 MB + 8 MB L3 being mislabelled as 3D V-Cache, Intel Meteor/Lunar Lake low-power E-cores with **no L3 at all** being eligible for device pinning, and Arrow Lake's interleaved P/E core numbering. |
+
+### Also hardened
+
+- **Driver version normalization** no longer mangles Intel Arc (`32.0.101.x`) or AMD (`32.0.x`) versions into NVIDIA-style numbers, and no longer treats the `nvraid.sys` / `nvstor.sys` storage drivers as display drivers.
+- **Version matching compares whole components**, so a rule for `1.18` can no longer match `.3118`.
+- **The most severe advisory wins** when a device matches several catalog entries, instead of the first in file order.
+- **The test suite grew from 215 to 828 assertions**, including a WAL durability and rollback suite, a drift-heal-revert proof against a real throwaway registry key, and hostile-input fuzzing.
+
+---
+
+## 🚀 The Driver Latency Advisory Engine
 
 ### The Challenge: Infinite Hardware Combinations & Bugged Drivers
 Modern gaming PCs represent millions of possible hardware combinations: CPUs, graphics cards, motherboards, network adapters, audio interfaces, and high-polling USB peripherals. Every single component runs its own vendor device driver.
@@ -69,7 +93,8 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 ---
 
 ## Table of Contents
-- [The v0.7.1 Driver Latency Advisory Engine](#-the-v071-driver-latency-advisory-engine)
+- [What's New in v1.0.0](#whats-new-in-v100)
+- [The Driver Latency Advisory Engine](#-the-driver-latency-advisory-engine)
 - [How Stutter Guard Works: The Two-Step Solution](#️-how-stutter-guard-works-the-complete-two-step-solution)
 - [Key Modules & Capabilities](#key-modules--capabilities)
 - [Comprehensive Step-by-Step Usage Guide](#comprehensive-step-by-step-usage-guide)
@@ -87,6 +112,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 - [Download & Running (Pre-Compiled Binary)](#download--running-pre-compiled-binary)
 - [Building from Source](#building-from-source)
 - [Project Architecture](#project-architecture)
+- [Known Limitations](#known-limitations)
 - [License & Non-Commercial Terms](#license--non-commercial-terms)
 - [Support & Sponsoring Development](#support--sponsoring-development)
 - [Acknowledgments & Research](#acknowledgments--research)
@@ -97,7 +123,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 
 | Module | Core Functionality |
 | :--- | :--- |
-| **Driver Advisory Engine** *(New in v0.7.1)* | Real-time audit against 77 catalogued driver regressions harvested from internet community reports. Automatically normalizes vendor versions (NVIDIA display drivers, Realtek, Intel) and prescribes concrete remediation: **Update**, **Roll back**, or **Reconfigure/Remove**. |
+| **Driver Advisory Engine** | Real-time audit against 77 catalogued driver regressions harvested from internet community reports. Automatically normalizes vendor versions (NVIDIA display drivers, Realtek, Intel) and prescribes concrete remediation: **Update**, **Roll back**, or **Reconfigure/Remove**. |
 | **Drift Watcher & 1-Click Auto-Heal** *(New in v1.0.0)* | Fingerprints every device's driver identity when tweaks are written. On startup it re-scans and, if a driver or Windows update has reset applied tweaks, shows a banner - **"Driver Update Detected - N applied tweaks were reset to stock"** - with a one-click **Re-Apply**. Re-applying preserves the original factory baseline, so Revert still restores the pre-Stutter-Guard state. |
 | **Home (System Scan)** | Read-only hardware and OS topology inspection: Windows build and UBR, CPU core grouping (CCDs / 3D V-Cache / Intel P & E cores / SMT mapping), chassis form-factor detection, GPU drivers and driver files, Virtualization-Based Security (VBS), system timer resolution, active WHEA hardware errors, driver advisories summary, and integrated progressive **Core Benchmark**. Scan reports export cleanly to text. |
 | **Interrupts & Affinity** | Hardware-aware IRQ affinity engine. Automatically preserves gaming cores completely interrupt-free (CPU 0/1; the 3D V-Cache CCD on AMD X3D; top-ranked CCDs or P-cores on Intel). Ranks secondary cores with an integrated progressive Core Benchmark (timer wake-up latency, speed, interrupt load, SMT stolen time) and assigns devices strategically: GPU, primary mouse USB controller, default audio, wired/wireless NIC RSS queues (**SMT-aware**: the RSS processor span is sized so queues land on distinct physical cores, not two threads of one core), and remaining USB controllers. On Intel hybrid CPUs a **P/E placement policy** selects whether non-game devices use E-cores (default), spare P-cores, or pure benchmark ranking. Escalates a **shared xHCI root hub carrying both the mouse and your USB DAC**, since one root hub raises a single interrupt for all its ports. Supports safe MSI mode conversions. |
@@ -230,6 +256,13 @@ C:\ProgramData\Stutter Guard\
 └── undo-all.ps1           # Standalone PowerShell script to revert every tweak without the app
 ```
 
+### Write-ahead logging
+
+Every value is recorded, flushed to disk and mirrored into `undo-all.ps1` **before** the change is
+applied, not after. If the journal cannot be written, the change is not made. Writes are atomic
+(`.tmp` then rename), so a crash mid-save cannot leave half a journal. A journal that fails to parse
+at startup puts the app into a protection mode that refuses to overwrite either file.
+
 ### How to Revert:
 - **In-App Per-Tweak Revert:** Every row in Stutter Guard has its own **Revert** button that restores the original pre-tweak value recorded in the journal.
 - **In-App Global Revert:** On the **Safety** screen, click **Revert everything** to restore all original registry values, delete the custom power plan, and remove scheduled tasks in one operation.
@@ -255,7 +288,7 @@ Both actions require explicit confirmation and display the exact payload before 
 
 ## Supported Hardware & CPU Topologies
 
-Stutter Guard includes an exhaustive hardware matrix verified by automated integration tests:
+Stutter Guard ships a hardware matrix verified by an automated simulation suite covering **28 CPU topologies** - AMD 3D V-Cache (single and dual CCD, asymmetric 6+6, SMT off), standard multi-CCD and Zen 2 quad-CCX parts, Strix Point APUs, Intel 12th-14th gen hybrids, Arrow / Meteor / Lunar Lake, homogeneous quad-cores, 2-core VMs, and 64-LP / 128-TP Threadrippers. Every applicable topology is asserted never to pin a device on CPU 0 or its SMT sibling, to emit valid 8-byte little-endian affinity masks, and to produce RSS spans inside the processor count.
 
 | Architecture | Example Processors | Optimization Strategy |
 | :--- | :--- | :--- |
@@ -264,6 +297,7 @@ Stutter Guard includes an exhaustive hardware matrix verified by automated integ
 | **AMD APUs & Laptops** | Ryzen 7 5800H, 6800H, 7840HS, 8845HS, Strix Point | Enforces laptop battery safety; respects flat-rank core spreads (<5% clock delta) and preserves hand-tuned SMT thread assignments. Disables unused iGPU interrupts on Optimus/dGPU configs. |
 | **Intel Hybrid (P + E)** | Core i9-14900K, 13900K, 12900K, i7-14700K | Preserves CPU 0/1 and top P-cores for games. Pins GPU and mouse USB to remaining P-cores; routes NIC RSS and peripheral USB to consecutive E-cores. |
 | **Intel Arrow Lake** | Core Ultra 9 285K, Core Ultra 7 265K | Handles interleaved P/E layouts without SMT; guards unequal L3 cache blocks from false V-Cache triggers. |
+| **Intel Meteor / Lunar Lake** | Core Ultra 7 155H, 258V | Hybrid with low-power E-cores that sit on the SoC tile **without their own L3**. Those cores are excluded from device placement whenever L3-backed cores exist, since a device pinned there pays a cache miss on every interrupt. |
 | **Intel Legacy / Quad-Core** | Core i7-7700HQ, i7-6700K, i5-4690K | Fallback logic reserves only CPU 0/1 so secondary candidate cores remain available. Primary discrete GPU and USB mouse receive dedicated cores; screen-driving iGPU shares with audio and Wi-Fi. |
 
 ---
@@ -288,7 +322,15 @@ To run the tool without compiling from source:
 1. Download **`StutterGuard.exe`** from the **[Stutter Guard Releases](https://github.com/Kareem-Shabaka/stutter-guard/releases)** page.
 2. Right-click `StutterGuard.exe` and select **Run as administrator**.
 
-`StutterGuard.exe` is a self-contained, single-file executable for Windows 10 and 11 (x64). No installer or external .NET runtimes required.
+`StutterGuard.exe` is a self-contained, single-file executable for Windows 10 and 11 (x64). No installer or external .NET runtimes required. It requests administrator elevation on launch, which the interrupt and service features need.
+
+Verify your download against the published checksums before running it:
+
+```powershell
+Get-FileHash .\StutterGuard.exe -Algorithm SHA256
+```
+
+Every release publishes a `SHA256SUMS.txt` next to the binary. If the hash does not match, do not run the file.
 
 ---
 
@@ -297,7 +339,7 @@ To run the tool without compiling from source:
 ### Prerequisites
 - Windows 10 or 11 (x64)
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (`winget install Microsoft.DotNet.SDK.10`)
-- Optional (for recompiling the embedded C timer tool): MinGW-w64 (`x86_64-w64-mingw32-gcc`)
+- Optional (only to recompile the embedded native C timer agent): MinGW-w64 (`x86_64-w64-mingw32-gcc`). The shipped `DpcTimerRes.exe` is a 6.6 KB managed build that the in-box `csc.exe` can rebuild from `timerres.cs`, so no C toolchain is required.
 
 ### One-Click Build
 Clone the repository and run the root build script:
@@ -308,7 +350,7 @@ cd stutter-guard
 build.cmd
 ```
 
-`build.cmd` executes the entire 215 unit test suite, restores dependencies, and publishes a self-contained single-file executable to:
+`build.cmd` executes the entire 828-assertion test suite, restores dependencies, and publishes a self-contained single-file executable to:
 ```
 publish\StutterGuard.exe
 ```
@@ -344,12 +386,27 @@ stutter-guard/
 │   ├── DpcTweaker.UI/               # Pure MVVM view models (INotifyPropertyChanged, RelayCommand)
 │   └── DpcTweaker.App/              # WPF desktop application (Fluent Dark/Light UI, boot agent)
 ├── tests/
-│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix covering all CPU architectures (215 tests)
+│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix: 828 assertions across 28 CPU architectures
 ├── tools/                           # Automated bad driver catalog generation & verification toolchain
 ├── build.cmd                        # Automated build & publish script
 ├── LICENSE                          # GPLv3 with Non-Commercial Rider
 └── README.md
 ```
+
+---
+
+## Known Limitations
+
+Stutter Guard documents what it does **not** do as carefully as what it does.
+
+| Limitation | Detail |
+| :--- | :--- |
+| **22 of the 77 driver rules cannot surface in a scan yet** | The auditor is complete - all 77 rules fire correctly when handed a matching device, and the test suite proves it. But the device scanner only enumerates PCI devices, so the rules targeting USB audio interfaces, HDAUDIO codecs, ACPI/ROOT nodes and SWC audio APOs have nothing to match in a real scan. This is the highest-value outstanding work. |
+| **RSS placement is bounded by what NDIS can express** | NDIS spreads receive queues over a **contiguous** processor range. The app sizes the queue count to fill that span so queues reach distinct physical cores, but it cannot make queues skip a processor. |
+| **Telemetry endpoints are embedded in the binary** | Hardware reports and feedback go to the developer's own channels. The webhook URLs are obfuscated, not encrypted, so they can be extracted from the executable. Submitting is always explicit and opt-in, and the app never sends anything on its own. |
+| **Verification is simulation-based** | The topology matrix, drift engine and WAL are tested against synthetic topologies and a throwaway registry key, not against every shipping CPU. Real firmware can report a layout that differs from what the tests model. |
+| **Several tweaks need a restart** | Interrupt affinity, MSI mode and GPU registry keys are read by drivers at device start. The app flags a restart, and the interrupt check tells you whether the pins actually landed. |
+| **Light C-states cost idle power** | Restricting cores to C1 raises idle package power by roughly 15-20 W on a desktop. This is stated on the Power screen rather than hidden. |
 
 ---
 
