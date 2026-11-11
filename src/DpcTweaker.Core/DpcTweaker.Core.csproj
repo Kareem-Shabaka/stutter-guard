@@ -26,6 +26,7 @@
     <EmbeddedResource Include="Assets\DpcTimerRes.exe" LogicalName="DpcTimerRes.exe" />
     <EmbeddedResource Include="Catalog\services.json" LogicalName="services.json" />
     <EmbeddedResource Include="Catalog\tasks.json" LogicalName="tasks.json" />
+    <EmbeddedResource Include="Catalog\bad_drivers.json" LogicalName="bad_drivers.json" />
   </ItemGroup>
 
 </Project>

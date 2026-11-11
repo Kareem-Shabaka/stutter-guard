@@ -112,6 +112,26 @@ public sealed class PciDevice
     public string AffinityKey => InterruptKey + @"\Affinity Policy";
     public string MsiKey => InterruptKey + @"\MessageSignaledInterruptProperties";
     public string? ClassKey => DriverKey is null ? null : @"HKLM\SYSTEM\CurrentControlSet\Control\Class\" + DriverKey;
+    public string? DriverVersion => ClassKey is null ? null : RegistryOps.ReadString(ClassKey, "DriverVersion");
+    public string? DriverDate => ClassKey is null ? null : RegistryOps.ReadString(ClassKey, "DriverDate");
+    public string? DriverDesc => ClassKey is null ? null : RegistryOps.ReadString(ClassKey, "DriverDesc");
+    public string? MatchingDeviceId => ClassKey is null ? null : RegistryOps.ReadString(ClassKey, "MatchingDeviceId");
+    public string? DriverFileName
+    {
+        get
+        {
+            if (Service is not null)
+            {
+                string? img = RegistryOps.ReadString(@"HKLM\SYSTEM\CurrentControlSet\Services\" + Service, "ImagePath");
+                if (!string.IsNullOrWhiteSpace(img))
+                {
+                    img = img.Trim().Trim('"');
+                    return System.IO.Path.GetFileName(img);
+                }
+            }
+            return null;
+        }
+    }
 
     public string InterruptSupportText
     {
