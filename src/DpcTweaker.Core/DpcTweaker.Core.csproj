@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DPC Latency Tweaker - core engine (detection, tweaks, journal, backups).
+    Plain net10.0 on purpose: it only uses APIs from the shared framework
+    (Registry, P/Invoke, COM via dynamic), so it builds anywhere without NuGet.
+    It only *runs* on Windows.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>DpcTweaker.Core</RootNamespace>
+    <AssemblyName>DpcTweaker.Core</AssemblyName>
+    <Product>Stutter Guard</Product>
+    <Authors>Kareem Shabaka</Authors>
+    <Copyright>Copyright (C) 2026 Kareem Shabaka. All rights reserved.</Copyright>
+    <Description>Stutter Guard - core engine (detection, tweaks, journal, backups).</Description>
+    <Version>0.7.0</Version>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\DpcTimerRes.exe" LogicalName="DpcTimerRes.exe" />
+    <EmbeddedResource Include="Catalog\services.json" LogicalName="services.json" />
+    <EmbeddedResource Include="Catalog\tasks.json" LogicalName="tasks.json" />
+  </ItemGroup>
+
+</Project>

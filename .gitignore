@@ -1,0 +1,23 @@
+# Build and publishing outputs
+bin/
+obj/
+publish/
+build-log.txt
+close-request
+
+# User-specific and environment files
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+.vs/
+.vscode/
+*.DotSettings.user
+
+# Logs and test results
+*.log
+TestResults/
+
+# OS metadata
+[Tt]humbs.db
+.DS_Store
