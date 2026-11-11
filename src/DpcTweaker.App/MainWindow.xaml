@@ -276,6 +276,20 @@
                             <Button Content="Use this mode" Command="{Binding UseMsiModeCommand}" Margin="12,0,0,0" Padding="14,6" />
                         </StackPanel>
                         <TextBlock Text="{Binding MsiModeChoice.Description}" Style="{StaticResource Secondary}" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Hybrid CPUs only: where non-game devices go. -->
+                <Border Style="{StaticResource Card}" Visibility="{Binding IsHybrid, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Hybrid CPU placement (P-cores / E-cores)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox ItemsSource="{Binding HybridPolicies}" SelectedItem="{Binding HybridChoice}" DisplayMemberPath="Label" MinWidth="320" />
+                            <Button Content="Use this" Command="{Binding UseHybridPolicyCommand}" Margin="12,0,0,0" Padding="14,6" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding HybridChoice.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <TextBlock Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Every device row below says whether it landed on a P-core or an E-core and why, so you can check this against the plan notes." />
                         <TextBlock Style="{StaticResource Secondary}" Margin="0,4,0,0"
                                    Text="Only devices still on a line-based IRQ get a row; devices whose driver already uses MSI are left as they are." />
                     </StackPanel>

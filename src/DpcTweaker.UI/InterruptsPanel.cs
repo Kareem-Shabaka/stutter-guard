@@ -21,6 +21,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     private string _message = "";
     private Choice<MsiMode> _msiMode;
     private Choice<bool> _pinMode;
+    private Choice<HybridDevicePolicy> _hybridChoice;
     private bool _downloadDuringCheck = true;
 
     public InterruptOptionsViewModel(MainViewModel main, TweakEngine engine)
@@ -70,11 +71,28 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         _pinMode = PinModes.First(m => m.Value == engine.Options.KeepValidPins);
         UsePinModeCommand = new RelayCommand(UsePinMode);
 
+        // Only meaningful on an Intel hybrid CPU; hidden everywhere else.
+        HybridPolicies = new()
+        {
+            new(HybridDevicePolicy.EcoresForNetAudio, "E-cores for audio and network (recommended)",
+                "GPU and mouse controller take P-cores; audio, network and secondary USB take E-cores, so every spare P-core stays free for the game's threads. " +
+                "This can override the core benchmark: an E-core is used even when the benchmark measured a P-core as steadier."),
+            new(HybridDevicePolicy.PcoresWhenAvailable, "P-cores when there is room",
+                $"Keeps CPU 0/1 plus {AffinityPlanner.HybridGamePoolPcores} P-cores free for the game, then puts audio and network on any P-cores still spare " +
+                "before spilling onto E-cores. A good choice when your CPU has enough P-cores to cover both the game and its devices."),
+            new(HybridDevicePolicy.BenchmarkDecides, "Let the benchmark decide",
+                "Stops treating P-cores as special for ranking. Cores are ordered purely by the 2-minute benchmark's wake-up jitter and execution speed, " +
+                "E-cores included. Use this if you ran the benchmark and want its numbers to win."),
+        };
+        _hybridChoice = HybridPolicies.First(m => m.Value == engine.Options.HybridDevices);
+        UseHybridPolicyCommand = new RelayCommand(UseHybridPolicy);
+
         RunBenchmarkCommand = new RelayCommand(() => _ = RunBenchmarkAsync(), () => !Running);
         CancelCommand = new RelayCommand(() => _cts?.Cancel(), () => Running);
         ForgetBenchmarkCommand = new RelayCommand(ForgetBenchmark, () => !Running && HasBench);
         CheckCommand = new RelayCommand(() => _ = RunCheckAsync(), () => !Running && Applicable);
         UseMsiModeCommand = new RelayCommand(UseMsiMode);
+        IsHybrid = engine.Profile.Cpu.IsHybrid;
         OpenStartupAppsCommand = new RelayCommand(() => _main.Ui.Open("ms-settings:startupapps"));
         OpenWinUtilCommand = new RelayCommand(() => _main.Ui.Open("https://github.com/ChrisTitusTech/winutil"));
 
@@ -105,6 +123,18 @@ public sealed class InterruptOptionsViewModel : ObservableObject
 
     public List<Choice<MsiMode>> MsiModes { get; }
     public List<Choice<bool>> PinModes { get; }
+    public List<Choice<HybridDevicePolicy>> HybridPolicies { get; }
+
+    /// <summary>True only on an Intel hybrid CPU: elsewhere the P/E choice means nothing.</summary>
+    public bool IsHybrid { get; }
+
+    public Choice<HybridDevicePolicy> HybridChoice
+    {
+        get => _hybridChoice;
+        set => Set(ref _hybridChoice, value);
+    }
+
+    public RelayCommand UseHybridPolicyCommand { get; }
 
     public Choice<bool> PinModeChoice
     {
@@ -278,6 +308,14 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         var engine = _main.Engine;
         if (engine is null || PinModeChoice.Value == engine.Options.KeepValidPins) return;
         engine.SetOptions(engine.Options.With(o => o.KeepValidPins = PinModeChoice.Value));
+        _main.ReloadPages();
+    }
+
+    private void UseHybridPolicy()
+    {
+        var engine = _main.Engine;
+        if (engine is null || HybridChoice.Value == engine.Options.HybridDevices) return;
+        engine.SetOptions(engine.Options.With(o => o.HybridDevices = HybridChoice.Value));
         _main.ReloadPages();
     }
 

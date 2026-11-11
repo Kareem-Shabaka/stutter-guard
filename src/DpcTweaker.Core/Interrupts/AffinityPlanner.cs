@@ -7,6 +7,25 @@ namespace DpcTweaker.Core.Interrupts;
 /// <summary>Why a device gets a core, in priority order (spec step 4).</summary>
 public enum DeviceRole { Gpu, Input, Audio, Network, OtherUsb, Rest }
 
+/// <summary>
+/// Where non-game devices go on an Intel hybrid CPU (P-cores and E-cores).
+/// <para>
+/// The default keeps every spare P-core for the game, which is the strongest isolation but can
+/// override the measured core ranking. The other two modes trade isolation for capacity or for
+/// trusting the benchmark, and are what an Alder Lake owner reaching for "why is my NIC on an
+/// E-core?" actually needs.
+/// </para>
+/// </summary>
+public enum HybridDevicePolicy
+{
+    /// <summary>Audio, Network and secondary USB go to E-cores so every spare P-core stays free for the game.</summary>
+    EcoresForNetAudio,
+    /// <summary>Keep a game pool of P-cores, then use any P-cores still spare before spilling onto E-cores.</summary>
+    PcoresWhenAvailable,
+    /// <summary>Ignore P/E for ranking: order purely by the measured benchmark, E-cores included.</summary>
+    BenchmarkDecides,
+}
+
 /// <summary>A physical core that may take devices, best first.</summary>
 public sealed record RankedCore(int Cpu, int CoreId, int Rank, bool PerformanceCore, string Detail);
 
@@ -74,8 +93,12 @@ public static class AffinityPlanner
 
     /// <param name="keepValidPins">Keep a device on the core it's already pinned to when that core is allowed
     /// (not kept free, a first thread, not taken by a more important device).</param>
+    /// <summary>P-cores kept for the game in <see cref="HybridDevicePolicy.PcoresWhenAvailable"/>, on top of CPU 0/1.</summary>
+    public const int HybridGamePoolPcores = 4;
+
     public static AffinityPlan Plan(CpuTopology topo, IReadOnlyList<CpuSetEntry> sets, BenchResult? bench,
-        IReadOnlyList<PciDevice> devices, bool keepValidPins = false)
+        IReadOnlyList<PciDevice> devices, bool keepValidPins = false,
+        HybridDevicePolicy hybridPolicy = HybridDevicePolicy.EcoresForNetAudio)
     {
         if (topo.MultipleProcessorGroups || topo.LogicalCount > 64)
             return new AffinityPlan { Applicable = false, NotApplicableReason = "More than 64 logical CPUs (several processor groups): interrupt placement stays read-only in this version." };
@@ -186,9 +209,11 @@ public static class AffinityPlanner
 
         var candidates = ranked.Select((c, i) => new RankedCore(c.First, c.Id, i + 1, !hybrid || c.Eff == maxEff,
             Detail(c, bench, hybrid, maxEff))).ToList();
+        // Which physical cores are P-cores, so the per-device note can describe the placement.
+        var pCoreIds = hybrid ? cores.Where(c => c.Eff == maxEff).Select(c => c.Id).ToHashSet() : new HashSet<int>();
 
         var order = Order(devices, notes, candidates.Count);
-        var assignments = Assign(order, candidates, cores, hybrid, keepValidPins);
+        var assignments = Assign(order, candidates, cores, hybrid, keepValidPins, hybridPolicy, pCoreIds);
         if (assignments.Any(a => a.Kept))
             notes.Add($"{assignments.Count(a => a.Kept)} device(s) were already pinned to an allowed core and stay there (\"Keep pins that follow the rules\").");
 
@@ -398,6 +423,26 @@ public static class AffinityPlanner
     /// cores and nothing else. BaseProcNumber is the first LP, RssMaxProcNumber the last LP of the
     /// last core (inclusive), MaxRssProcessors the number of LPs in that span.
     /// </summary>
+    /// <summary>
+    /// Which kind of core a role should try first on a hybrid CPU, as the preferred-core predicate.
+    /// <para>
+    /// EcoresForNetAudio: only the GPU and the mouse controller want P-cores; everything else
+    /// takes E-cores so the game keeps every spare P-core.
+    /// PcoresWhenAvailable: same, except Audio and Network also prefer P-cores — they simply end up
+    /// on E-cores when the game pool has already claimed the spares.
+    /// BenchmarkDecides: nothing is preferred, so the measured ranking decides.
+    /// </para>
+    /// </summary>
+    internal static Func<RankedCore, bool>? PreferredPredicate(DeviceRole role, HybridDevicePolicy policy) => policy switch
+    {
+        HybridDevicePolicy.EcoresForNetAudio => c => c.PerformanceCore == (role is DeviceRole.Gpu or DeviceRole.Input),
+        HybridDevicePolicy.PcoresWhenAvailable =>
+            role is DeviceRole.Gpu or DeviceRole.Input or DeviceRole.Audio or DeviceRole.Network
+                ? c => c.PerformanceCore
+                : c => !c.PerformanceCore,
+        _ => null,
+    };
+
     internal static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)
     {
         if (w.Role != DeviceRole.Network || cpus.Length == 0) return null;
@@ -416,7 +461,28 @@ public static class AffinityPlanner
         return new RssPlan(firsts[0], firsts[^1] + threads - 1, firsts.Length * threads, threads);
     }
 
-    private static List<Assignment> Assign(List<Want> order, List<RankedCore> candidates, List<PhysCore> cores, bool hybrid, bool keepValidPins)
+    /// <summary>
+    /// Spells out which kind of core a device landed on and why, so a hybrid owner never has to
+    /// guess why their NIC went to an E-core.
+    /// </summary>
+    internal static string HybridNote(int[] cpus, List<PhysCore> cores, HashSet<int> pCoreIds)
+    {
+        if (cpus.Length == 0) return "";
+        var pCores = cpus.Where(c => cores.FirstOrDefault(pc => pc.Threads.Contains(c)) is { } pc2 &&
+                                     pCoreIds.Contains(pc2.Id)).ToList();
+        bool allP = pCores.Count == cpus.Length;
+        bool allE = pCores.Count == 0;
+        string lps = CpuTopology.FormatCpus(cpus);
+        string where = allP ? $"Placed on P-core(s) (LP {lps})"
+                     : allE ? $"Placed on E-core(s) (LP {lps})"
+                     : $"Placed on CPUs {lps}";
+        if (!allE) return where + ".";
+        return where + " to keep P-cores free for game threads — switch 'Hybrid CPU placement' in Interrupts options " +
+               "if you prefer P-cores or benchmark-only ranking.";
+    }
+
+
+    private static List<Assignment> Assign(List<Want> order, List<RankedCore> candidates, List<PhysCore> cores, bool hybrid, bool keepValidPins, HybridDevicePolicy hybridPolicy, HashSet<int> pCoreIds)
     {
         var free = candidates.ToList(); // best first
         var used = new Dictionary<int, List<DeviceRole>>();
@@ -470,8 +536,9 @@ public static class AffinityPlanner
         IEnumerable<RankedCore> Preferred(DeviceRole r)
         {
             if (!hybrid) return free;
-            bool wantP = r is DeviceRole.Gpu or DeviceRole.Input;
-            return free.Where(c => c.PerformanceCore == wantP).Concat(free.Where(c => c.PerformanceCore != wantP));
+            var wants = PreferredPredicate(r, hybridPolicy);
+            if (wants is null) return free;   // BenchmarkDecides: the measured order stands
+            return free.Where(wants).Concat(free.Where(c => !wants(c)));
         }
 
         foreach (var w in order)
@@ -486,7 +553,9 @@ public static class AffinityPlanner
                     if (!usedDevs.TryGetValue(coreFirst, out var kd)) usedDevs[coreFirst] = kd = new List<PciDevice>();
                     kd.Add(w.Device);
                 }
-                result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = keptCpus, Kept = true, Rss = RssFor(w, keptCpus, cores), Reason = w.Reason + " Already pinned here, kept." });
+                string keptReason = w.Reason + " Already pinned here, kept." +
+                                    (hybrid ? " " + HybridNote(keptCpus, cores, pCoreIds) : "");
+                result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = keptCpus, Kept = true, Rss = RssFor(w, keptCpus, cores), Reason = keptReason });
                 continue;
             }
 
@@ -535,7 +604,8 @@ public static class AffinityPlanner
                 if (!usedDevs.TryGetValue(c, out var dl)) usedDevs[c] = dl = new List<PciDevice>();
                 dl.Add(w.Device);
             }
-            result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = cpus, Shared = shared, Rss = RssFor(w, cpus, cores), Reason = w.Reason });
+            string reason = hybrid ? w.Reason + " " + HybridNote(cpus, cores, pCoreIds) : w.Reason;
+            result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = cpus, Shared = shared, Rss = RssFor(w, cpus, cores), Reason = reason });
         }
         return result;
     }

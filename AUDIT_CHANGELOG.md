@@ -139,6 +139,72 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 ```
 ---
 
+## Wave 9 — Configurable hybrid P/E placement (the 12700K report)
+
+A user on an **i7-12700K** reported that the 2-minute core benchmark told them to put their Intel
+I210 NIC on E-cores while GPU and USB stayed on P-cores. Reproduced exactly on a synthetic Alder
+Lake 8P+4E topology. The behaviour was working as designed — but the design silently overrode the
+benchmark the user had just run, and never said why.
+
+Preferred() hard-coded "GPU and Input want P-cores, everything else wants E-cores", so a measured
+P-core that woke up 3 µs faster could never win for the NIC, and three P-cores sat idle while audio
+and network were pushed onto the 4-core E-cluster across the ring.
+
+### New option: HybridDevicePolicy (Interrupts screen, hybrid CPUs only)
+
+| Mode | Behaviour |
+|---|---|
+| **EcoresForNetAudio** *(default, unchanged)* | GPU + mouse on P-cores; audio, network and secondary USB on E-cores. Maximum game isolation. |
+| **PcoresWhenAvailable** | Keeps CPU 0/1 plus 4 P-cores for the game, then uses spare P-cores before spilling onto E-cores. |
+| **BenchmarkDecides** | No P/E preference at all: pure measured ranking, E-cores included. |
+
+On a 12700K this changes the NIC from *E-cores 17,18* to *spare P-cores* under the middle mode, and
+under BenchmarkDecides it follows whichever cluster the benchmark actually measured as steadier.
+
+### Explicit P/E reasoning on every row
+
+HybridNote() appends to each assignment's reason on a hybrid CPU:
+
+> Placed on E-core(s) (LP 17,18) to keep P-cores free for game threads — switch 'Hybrid CPU
+> placement' in Interrupts options if you prefer P-cores or benchmark-only ranking.
+
+or simply Placed on P-core(s) (LP 6). No hybrid owner has to guess again.
+
+### Files
+
+| Change | Where |
+|---|---|
+| HybridDevicePolicy enum + HybridGamePoolPcores | Core\Interrupts\AffinityPlanner.cs:? |
+| PreferredPredicate — the P/E rule, now policy-driven | Core\Interrupts\AffinityPlanner.cs:? |
+| HybridNote — per-device P/E explanation | Core\Interrupts\AffinityPlanner.cs:? |
+| Persisted option (defaults to EcoresForNetAudio) | Core\Tweaks\Options.cs:? |
+| Options-panel choice, hidden unless IsHybrid | UI\InterruptsPanel.cs:88, :? |
+| Engine passes the option into the plan | Core\Engine.cs |
+
+### A latent bug fixed while building it
+
+The first cut stored the P-core id set in a [ThreadStatic] field. Two concurrent Plan() calls —
+a UI refresh plus a background heal — would have clobbered each other's set and produced wrong
+P/E notes. Replaced with an explicit parameter threaded through Assign().
+
+### Tests: 12700K (8P+4E) and 12600K (6P+4E)
+
+30 new assertions in Wave 9, covering all three policies on both CPUs, plus:
+- EcoresForNetAudio: GPU/Input on P-cores, audio/NIC on E-cores, only CPU 0/1 + top-2 reserved.
+- PcoresWhenAvailable: 12700K puts NIC **and** audio on spare P-cores; 12600K fits 3 devices on its 3 free P-cores and spills only the fourth.
+- BenchmarkDecides: follows the measured order both ways — P-cores steadier → NIC on P; E-cores steadier → GPU takes an E-core on merit and the NIC spills to P once the 4-core E-cluster is consumed.
+- Note text asserted for both the E-core and P-core wording.
+- Option defaults and With() copy semantics.
+
+### Verification
+
+```
+dotnet build -c Release   →  0 Warning(s), 0 Error(s)
+--selftest                →  600 passed, 0 failed
+dotnet publish -c Release →  publish\StutterGuard.exe refreshed
+```
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -149,7 +215,8 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 | After Wave 5 | 371 |
 | After Wave 6 | 393 |
 | After DriftWatcher (cda74dc) | 450 |
-| After Wave 8 | **570** |
+| After Wave 8 | 570 |
+| After Wave 9 (hybrid policy) | **600** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 
