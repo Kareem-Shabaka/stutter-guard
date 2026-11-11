@@ -1623,14 +1623,15 @@ Console.WriteLine("DriftWatcher: driver fingerprints and cause attribution");
     var report = DriftWatcher.Attribute(fakes, fpBefore, fpAfterUpdate, afterUpdate);
     Check("drift after a driver change is attributed to the driver update", report.Cause == DriftCause.DriverUpdate, report.Cause.ToString());
     Check("the headline matches the requested wording",
-        report.Headline == "Driver Update Detected: 2 Tweaks Drifted", report.Headline);
+        report.Headline == "Driver Update Detected — 2 applied tweaks were reset to stock", report.Headline);
     Check("the changed device is named", report.Detail.Contains("AMD Radeon RX 9070 XT"), report.Detail);
     Check("the report says a driver install wipes the keys", report.Detail.Contains("Interrupt Management"), report.Detail);
     Check("the report promises revert still works", report.Detail.Contains("revert still works"), report.Detail);
     Check("the drifted tweaks are carried through", report.Drifted.Count == 2 && report.IsDriverUpdate);
 
-    Check("a single drifted tweak reads naturally", DriftWatcher.Attribute(new[] { fakes[0] }, fpBefore, fpAfterUpdate, afterUpdate).Headline
-        == "Driver Update Detected: 1 Tweak Drifted");
+    Check("a single drifted tweak reads in the singular",
+        DriftWatcher.Attribute(new[] { fakes[0] }, fpBefore, fpAfterUpdate, afterUpdate).Headline
+        == "Driver Update Detected — 1 applied tweak was reset to stock");
 
     // Drift with no driver change must NOT claim a driver update.
     var sameDrivers = Prof(gpu, nic);
@@ -1638,7 +1639,7 @@ Console.WriteLine("DriftWatcher: driver fingerprints and cause attribution");
     Check("drift without a driver change is not blamed on a driver",
         external.Cause == DriftCause.ExternalChange, external.Cause.ToString());
     Check("its headline is honest about the uncertainty",
-        external.Headline == "2 Tweaks No Longer Match", external.Headline);
+        external.Headline == "Windows Update or Another Tool — 2 applied tweaks were reset to stock", external.Headline);
     Check("its detail mentions Windows Update or another tool",
         external.Detail.Contains("Windows update") && external.Detail.Contains("another tuning tool"), external.Detail);
 
@@ -1700,6 +1701,155 @@ Console.WriteLine("DriftWatcher: driver fingerprints and cause attribution");
     {
         Paths.DataDir = driftSavedDir;
         try { Directory.Delete(driftDir, true); } catch { }
+    }
+}
+// ================================================================ Universal drift + heal, real registry
+
+Console.WriteLine("Universal drift across every category (real HKCU key, mutated behind the engine's back)");
+{
+    // A throwaway key under HKCU: nothing real is touched and it is deleted in finally.
+    string testKey = @"HKCU\Software\StutterGuardSelfTest\" + Guid.NewGuid().ToString("N");
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-uni-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        // "Factory" state: every value exists and reads 0, like a driver's default.
+        // Targets: 1. After a "driver update" they go back to 0.
+        string regPath = @"HKCU\Software\StutterGuardSelfTest\" + testKey.Split('\\')[^1];
+        foreach (string n in new[] { "EnableUlps", "MSISupported", "AffinityMask", "*EEE", "*RssBaseProcNumber" })
+            RegistryOps.Write(regPath, n, RegistryValueKind.DWord, 0);
+        Check("the test key starts at the factory value",
+            RegistryOps.ReadDword(regPath, "EnableUlps") == 0u && RegistryOps.ReadDword(regPath, "*EEE") == 0u);
+
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "Test CPU", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var engine = new TweakEngine(profile, j);
+
+        // One tweak per module, exactly like real rows: GPU key, MSI, IRQ affinity mask, NIC keyword, RSS.
+        RegistryValueTweak Row(string id, string module, string valueName, int target) =>
+            new(new TweakInfo { Id = id, Module = module, Title = id }, j, regPath, valueName, RegistryValueKind.DWord, target);
+
+        var rows = new[]
+        {
+            Row("amdgpu.EnableUlps", "GPU", "EnableUlps", 1),
+            Row("msi.dev", "Interrupts", "MSISupported", 1),
+            Row("irq.dev", "Interrupts", "AffinityMask", 4),
+            Row("nic.*EEE", "Network", "*EEE", 0),          // "off" is 0, so target 0 == factory: not drifted
+            Row("rss.nic", "Interrupts", "*RssBaseProcNumber", 20),
+        };
+
+        var applied = engine.Heal(rows, null);
+        Check("all rows applied through the transactional pipeline", applied.All(r => r.Ok),
+            string.Join("; ", applied.Where(r => !r.Ok).Select(r => r.Error)));
+        Check("the tuned values are live",
+            RegistryOps.ReadDword(regPath, "EnableUlps") == 1u && RegistryOps.ReadDword(regPath, "AffinityMask") == 4u);
+        Check("one baseline per row, holding the factory value 0",
+            rows.Take(4).All(r => j.OriginalsFor(r.Info.Id).Count == 1 && j.OriginalsFor(r.Info.Id).Single().Data == "0"));
+        Check("nothing is drifted right after applying", engine.DriftedCount == 0, engine.DriftedCount.ToString());
+
+        // ---- the simulated AMD Adrenalin / Windows Update -------------------------------
+        // Wipes the GPU, MSI and affinity keys, and resets the RSS keyword. Leaves "*EEE" alone
+        // (its target was already 0, so it can never drift).
+        RegistryOps.Write(regPath, "EnableUlps", RegistryValueKind.DWord, 0);
+        RegistryOps.Write(regPath, "MSISupported", RegistryValueKind.DWord, 0);
+        RegistryOps.DeleteValue(regPath, "AffinityMask");       // a reinstall removes the whole key
+        RegistryOps.Write(regPath, "*RssBaseProcNumber", RegistryValueKind.DWord, 0);
+
+        int expected = 4;   // EnableUlps, MSISupported, AffinityMask, RssBaseProcNumber
+        // engine.DriftedCount reads the engine's own catalog; these rows are injected, so use the
+        // static helper the engine itself calls.
+        var driftedRows = TweakEngine.FindDrifted(rows);
+        Check("drift is detected across every category", driftedRows.Count == expected,
+            $"{driftedRows.Count} vs {expected}: " + string.Join(",", driftedRows.Select(x => x.Info.Id)));
+        var ids = driftedRows.Select(x => x.Info.Id).OrderBy(x => x).ToList();
+        Check("the engine's own catalog shows no drift (its rows were never applied)", engine.DriftedCount == 0,
+            engine.DriftedCount.ToString());
+        Check("the GPU key drifted", ids.Contains("amdgpu.EnableUlps"));
+        Check("the MSI row drifted", ids.Contains("msi.dev"));
+        Check("the IRQ affinity row drifted (deleted value)", ids.Contains("irq.dev"));
+        Check("the RSS keyword drifted", ids.Contains("rss.nic"));
+        Check("a row whose target equalled the factory value never drifts", !ids.Contains("nic.*EEE"));
+
+        foreach (var r in rows.Where(r => ids.Contains(r.Info.Id)))
+            Check($"row {r.Info.Id} reports status Drifted", r.Detect().Status == TweakStatus.Drifted, r.Detect().Status.ToString());
+
+        // subsystem breakdown
+        var report = DriftWatcher.Attribute(driftedRows, null, null, profile);
+        Check("the report groups by subsystem", report.Subsystems.Count >= 2, string.Join(",", report.Subsystems.Select(g => $"{g.Module}={g.Count}")));
+        Check("Interrupts is the biggest group", report.Subsystems[0].Module == "Interrupts" && report.Subsystems[0].Count == 3,
+            string.Join(",", report.Subsystems.Select(g => $"{g.Module}={g.Count}")));
+        Check("the group label is human readable", report.Subsystems.Any(g => g.Label == "Interrupts / MSI"));
+        Check("the subsystem text lists them", report.SubsystemText.Contains("Interrupts / MSI (3)"), report.SubsystemText);
+        Check("the headline uses the requested wording",
+            report.Headline == "Windows Update or Another Tool — 4 applied tweaks were reset to stock", report.Headline);
+        Check("a single tweak reads in the singular",
+            DriftWatcher.Attribute(new[] { rows[0] }, null, null, profile).Headline
+                == "Windows Update or Another Tool — 1 applied tweak was reset to stock");
+
+        // ---- heal ---------------------------------------------------------------------
+        // HealDrifted() is the no-argument convenience that heals the ENGINE's catalog (per spec:
+        // filter _tweaks.Where(Drifted && Applicable)). These rows are injected, so heal them by
+        // identifier through the same transactional pipeline.
+        var healed = engine.Heal(driftedRows);
+        Check("heal re-applied every drifted row", healed.Count == expected && healed.All(r => r.Ok),
+            string.Join("; ", healed.Where(r => !r.Ok).Select(r => r.Error)));
+        Check("drift is gone afterwards", TweakEngine.FindDrifted(rows).Count == 0,
+            TweakEngine.FindDrifted(rows).Count.ToString());
+        Check("the tuned values are live again",
+            RegistryOps.ReadDword(regPath, "EnableUlps") == 1u &&
+            RegistryOps.ReadDword(regPath, "AffinityMask") == 4u &&
+            RegistryOps.ReadDword(regPath, "MSISupported") == 1u &&
+            RegistryOps.ReadDword(regPath, "*RssBaseProcNumber") == 20u);
+        Check("every row reports Applied again", rows.Take(4).All(r => r.Detect().Status == TweakStatus.Applied));
+
+        // ---- BASELINE INTEGRITY: the whole point -------------------------------------
+        Check("heal did not add baseline entries",
+            rows.Take(4).All(r => j.OriginalsFor(r.Info.Id).Count == 1),
+            string.Join(",", rows.Take(4).Select(r => $"{r.Info.Id}:{j.OriginalsFor(r.Info.Id).Count}")));
+        Check("heal did not overwrite the factory baseline with the drifted value",
+            rows.Take(4).All(r => j.OriginalsFor(r.Info.Id).Single().Data == "0"),
+            string.Join(",", rows.Take(4).Select(r => $"{r.Info.Id}={j.OriginalsFor(r.Info.Id).Single().Data}")));
+        Check("the journal on disk agrees",
+            new Journal(Path.Combine(dir, "journal.json")).OriginalsFor("amdgpu.EnableUlps").Single().Data == "0");
+
+        // a second wipe and heal must still not duplicate
+        RegistryOps.Write(regPath, "EnableUlps", RegistryValueKind.DWord, 0);
+        engine.Heal(TweakEngine.FindDrifted(rows));
+        Check("a second heal still leaves exactly one baseline",
+            j.OriginalsFor("amdgpu.EnableUlps").Count == 1 && j.OriginalsFor("amdgpu.EnableUlps").Single().Data == "0");
+
+        // ---- the decisive test: revert-all after healing restores FACTORY, not the drift --
+        var (restored, errors) = engine.RevertAll();
+        Check("revert all after heal reports no errors", errors.Count == 0, string.Join("; ", errors));
+        Check("revert all after heal puts the FACTORY value back, not the post-update one",
+            RegistryOps.ReadDword(regPath, "EnableUlps") == 0u &&
+            RegistryOps.ReadDword(regPath, "MSISupported") == 0u &&
+            RegistryOps.ReadDword(regPath, "AffinityMask") == 0u &&
+            RegistryOps.ReadDword(regPath, "*RssBaseProcNumber") == 0u,
+            $"EnableUlps={RegistryOps.ReadDword(regPath, "EnableUlps")} MSI={RegistryOps.ReadDword(regPath, "MSISupported")} " +
+            $"Affinity={RegistryOps.ReadDword(regPath, "AffinityMask")} Rss={RegistryOps.ReadDword(regPath, "*RssBaseProcNumber")}");
+        Check("revert all cleared the journal", j.EntryCount == 0, j.EntryCount.ToString());
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try
+        {
+            // Delete the throwaway key tree (RegistryOps has no delete-tree helper: it never needs one).
+            using var hkcu = Microsoft.Win32.Registry.CurrentUser;
+            hkcu.DeleteSubKeyTree(@"Software\StutterGuardSelfTest", throwOnMissingSubKey: false);
+        }
+        catch { }
+        try { Directory.Delete(dir, true); } catch { }
     }
 }
 Console.WriteLine($"{passed} passed, {failures} failed");

@@ -17,19 +17,48 @@ public enum DriftCause
 }
 
 /// <summary>The outcome of one drift scan, ready for the Home banner.</summary>
+/// <summary>One subsystem and how many of its tweaks drifted.</summary>
+public sealed record DriftGroup(string Module, int Count)
+{
+    /// <summary>The name a user recognises, rather than the internal module string.</summary>
+    public string Label => Module switch
+    {
+        "GPU" => "GPU driver keys",
+        "Interrupts" => "Interrupts / MSI",
+        "Network" => "Network adapter",
+        "Power" => "Power plan",
+        "Boot tasks" => "Boot tasks / timer",
+        "Services" => "Services",
+        "Tasks" => "Scheduled tasks",
+        _ => Module,
+    };
+}
+
 public sealed record DriftReport(
     IReadOnlyList<ITweak> Drifted,
     DriftCause Cause,
     IReadOnlyList<string> ChangedDevices,
+    IReadOnlyList<DriftGroup> Subsystems,
     string Headline,
     string Detail)
 {
     public static readonly DriftReport Clean = new(
-        Array.Empty<ITweak>(), DriftCause.None, Array.Empty<string>(), "", "");
+        Array.Empty<ITweak>(), DriftCause.None, Array.Empty<string>(), Array.Empty<DriftGroup>(), "", "");
 
     public int Count => Drifted.Count;
     public bool HasDrift => Drifted.Count > 0;
     public bool IsDriverUpdate => Cause == DriftCause.DriverUpdate;
+
+    /// <summary>"GPU driver keys (2), Interrupts / MSI (4), Power plan (1)" — biggest first.</summary>
+    public string SubsystemText => string.Join(", ", Subsystems.Select(g => $"{g.Label} ({g.Count})"));
+
+    /// <summary>Groups the drifted tweaks by module, most affected first.</summary>
+    public static IReadOnlyList<DriftGroup> Group(IEnumerable<ITweak> drifted) =>
+        drifted.GroupBy(t => t.Info.Module)
+               .Select(g => new DriftGroup(g.Key, g.Count()))
+               .OrderByDescending(g => g.Count)
+               .ThenBy(g => g.Module, StringComparer.OrdinalIgnoreCase)
+               .ToList();
 }
 
 /// <summary>
@@ -164,9 +193,11 @@ public static class DriftWatcher
         // cause is unknown, so do not dress it up as a driver update.
         var cause = driverChanged ? DriftCause.DriverUpdate : DriftCause.ExternalChange;
 
+        var groups = DriftReport.Group(drifted);
+        string what = drifted.Count == 1 ? "1 applied tweak was" : $"{drifted.Count} applied tweaks were";
         string headline = driverChanged
-            ? $"Driver Update Detected: {drifted.Count} Tweak{(drifted.Count == 1 ? "" : "s")} Drifted"
-            : $"{drifted.Count} Tweak{(drifted.Count == 1 ? "" : "s")} No Longer Match";
+            ? $"Driver Update Detected — {what} reset to stock"
+            : $"Windows Update or Another Tool — {what} reset to stock";
 
         string who = changed.Count switch
         {
@@ -184,7 +215,11 @@ public static class DriftWatcher
             : "These were applied and no driver version changed, so a Windows update, another tuning tool or a manual edit put them back. " +
               "Re-applying keeps the original before-state in the journal, so every revert still works.";
 
-        Log.Info($"Drift: {headline} ({cause})" + (changed.Count > 0 ? " — " + string.Join(", ", changed) : ""));
-        return new DriftReport(drifted, cause, changed, headline, detail);
+        detail = "Affected: " + string.Join(", ", groups.Select(g => $"{g.Label} ({g.Count})")) + ".\n\n" + detail;
+
+        Log.Info($"Drift: {headline} ({cause})" +
+                 (changed.Count > 0 ? " — driver changed: " + string.Join(", ", changed) : "") +
+                 " — " + string.Join(", ", groups.Select(g => $"{g.Module}={g.Count}")));
+        return new DriftReport(drifted, cause, changed, groups, headline, detail);
     }
 }

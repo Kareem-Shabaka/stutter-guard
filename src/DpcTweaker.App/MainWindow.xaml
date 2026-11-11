@@ -395,6 +395,7 @@
                                 <TextBlock Text="{Binding DriftHeadline}" FontWeight="SemiBold" FontSize="15"
                                            Foreground="{DynamicResource SystemFillColorCautionBrush}" VerticalAlignment="Center" />
                             </StackPanel>
+                            <TextBlock Text="{Binding DriftSubsystems}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6" />
                             <TextBlock Text="{Binding DriftDetail}" TextWrapping="Wrap" />
                             <Expander Header="Which tweaks no longer match" Margin="0,8,0,0">
                                 <ItemsControl ItemsSource="{Binding DriftLines}" Margin="4,6,0,0" />

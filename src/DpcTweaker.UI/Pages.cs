@@ -91,6 +91,7 @@ public sealed class HomePageViewModel : PageViewModel
             OnPropertyChanged(nameof(HasDrift));
             OnPropertyChanged(nameof(DriftHeadline));
             OnPropertyChanged(nameof(DriftDetail));
+            OnPropertyChanged(nameof(DriftSubsystems));
             HealDriftedCommand.Refresh();
         }
     }
@@ -98,6 +99,9 @@ public sealed class HomePageViewModel : PageViewModel
     public bool HasDrift => _drift.HasDrift;
     public string DriftHeadline => _drift.Headline;
     public string DriftDetail => _drift.Detail;
+
+    /// <summary>"Affected: GPU driver keys (2), Interrupts / MSI (4)."</summary>
+    public string DriftSubsystems => _drift.HasDrift ? "Affected: " + _drift.SubsystemText + "." : "";
     public ObservableCollection<InfoLine> DriftLines { get; } = new();
 
     public string DriftMessage { get => _driftMessage; private set => Set(ref _driftMessage, value); }
