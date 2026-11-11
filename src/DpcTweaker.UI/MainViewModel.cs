@@ -152,6 +152,23 @@ public sealed class MainViewModel : ObservableObject
         DriftedCount = driftedCount;
         if (driftedCount > 0) StatusText = $"{driftedCount} tweak(s) drifted — see Home";
     }
+
+    /// <summary>Exactly which applied tweaks were reset, for a caller that wants to list them.</summary>
+    public IReadOnlyList<ITweak> DriftedTweaks => Engine?.DriftedTweaks() ?? (IReadOnlyList<ITweak>)Array.Empty<ITweak>();
+
+    /// <summary>
+    /// Async wrapper around <see cref="TweakEngine.HealDrifted"/>: does the work off the UI thread,
+    /// flags a restart when a re-applied tweak needs one, and refreshes every page afterwards.
+    /// </summary>
+    public async Task<IReadOnlyList<TweakResult>> HealDriftedAsync(IProgress<string>? progress = null)
+    {
+        if (Engine is not { } engine) return Array.Empty<TweakResult>();
+        var results = await Task.Run(() => engine.HealDrifted(progress));
+        if (results.Any(r => r.Ok)) DriftWatcher.Remember(engine);
+        if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) ForceRestartNeeded();
+        await RefreshAllAsync();
+        return results;
+    }
     public async Task InitializeAsync()
     {
         Loading = true;

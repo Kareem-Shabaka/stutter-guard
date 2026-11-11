@@ -125,7 +125,7 @@ public sealed class TweakRowViewModel : ObservableObject
         {
             TweakStatus.Applied => (s.SetByApp ? "Applied" : "Already set", "ok"),
             TweakStatus.PendingReboot => ("Pending restart", "pending"),
-            TweakStatus.Drifted => ("Drifted", "drift"),
+            TweakStatus.Drifted => ("Drifted (reset by update)", "drift"),
             TweakStatus.NotApplied => ("Not applied", "off"),
             TweakStatus.NotApplicable => ("Not applicable", "na"),
             TweakStatus.NotEffective => ("Not effective", "bad"),
