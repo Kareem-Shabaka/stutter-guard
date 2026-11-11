@@ -62,7 +62,7 @@ public sealed class AffinityPlan
 /// </summary>
 public static class AffinityPlanner
 {
-    private sealed class PhysCore
+    internal sealed class PhysCore   // internal only so the self-tests can exercise RssFor
     {
         public int Id;
         public int First;
@@ -247,7 +247,7 @@ public static class AffinityPlanner
         return string.Join(", ", parts);
     }
 
-    private sealed record Want(PciDevice Device, DeviceRole Role, int Cores, string Reason);
+    internal sealed record Want(PciDevice Device, DeviceRole Role, int Cores, string Reason);
 
     /// <summary>Spec step 4: the order devices get cores in.</summary>
     private static List<Want> Order(IReadOnlyList<PciDevice> devices, List<string> notes, int coreBudget)
@@ -398,13 +398,22 @@ public static class AffinityPlanner
     /// cores and nothing else. BaseProcNumber is the first LP, RssMaxProcNumber the last LP of the
     /// last core (inclusive), MaxRssProcessors the number of LPs in that span.
     /// </summary>
-    private static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)
+    internal static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)
     {
         if (w.Role != DeviceRole.Network || cpus.Length == 0) return null;
-        int threads = cores.FirstOrDefault(c => c.Threads.Contains(cpus[0]))?.Threads.Count ?? 1;
+        // A kept pin can name a second thread (LP 21). The RSS keywords speak in logical-processor
+        // ranges, so anchor on each core's first thread: base=21/max=22 would span two cores.
+        var firsts = cpus
+            .Select(c => cores.FirstOrDefault(pc => pc.Threads.Contains(c)))
+            .Where(pc => pc is not null)
+            .Select(pc => pc!.First)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToArray();
+        if (firsts.Length == 0) firsts = cpus.Distinct().OrderBy(x => x).ToArray();
+        int threads = cores.FirstOrDefault(c => c.Threads.Contains(firsts[0]))?.Threads.Count ?? 1;
         if (threads < 1) threads = 1;
-        int last = cpus[^1];
-        return new RssPlan(cpus[0], last + threads - 1, cpus.Length * threads, threads);
+        return new RssPlan(firsts[0], firsts[^1] + threads - 1, firsts.Length * threads, threads);
     }
 
     private static List<Assignment> Assign(List<Want> order, List<RankedCore> candidates, List<PhysCore> cores, bool hybrid, bool keepValidPins)

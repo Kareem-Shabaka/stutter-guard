@@ -911,11 +911,13 @@ Console.WriteLine("Wave 1 (F2.1 / F2.3 / F2.4): write-ahead journal, lockstep un
         var txn = j.BeginTransaction("t.wal");
         j.RecordOriginal("t.wal", "reg", @"HKLM\X|A", true, "DWord", "1");
         Check("WAL: the record is on disk before the caller mutates anything", new Journal(jf).OriginalsFor("t.wal").Count == 1);
-        Check("WAL: undo-all.ps1 is refreshed in the same step", sidecar == 1, sidecar.ToString());
+        Check("WAL: the JSON record is written ahead, the sidecar is not (I/O stays halved)", sidecar == 0, sidecar.ToString());
         j.RecordOriginal("t.wal", "reg", @"HKLM\X|A", true, "DWord", "9");
-        Check("WAL: a repeat of the same target neither records nor re-flushes", sidecar == 1 && j.OriginalsFor("t.wal").Single().Data == "1");
+        Check("WAL: a repeat of the same target neither records nor re-flushes", sidecar == 0 && j.OriginalsFor("t.wal").Single().Data == "1");
         j.MarkApplied("t.wal");
         j.CommitTransaction(txn);
+        j.Flush();
+        Check("WAL: undo-all.ps1 is refreshed once, on commit", sidecar == 1, sidecar.ToString());
 
         // a second tweak whose Apply throws
         var txn2 = j.BeginTransaction("t.fail");
@@ -924,6 +926,7 @@ Console.WriteLine("Wave 1 (F2.1 / F2.3 / F2.4): write-ahead journal, lockstep un
         bool rolledBack = j.RollbackTransaction(txn2);
         j.Flush();                              // what TweakEngine.Apply does in its finally
         Check("rollback reports a change", rolledBack);
+        Check("rollback refreshes the sidecar once, so the two files agree", sidecar == 2, sidecar.ToString());
         Check("rollback drops the phantom record", j.OriginalsFor("t.fail").Count == 0);
         Check("rollback survives a reload", new Journal(jf).OriginalsFor("t.fail").Count == 0);
         Check("rollback does not touch an earlier tweak", j.OriginalsFor("t.wal").Count == 1);
@@ -1124,6 +1127,198 @@ Console.WriteLine("Wave 2 (F3.3): the timer task check reads XML, not text");
         TimerTaskTweak.ArgumentsMatch(xml.Replace("<Arguments>5000</Arguments>", "<Arguments>\r\n      5000\r\n    </Arguments>"), "5000"));
     Check("malformed XML does not read as a match", !TimerTaskTweak.ArgumentsMatch("<not xml", "5000"));
     Check("missing XML does not read as a match", !TimerTaskTweak.ArgumentsMatch(null, "5000"));
+}
+// ================================================================ Wave 4
+
+Console.WriteLine("Wave 4 (#1): a journal with explicit nulls must not throw");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-null-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        string f = Path.Combine(dir, "journal.json");
+        File.WriteAllText(f, """{"Version":1,"Originals":null,"Applied":null,"State":null}""");
+        var j = new Journal(f);
+        Check("null Originals/Applied/State don't throw on read", j.EntryCount == 0 && j.AppliedCount == 0);
+        Check("nulls are data damage, not an unreadable file", !j.IsDegraded);
+        Check("a null State reads as absent", j.GetState("options") is null);
+
+        j.RecordOriginal("t", "reg", @"HKLM\X|A", true, "DWord", "1");
+        j.MarkApplied("t");
+        j.SetState("k", "v");
+        j.Flush();
+        var again = new Journal(f);
+        Check("the repaired journal round-trips", again.EntryCount == 1 && again.IsApplied("t") && again.GetState("k") == "v");
+        Check("no .broken copy for a merely nulled journal", Directory.GetFiles(dir, "*.broken-*").Length == 0);
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 4 (#2/#5): a degraded journal refuses to be written");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-gate-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        const string goodUndo = "# real undo script`r`nRegSet 'x' 'y' 'DWord' 1`r`n";
+        File.WriteAllText(Paths.UndoAllScript, goodUndo);
+        File.WriteAllText(Paths.JournalFile, "{ broken ");
+
+        var j = new Journal(Paths.JournalFile);
+        Check("degraded latch is set", j.IsDegraded);
+
+        bool saveThrew = false;
+        try { j.Save(); } catch (InvalidOperationException) { saveThrew = true; }
+        Check("Save refuses to overwrite the unreadable journal", saveThrew);
+
+        // The write-ahead step must abort the tweak rather than let it change the system.
+        var txn = j.BeginTransaction("t.blocked");
+        bool walThrew = false;
+        try { j.RecordOriginal("t.blocked", "reg", @"HKLM\X|Z", true, "DWord", "1"); }
+        catch (InvalidOperationException) { walThrew = true; }
+        Check("inside a transaction a failed WAL write throws (the tweak must not run)", walThrew);
+        j.RollbackTransaction(txn);
+        j.CommitTransaction(txn);
+        Check("...and the phantom entry is gone again", j.OriginalsFor("t.blocked").Count == 0);
+
+        // Outside a transaction it must stay quiet: it runs from finally blocks.
+        bool quiet = true;
+        try { j.Flush(); } catch { quiet = false; }
+        Check("outside a transaction a failed save only logs", quiet);
+        Check("the good undo-all.ps1 survives untouched", File.ReadAllText(Paths.UndoAllScript) == goodUndo);
+
+        j.RecoverDegraded();
+        Check("explicit recovery clears the latch", !j.IsDegraded);
+        j.Save();
+        Check("after recovery the journal can be written", File.Exists(Paths.JournalFile) && new Journal(Paths.JournalFile).IsDegraded == false);
+        Check("the unreadable file was kept for the user", Directory.GetFiles(dir, "journal.json*.broken-*").Length == 1);
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 4 (#6/#15): interrupt accounting and RSS span over SMT siblings");
+{
+    var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+        new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+    var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+
+    // #6: the check must sum every thread of the assigned cores
+    var nic = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+    var nicSpan = InterruptCheck.CpusFor(nic, t);
+    Check("the NIC's check span covers both threads of both cores",
+        nicSpan.SequenceEqual(new[] { 20, 21, 22, 23 }), string.Join(",", nicSpan));
+    var gpu = plan.Assignments.Single(a => a.Device.DeviceId == "7550");
+    var gpuSpan = InterruptCheck.CpusFor(gpu, t);
+    Check("a single-core device spans that core's threads",
+        gpuSpan.SequenceEqual(new[] { gpu.Cpus[0], gpu.Cpus[0] + 1 }), string.Join(",", gpuSpan));
+    Check("without topology it falls back to the assigned threads",
+        InterruptCheck.CpusFor(nic, null).SequenceEqual(nic.Cpus));
+
+    // #15: a kept pin on a second thread must be anchored back to its core's first thread
+    static List<AffinityPlanner.PhysCore> PhysCores(CpuTopology topo) =>
+        topo.Cpus.GroupBy(c => c.CoreId)
+            .Select(g => new AffinityPlanner.PhysCore
+            {
+                Id = g.Key,
+                First = g.Min(c => c.Index),
+                Threads = g.Select(c => c.Index).OrderBy(x => x).ToList(),
+            })
+            .OrderBy(c => c.First)
+            .ToList();
+    var cores = PhysCores(t);
+    var nicDev = Dev(@"PCI\VEN_10EC&DEV_8126\1", "Realtek Gaming 5GbE Family Controller", 0x02, 0x00, 0x00);
+    PciScanner.Classify(new List<PciDevice> { nicDev }, Array.Empty<GpuInfo>());
+    AffinityPlanner.Want W(int[] cpus) => new(nicDev, DeviceRole.Network, cpus.Length, "test");
+
+    var odd = AffinityPlanner.RssFor(W(new[] { 21 }), new[] { 21 }, cores)!;
+    Check("a pin on the second thread anchors to the core's first thread", odd.BaseProcNumber == 20, odd.Describe());
+    Check("...so it never spills into the next core", odd.MaxProcNumber == 21 && odd.NumProcessors == 2, odd.Describe());
+
+    var pair = AffinityPlanner.RssFor(W(new[] { 20, 22 }), new[] { 20, 22 }, cores)!;
+    Check("two cores span all four of their threads",
+        pair.BaseProcNumber == 20 && pair.MaxProcNumber == 23 && pair.NumProcessors == 4, pair.Describe());
+
+    var both = AffinityPlanner.RssFor(W(new[] { 20, 21 }), new[] { 20, 21 }, cores)!;
+    Check("both threads of one core collapse to that one core",
+        both.BaseProcNumber == 20 && both.MaxProcNumber == 21 && both.NumProcessors == 2, both.Describe());
+
+    // #7: NDIS rounds queues over the span, so the queue count has to fill it
+    var rich = new PciDevice { InstanceId = @"PCI\X\1", Name = "NIC", RssQueueOptions = new() { "1", "2", "4", "8" } };
+    Check("4 processors with a driver offering 4 -> 4 queues", RssTweak.ChooseQueues(rich, new RssPlan(20, 23, 4, 2)) == "4");
+    Check("2 processors over 2 no-SMT cores -> 2 queues", RssTweak.ChooseQueues(rich, new RssPlan(20, 21, 2, 1)) == "2");
+    var capped = new PciDevice { InstanceId = @"PCI\X\2", Name = "NIC", RssQueueOptions = new() { "1", "2" } };
+    Check("a driver capped at 2 keeps 2", RssTweak.ChooseQueues(capped, new RssPlan(20, 23, 4, 2)) == "2");
+    var blind = new PciDevice { InstanceId = @"PCI\X\3", Name = "NIC" };
+    Check("a driver with no queue keyword falls back to one queue per core",
+        RssTweak.ChooseQueues(blind, new RssPlan(20, 23, 4, 2)) == "2");
+}
+
+Console.WriteLine("Wave 4 (#9): a protected task is not a missing task");
+{
+    const int E_ACCESSDENIED = unchecked((int)0x80070005);
+    const int FILE_NOT_FOUND = unchecked((int)0x80070002);
+    const int PATH_NOT_FOUND = unchecked((int)0x80070003);
+    Check("access denied is reported as access-denied", TaskSched.ClassifyLookupFailure(E_ACCESSDENIED) == TaskSched.TaskLookup.AccessDenied);
+    Check("file not found is missing", TaskSched.ClassifyLookupFailure(FILE_NOT_FOUND) == TaskSched.TaskLookup.Missing);
+    Check("path not found is missing", TaskSched.ClassifyLookupFailure(PATH_NOT_FOUND) == TaskSched.TaskLookup.Missing);
+    Check("an unknown HRESULT is unreadable, never missing", TaskSched.ClassifyLookupFailure(unchecked((int)0x80004005)) == TaskSched.TaskLookup.Unknown);
+    Check("an unreadable task still reports Exists, so nothing deletes it",
+        TaskSched.Query(@"\Microsoft\Windows\Definitely Not A Real Task Path\Nope").Exists == false);
+}
+
+Console.WriteLine("Wave 4 (#8/#13/#16): restore-point journaling, bounded backup csv, REG_NONE");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-w4-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        j.RecordOriginal("safety.restorepoint", "restorepoint", "C:", existed: false, null, "1");
+        string undo = JournalRestorer.BuildUndoScript(j);
+        Check("undo turns System Protection back off", undo.Contains("Disable-ComputerRestore"), undo);
+        Check("the restore-point entry survives the journal round trip",
+            j.OriginalsFor("safety.restorepoint").Single() is { Kind: "restorepoint", Target: "C:", Data: "1" });
+
+        Check("the per-boot device-power task dedupes its backup csv", DevicePower.ApplyScript.Contains("$have.ContainsKey"));
+        Check("restore dedupes rows written by an older build", DevicePower.RestoreScript.Contains("Sort-Object Kind, Id -Unique"));
+
+        bool refused = false;
+        try { _ = new RegValue(true, RegistryValueKind.None, "not bytes").Serialize(); }
+        catch (InvalidOperationException) { refused = true; }
+        Check("REG_NONE with a non-binary value refuses to record rather than truncate", refused);
+        Check("REG_NONE tolerates a non-hex journal record",
+            (string)RegValue.Deserialize(RegistryValueKind.None, "nothex") == "nothex");
+        Check("REG_NONE still round-trips real bytes",
+            ((byte[])RegValue.Deserialize(RegistryValueKind.None, "DEADBEEF")).SequenceEqual(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 4 (#10): native tools are decoded with the OEM codepage");
+{
+    var enc = ProcessRunner.ConsoleEncoding;
+    int oem = System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage;
+    // UTF-8 (65001) is the deliberate last-resort fallback when no code-page provider is available.
+    Check("native tool output is decoded with the OEM codepage, not Encoding.Default (UTF-8)",
+        enc.CodePage == oem || enc.CodePage == 65001, $"got {enc.CodePage}, OEM is {oem}");
 }
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

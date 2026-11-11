@@ -44,7 +44,7 @@ public sealed class BackupSet
         if (!RegistryOps.KeyExists(keyPath)) return;
         string file = Path.Combine(Folder, SafeName(keyPath) + ".reg");
         var r = ProcessRunner.Run(ProcessRunner.System32("reg.exe"),
-            new[] { "export", RegistryOps.LongForm(keyPath), file, "/y" }, 60_000, Encoding.Default);
+            new[] { "export", RegistryOps.LongForm(keyPath), file, "/y" }, 60_000, ProcessRunner.ConsoleEncoding);
         if (!r.Ok) Log.Warn("reg export failed for " + keyPath + ": " + r.Combined);
     }
 
@@ -57,7 +57,7 @@ public sealed class BackupSet
         }
         string file = Path.Combine(Folder, "power-plan-" + scheme + ".pow");
         var r = ProcessRunner.Run(ProcessRunner.System32("powercfg.exe"),
-            new[] { "/export", file, scheme.ToString() }, 60_000, Encoding.Default);
+            new[] { "/export", file, scheme.ToString() }, 60_000, ProcessRunner.ConsoleEncoding);
         if (!r.Ok) Log.Warn("powercfg /export failed for " + scheme + ": " + r.Combined);
     }
 

@@ -118,6 +118,7 @@ public sealed class RssTweak : TweakBase
                (a.Cpus.Length > 1 ? $"{a.Cpus.Length} queues on {a.Cpus.Length} cores" : "1 queue on 1 core") +
                $", processors {(a.Rss?.BaseProcNumber ?? a.Cpus[0])}-{(a.Rss?.MaxProcNumber ?? a.Cpus[^1])}" +
                (a.Rss is { ThreadsPerCore: > 1 } rp ? $" ({rp.NumProcessors} logical processors over {a.Cpus.Length} SMT core(s))" : "") +
+               (a.Device.RssQueueOptions.Count > 0 ? $" as {ChooseQueues(a.Device, a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1))} queue(s)" : "") +
                ". Set-NetAdapterRss writes the same keywords. The RSS profile is left at the driver's default.",
         Why = "Received packets are processed (DPC) on the RSS cores. Putting those on the same cores as the adapter's interrupts keeps network work off the game's cores. On the desktop: ndis DPCs only on CPUs 20/22, CCD0 untouched. Games use at most 2 queues.",
         Cost = "None for gaming. Very fast multi-stream downloads use fewer cores.",
@@ -136,11 +137,33 @@ public sealed class RssTweak : TweakBase
         var rss = a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1);
         _items = new List<(string, string)>();
         if (d.RssCapable) _items.Add(("*RSS", "1"));
-        string queues = a.Cpus.Length.ToString(CultureInfo.InvariantCulture);
+        string queues = ChooseQueues(d, rss);
         if (d.RssQueueOptions.Contains(queues)) _items.Add(("*NumRssQueues", queues));
         _items.Add(("*RssBaseProcNumber", rss.BaseProcNumber.ToString(CultureInfo.InvariantCulture)));
         _items.Add(("*MaxRssProcessors", rss.NumProcessors.ToString(CultureInfo.InvariantCulture)));
         _items.Add(("*RssMaxProcNumber", rss.MaxProcNumber.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    /// <summary>
+    /// NDIS spreads its receive queues over the processors in [base, max] in order, so the queue
+    /// count has to fill that span. Two queues over LPs 20-23 still land on 20 and 21, the two
+    /// threads of one core; four queues put two on each of the two target cores.
+    /// </summary>
+    internal static string ChooseQueues(PciDevice d, RssPlan rss)
+    {
+        int want = Math.Max(1, rss.NumProcessors);
+        if (d.RssQueueOptions.Count == 0)
+            return Math.Max(1, want / Math.Max(1, rss.ThreadsPerCore)).ToString(CultureInfo.InvariantCulture);
+
+        var offered = d.RssQueueOptions
+            .Select(v => int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : -1)
+            .Where(n => n > 0)
+            .OrderBy(n => n)
+            .ToList();
+        if (offered.Count == 0) return want.ToString(CultureInfo.InvariantCulture);
+
+        int pick = offered.Contains(want) ? want : offered.Where(n => n <= want).DefaultIfEmpty(offered[0]).Max();
+        return pick.ToString(CultureInfo.InvariantCulture);
     }
 
     protected override Probe Read()

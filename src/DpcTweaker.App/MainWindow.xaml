@@ -489,6 +489,19 @@
                     <TextBlock Style="{StaticResource Secondary}" Margin="0,0,0,14"
                                Text="Every change is recorded with its previous value before it's made. Revert one tweak from its row, or everything from here. Backups and an undo script that works without the app (even in Safe Mode) are kept in the data folder." />
 
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12"
+                            Visibility="{Binding Degraded, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE7BA;  The journal couldn't be read" FontWeight="SemiBold" Margin="0,0,0,6"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                            <TextBlock Text="{Binding DegradedText}" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Start a fresh journal" Command="{Binding RecoverDegradedCommand}" Padding="14,6" Margin="0,0,8,0" />
+                                <Button Content="Open data folder" Command="{Binding OpenDataCommand}" Padding="14,6" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="System Restore point" FontWeight="SemiBold" Margin="0,0,0,6" />

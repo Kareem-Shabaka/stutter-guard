@@ -35,7 +35,7 @@ public static class TaskSched
         try
         {
             var r = ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"),
-                new[] { "/Create", "/TN", FullPath(name), "/XML", tmp, "/F" }, 60_000, Encoding.Default);
+                new[] { "/Create", "/TN", FullPath(name), "/XML", tmp, "/F" }, 60_000, ProcessRunner.ConsoleEncoding);
             if (!r.Ok) throw new InvalidOperationException("schtasks /Create failed: " + r.Combined);
         }
         finally
@@ -48,16 +48,16 @@ public static class TaskSched
     public static void Delete(string fullPath)
     {
         var r = ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"),
-            new[] { "/Delete", "/TN", fullPath, "/F" }, 60_000, Encoding.Default);
+            new[] { "/Delete", "/TN", fullPath, "/F" }, 60_000, ProcessRunner.ConsoleEncoding);
         if (!r.Ok && Query(fullPath).Exists) throw new InvalidOperationException("schtasks /Delete failed: " + r.Combined);
         Log.Info("Task deleted: " + fullPath);
     }
 
     public static void Run(string fullPath) =>
-        ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"), new[] { "/Run", "/TN", fullPath }, 30_000, Encoding.Default);
+        ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"), new[] { "/Run", "/TN", fullPath }, 30_000, ProcessRunner.ConsoleEncoding);
 
     public static void End(string fullPath) =>
-        ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"), new[] { "/End", "/TN", fullPath }, 30_000, Encoding.Default);
+        ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"), new[] { "/End", "/TN", fullPath }, 30_000, ProcessRunner.ConsoleEncoding);
 
     public static ScheduledTaskInfo Query(string fullPath)
     {
@@ -68,7 +68,7 @@ public static class TaskSched
         catch
         {
             var r = ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"),
-                new[] { "/Query", "/TN", fullPath, "/XML" }, 30_000, Encoding.Default);
+                new[] { "/Query", "/TN", fullPath, "/XML" }, 30_000, ProcessRunner.ConsoleEncoding);
             if (!r.Ok) return new ScheduledTaskInfo(false, false, "missing", null, null, null);
             bool enabled = !r.StdOut.Contains("<Enabled>false</Enabled>", StringComparison.OrdinalIgnoreCase);
             return new ScheduledTaskInfo(true, enabled, "present", null, null, r.StdOut);
@@ -85,10 +85,10 @@ public static class TaskSched
         string name = fullPath[(cut + 1)..];
         dynamic folder;
         try { folder = svc.GetFolder(folderPath); }
-        catch { return new ScheduledTaskInfo(false, false, "missing", null, null, null); }
+        catch (Exception ex) { return FromHResult(ex, "folder"); }
         dynamic task;
         try { task = folder.GetTask(name); }
-        catch { return new ScheduledTaskInfo(false, false, "missing", null, null, null); }
+        catch (Exception ex) { return FromHResult(ex, "task"); }
 
         int state = (int)task.State;
         bool enabled = (bool)task.Enabled;
@@ -98,6 +98,39 @@ public static class TaskSched
         string stateText = state switch { 1 => "Disabled", 2 => "Queued", 3 => "Ready", 4 => "Running", _ => "Unknown" };
         DateTime? lastRun = last.Year < 2000 ? null : last;
         return new ScheduledTaskInfo(true, enabled, stateText, lastRun, lastRun is null ? null : result, xml);
+    }
+
+    /// <summary>
+    /// How a failed Task Scheduler lookup should be reported. "Missing" and "access denied" must not
+    /// collapse into one answer: the revert paths act on Exists, and deleting a task we simply couldn't
+    /// read would hit a real system task.
+    /// </summary>
+    internal enum TaskLookup { Found, Missing, AccessDenied, Unknown }
+
+    private const int E_ACCESSDENIED = unchecked((int)0x80070005);
+    private const int HRESULT_FILE_NOT_FOUND = unchecked((int)0x80070002);
+    private const int HRESULT_PATH_NOT_FOUND = unchecked((int)0x80070003);
+    private const int HRESULT_RPC_E_DISCONNECTED = unchecked((int)0x80010108);
+
+    internal static TaskLookup ClassifyLookupFailure(int hr) => hr switch
+    {
+        E_ACCESSDENIED => TaskLookup.AccessDenied,
+        HRESULT_FILE_NOT_FOUND or HRESULT_PATH_NOT_FOUND => TaskLookup.Missing,
+        HRESULT_RPC_E_DISCONNECTED => TaskLookup.Unknown,
+        _ => TaskLookup.Unknown,
+    };
+
+    private static ScheduledTaskInfo FromHResult(Exception ex, string what)
+    {
+        int hr = ex.HResult;
+        var kind = ClassifyLookupFailure(hr);
+        if (kind == TaskLookup.Missing)
+            return new ScheduledTaskInfo(false, false, "missing", null, null, null);
+
+        // Keep Exists = true so a revert never deletes a task that is merely unreadable.
+        string state = kind == TaskLookup.AccessDenied ? "access-denied" : "unreadable";
+        Log.Warn($"Task Scheduler couldn't read the {what}: {ex.Message} (0x{hr:X8}). Reported as {state}, not as missing.");
+        return new ScheduledTaskInfo(true, false, state, null, null, null);
     }
 
     private static readonly object CacheGate = new();
@@ -187,7 +220,7 @@ public static class TaskSched
     public static void SetEnabled(string fullPath, bool enabled)
     {
         var r = ProcessRunner.Run(ProcessRunner.System32("schtasks.exe"),
-            new[] { "/Change", "/TN", fullPath, enabled ? "/ENABLE" : "/DISABLE" }, 60_000, Encoding.Default);
+            new[] { "/Change", "/TN", fullPath, enabled ? "/ENABLE" : "/DISABLE" }, 60_000, ProcessRunner.ConsoleEncoding);
         if (!r.Ok) throw new InvalidOperationException($"schtasks /Change {(enabled ? "/ENABLE" : "/DISABLE")} failed: " + r.Combined.Trim());
         InvalidateList();
         Log.Info($"Task {(enabled ? "enabled" : "disabled")}: {fullPath}");

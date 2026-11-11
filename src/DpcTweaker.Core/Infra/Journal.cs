@@ -129,6 +129,14 @@ public sealed class Journal
                 Log.Error("Journal deserialized to null, starting a new one.");
                 return new JournalData();
             }
+            // JsonSerializer assigns an explicit null over an initialized default, so a journal
+            // containing "Originals": null would deserialize "successfully" and then throw a
+            // NullReferenceException on the first read. Coalesce before anything touches it.
+            bool repaired = false;
+            if (data.Originals is null) { data.Originals = new(); repaired = true; }
+            if (data.Applied is null) { data.Applied = new(); repaired = true; }
+            if (data.State is null) { data.State = new(); repaired = true; }
+            if (repaired) Log.Warn("Journal had null collections; treated them as empty.");
             return data;
         }
         catch (Exception ex)
@@ -146,18 +154,30 @@ public sealed class Journal
         try { File.Copy(file, file + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: true); } catch { }
     }
 
-    /// <summary>Explicit recovery: accept the recovered journal and allow undo-all.ps1 to be rewritten.</summary>
+    /// <summary>
+    /// Explicit recovery: accept the recovered (empty) journal and allow journal.json and
+    /// undo-all.ps1 to be written again. The .broken copy is never deleted, so the old
+    /// before-states stay on disk.
+    /// </summary>
     public void RecoverDegraded()
     {
-        IsDegraded = false;
-        Log.Info("Journal degradation latch cleared by explicit recovery.");
+        lock (_gate) IsDegraded = false;
+        Log.Warn("Journal degradation latch cleared by explicit user recovery. The .broken copy is kept.");
     }
 
-    /// <summary>Atomic: write a temp file, then swap it in, so a crash never leaves half a journal.</summary>
+    /// <summary>
+    /// Atomic: write a temp file, then swap it in, so a crash never leaves half a journal.
+    /// Refuses while the journal is degraded: the in-memory document came up empty, so writing it
+    /// would destroy the recorded before-states (they survive only in the .broken copy).
+    /// </summary>
     public void Save()
     {
         lock (_gate)
         {
+            if (IsDegraded)
+                throw new InvalidOperationException(
+                    "Journal is in degraded protection mode: it couldn't be read at startup, so it won't be " +
+                    "overwritten. Restore from the .broken copy or call RecoverDegraded() first.");
             Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
             string json = JsonSerializer.Serialize(_data, JsonOpts);
             string tmp = _file + ".tmp";
@@ -166,10 +186,32 @@ public sealed class Journal
         }
     }
 
-    /// <summary>Persist the journal, then regenerate undo-all.ps1 from it. Never throws.</summary>
-    public void Flush()
+    /// <summary>
+    /// Persist the journal (and optionally undo-all.ps1) from it.
+    /// <para>
+    /// Inside a tweak transaction this THROWS when the write fails: the caller is about to change
+    /// the system and must not do so without a durable before-state. Outside a transaction it only
+    /// logs, because it runs from finally blocks where throwing would mask the real error.
+    /// </para>
+    /// <param name="includeSidecar">
+    /// False for the write-ahead step (journal.json alone is the fast WAL record); true once per
+    /// tweak on commit, so undo-all.ps1 isn't rewritten for every single entry.
+    /// </param>
+    /// </summary>
+    public void Flush(bool includeSidecar = true)
     {
-        try { Save(); } catch (Exception ex) { Log.Error("Journal save failed: " + ex.Message); }
+        bool saved = true;
+        try
+        {
+            Save();
+        }
+        catch (Exception ex)
+        {
+            if (_txns.Count > 0) throw;   // WAL: the caller must abort instead of mutating the system
+            saved = false;
+            Log.Error("Journal save failed: " + ex.Message);
+        }
+        if (!includeSidecar || !saved) return;   // never let the two files drift apart
         try { SidecarWriter?.Invoke(this); } catch (Exception ex) { Log.Warn("undo-all.ps1 refresh failed: " + ex.Message); }
     }
 
@@ -246,8 +288,9 @@ public sealed class Journal
                 added = true;
             }
         }
-        // Write-ahead: the before-state is durable before the change happens.
-        if (added && inTransaction) Flush();
+        // Write-ahead: the before-state is durable before the change happens. journal.json only;
+        // undo-all.ps1 is regenerated once per tweak on commit instead of once per entry.
+        if (added && inTransaction) Flush(includeSidecar: false);
     }
 
     public IReadOnlyList<JournalEntry> OriginalsFor(string tweakId)

@@ -48,7 +48,13 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
         RegistryValueKind.QWord => AsQword().ToString(CultureInfo.InvariantCulture),
         RegistryValueKind.Binary => Convert.ToHexString((byte[])Value!),
         // "None" carries raw bytes; there is no .NET type for it, so treat it like Binary.
-        RegistryValueKind.None => Value is byte[] none ? Convert.ToHexString(none) : "",
+        // REG_NONE always reads back as raw bytes. Anything else can't be recorded faithfully, and
+        // guessing would silently lose the value, so refuse instead of truncating it.
+        RegistryValueKind.None => Value is byte[] none
+            ? Convert.ToHexString(none)
+            : throw new InvalidOperationException(
+                "A REG_NONE value can only be recorded as raw bytes, but this one is " +
+                (Value?.GetType().Name ?? "null") + "."),
         RegistryValueKind.MultiString => string.Join("\n", (string[])Value!),
         _ => Value?.ToString() ?? "",
     };
@@ -58,12 +64,23 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
         RegistryValueKind.DWord => unchecked((int)uint.Parse(data, CultureInfo.InvariantCulture)),
         RegistryValueKind.QWord => unchecked((long)ulong.Parse(data, CultureInfo.InvariantCulture)),
         RegistryValueKind.Binary => Convert.FromHexString(data),
-        RegistryValueKind.None => data.Length == 0 ? Array.Empty<byte>() : Convert.FromHexString(data),
+        // Tolerate a non-hex record rather than throwing away the value on the way back out.
+        RegistryValueKind.None => data.Length == 0
+            ? Array.Empty<byte>()
+            : IsHex(data) ? Convert.FromHexString(data) : data,
         RegistryValueKind.MultiString => data.Split('\n'),
         _ => data,
     };
 
     public static string FormatDword(uint v) => v > 9 ? $"{v} (0x{v:X})" : v.ToString(CultureInfo.InvariantCulture);
+
+    private static bool IsHex(string s)
+    {
+        if (s.Length % 2 != 0) return false;
+        foreach (char c in s)
+            if (!Uri.IsHexDigit(c)) return false;
+        return true;
+    }
 }
 
 /// <summary>Registry access with full paths like HKLM\SYSTEM\..., always the 64-bit view.</summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using DpcTweaker.Core;
@@ -10,14 +11,27 @@ namespace DpcTweaker.App;
 
 public partial class App : Application
 {
+    /// <summary>Held for the life of the process: a second copy must not share journal.json.</summary>
+    private Mutex? _singleInstance;
+
+    /// <summary>Signalled by a second copy so the running one brings its window forward.</summary>
+    private EventWaitHandle? _activateSignal;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // Boot tasks run "StutterGuard.exe --agent <verb>" as SYSTEM: do the job, no window, exit.
+        // They are short-lived and must never be blocked by the GUI's single-instance lock.
         if (Agent.IsAgentCall(e.Args))
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             int code = Agent.Run(e.Args);
             Shutdown(code);
+            return;
+        }
+
+        if (!TakeSingleInstanceLock())
+        {
+            Shutdown(0);
             return;
         }
 
@@ -36,6 +50,73 @@ public partial class App : Application
         host.Owner = window;
         MainWindow = window;
         window.Show();
+    }
+
+    /// <summary>
+    /// One GUI instance per session. Two copies would each hold their own copy of journal.json in
+    /// memory and the last one to save would silently drop the other's recorded before-states.
+    /// </summary>
+    private bool TakeSingleInstanceLock()
+    {
+        try
+        {
+            _singleInstance = new Mutex(initiallyOwned: true, @"Local\StutterGuard_SingleInstance_Mutex", out bool created);
+            if (!created)
+            {
+                // Ask the running copy to come to the front, then leave.
+                if (EventWaitHandle.TryOpenExisting(@"Local\StutterGuard_Activate_Event", out var existing))
+                {
+                    existing.Set();
+                    existing.Dispose();
+                }
+                MessageBox.Show(
+                    "Stutter Guard is already running.\n\nIts window has been brought to the front. Only one copy may run at a time, " +
+                    "because two copies would overwrite each other's journal and backup records.",
+                    "Stutter Guard", MessageBoxButton.OK, MessageBoxImage.Information);
+                _singleInstance.Dispose();
+                _singleInstance = null;
+                return false;
+            }
+
+            _activateSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\StutterGuard_Activate_Event");
+            var thread = new Thread(() =>
+            {
+                while (true)
+                {
+                    try { _activateSignal.WaitOne(); }
+                    catch { return; }
+                    Dispatcher.BeginInvoke(new Action(BringToFront));
+                }
+            })
+            { IsBackground = true, Name = "single-instance activate" };
+            thread.Start();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Never block startup on the lock itself.
+            Log.Warn("Single-instance lock failed, continuing without it: " + ex.Message);
+            return true;
+        }
+    }
+
+    private void BringToFront()
+    {
+        if (MainWindow is not Window w) return;
+        if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal;
+        w.Show();
+        w.Activate();
+        w.Topmost = true;
+        w.Topmost = false;
+        w.Focus();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try { _activateSignal?.Dispose(); } catch { }
+        try { _singleInstance?.ReleaseMutex(); } catch { }
+        try { _singleInstance?.Dispose(); } catch { }
+        base.OnExit(e);
     }
 }
 
