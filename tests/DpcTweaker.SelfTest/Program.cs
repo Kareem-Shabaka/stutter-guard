@@ -1852,6 +1852,566 @@ Console.WriteLine("Universal drift across every category (real HKCU key, mutated
         try { Directory.Delete(dir, true); } catch { }
     }
 }
+// ================================================================ Wave 8, Part 1: DriverAuditor stress
+
+Console.WriteLine("Wave 8 P1: vendor collision and version-boundary matrix");
+{
+    // --- NVIDIA translation must apply to NVIDIA display drivers only -------------------
+    Check("NVIDIA 32.0.15.6094 -> 560.94", DriverAuditor.NormalizeVersion("32.0.15.6094") == "560.94",
+        DriverAuditor.NormalizeVersion("32.0.15.6094"));
+    Check("NVIDIA 31.0.15.3118 -> 531.18", DriverAuditor.NormalizeVersion("31.0.15.3118") == "531.18");
+    Check("NVIDIA 32.0.14.7212 -> 472.12", DriverAuditor.NormalizeVersion("32.0.14.7212") == "472.12");
+
+    // --- no other vendor may get NVIDIA translation ------------------------------------
+    Check("Intel Arc 32.0.101.5186 is untouched",
+        DriverAuditor.NormalizeVersion("32.0.101.5186", "igdkmdn64.sys") == "32.0.101.5186",
+        DriverAuditor.NormalizeVersion("32.0.101.5186", "igdkmdn64.sys"));
+    Check("AMD Adrenalin 32.0.12019.1028 is untouched",
+        DriverAuditor.NormalizeVersion("32.0.12019.1028", "amdkmdag.sys") == "32.0.12019.1028",
+        DriverAuditor.NormalizeVersion("32.0.12019.1028", "amdkmdag.sys"));
+    Check("AMD Adrenalin 31.0.24033.1003 is untouched",
+        DriverAuditor.NormalizeVersion("31.0.24033.1003", "amdkmdag.sys") == "31.0.24033.1003",
+        DriverAuditor.NormalizeVersion("31.0.24033.1003", "amdkmdag.sys"));
+    Check("inbox stornvme.sys is untouched",
+        DriverAuditor.NormalizeVersion("10.0.26100.1", "stornvme.sys") == "10.0.26100.1");
+    // nvraid.sys starts with "nv" but is a storage driver: its 10.0.x.y must never be
+    // translated into a fabricated display-driver number.
+    Check("nvraid.sys 10.0.19041.1234 is NOT translated",
+        DriverAuditor.NormalizeVersion("10.0.19041.1234", "nvraid.sys") == "10.0.19041.1234",
+        DriverAuditor.NormalizeVersion("10.0.19041.1234", "nvraid.sys"));
+    Check("nvstor.sys 10.0.19041.1234 is NOT translated",
+        DriverAuditor.NormalizeVersion("10.0.19041.1234", "nvstor.sys") == "10.0.19041.1234",
+        DriverAuditor.NormalizeVersion("10.0.19041.1234", "nvstor.sys"));
+
+    // --- component boundary traps ------------------------------------------------------
+    Check("a rule for 1.18 does not match .3118", !DriverAuditor.MatchesVersionComponents("31.0.15.3118", "1.18"));
+    Check("a rule for 24.1 does not match 24.10", !DriverAuditor.MatchesVersionComponents("24.10.1", "24.1"));
+    Check("a rule for 24.1 does not match 24.11", !DriverAuditor.MatchesVersionComponents("24.11", "24.1"));
+    Check("a rule for 1.1 does not match 11.1", !DriverAuditor.MatchesVersionComponents("11.1", "1.1"));
+    Check("exact components still match", DriverAuditor.MatchesVersionComponents("24.10.1", "24.10"));
+    Check("a trailing OEM suffix is tolerated", DriverAuditor.MatchesVersionComponents("32.0.15.6094 (WHQL)", "32.0.15.6094"));
+    Check("an empty wanted version never matches", !DriverAuditor.MatchesVersionComponents("1.2.3", ""));
+}
+
+Console.WriteLine("Wave 8 P1: hostile and malformed input");
+{
+    SystemProfile P(IEnumerable<GpuInfo> gpus, IEnumerable<PciDevice> devs) => new()
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "x", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = gpus.ToList(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        Devices = devs.ToList(),
+    };
+
+    GpuInfo G(string? name, string? ver, string? file, string? id) => new()
+    {
+        Name = name ?? "", Vendor = GpuVendor.Amd,
+        ClassKeyPath = @"HKLM\X\0000", ClassSubkey = "0000",
+        DriverVersion = ver, DriverFile = file, InstanceId = id,
+    };
+
+    bool Threw(SystemProfile p)
+    {
+        try { DriverAuditor.Audit(p); return false; }
+        catch (Exception ex) { Console.WriteLine("        threw: " + ex.GetType().Name + ": " + ex.Message); return true; }
+    }
+
+    Check("all-null driver fields do not throw", !Threw(P(new[] { G(null, null, null, null) }, Array.Empty<PciDevice>())));
+    Check("empty driver fields do not throw", !Threw(P(new[] { G("", "", "", "") }, Array.Empty<PciDevice>())));
+    Check("whitespace driver fields do not throw", !Threw(P(new[] { G("  ", "  ", "  ", "  ") }, Array.Empty<PciDevice>())));
+    Check("a version with an OEM suffix does not throw", !Threw(P(new[] { G("RX 9070 XT", "32.0.15.6094 (WHQL)", "nvlddmkm.sys", @"PCI\VEN_10DE&DEV_2684\1") }, Array.Empty<PciDevice>())));
+    Check("a non-numeric version does not throw", !Threw(P(new[] { G("AMD", "v1.0-beta", "amdkmdag.sys", @"PCI\VEN_1002&DEV_7550\1") }, Array.Empty<PciDevice>())));
+    Check("a zero version does not throw", !Threw(P(new[] { G("AMD", "0.0.0.0", "amdkmdag.sys", @"PCI\VEN_1002&DEV_7550\1") }, Array.Empty<PciDevice>())));
+    Check("a full DriverStore path does not throw", !Threw(P(new[] { G("RX 9070 XT", "32.0.12019.1028",
+        @"\SystemRoot\System32\DriverStore\FileRepository\u0401234.inf_amd64_abc123\amdkmdag.sys", @"PCI\VEN_1002&DEV_7550\1") }, Array.Empty<PciDevice>())));
+    Check("a UNC-style driver path does not throw", !Threw(P(new[] { G("X", "1.2.3.4", @"\\?\C:\Windows\System32\drivers\foo.sys", @"PCI\VEN_1002&DEV_7550\1") }, Array.Empty<PciDevice>())));
+    Check("a null device list does not throw", !Threw(P(Array.Empty<GpuInfo>(), Array.Empty<PciDevice>())));
+    Check("a huge version string does not throw", !Threw(P(new[] { G("AMD", new string('9', 400), "amdkmdag.sys", @"PCI\VEN_1002&DEV_7550\1") }, Array.Empty<PciDevice>())));
+
+    // A full path must still be matched by base file name, or a DriverStore path would never match.
+    var withPath = P(new[] { G("NVIDIA GeForce GTX 1080", "368.39",
+        @"\SystemRoot\System32\DriverStore\FileRepository\nv_disp.inf_amd64_x\nvlddmkm.sys", @"PCI\VEN_10DE&DEV_1B80\1") }, Array.Empty<PciDevice>());
+    var pathAdv = DriverAuditor.Audit(withPath);
+    Check("a DriverStore path still matches its catalog rule",
+        pathAdv.Any(a => a.IsBugged && a.DriverFile.Equals("nvlddmkm.sys", StringComparison.OrdinalIgnoreCase)),
+        string.Join("; ", pathAdv.Select(a => $"{a.DriverFile}:{a.IsBugged}")));
+}
+
+Console.WriteLine("Wave 8 P1: every one of the 77 catalog rules is reachable and fires");
+{
+    var all = Catalogs.BadDrivers;
+    Check("catalog holds 77 entries", all.Count == 77, all.Count.ToString());
+
+    int reachable = 0, audited = 0, pciRules = 0;
+    var matcherMisses = new List<string>();
+    var auditMisses = new List<string>();
+    var nonPciRules = new List<string>();
+
+    foreach (var entry in all)
+    {
+        // Derive a hardware id from the entry's own pattern (strip the trailing wildcard) WITHOUT
+        // re-homing it: 22 rules target USB / HDAUDIO / ACPI / ROOT / SWC nodes, not PCI.
+        string hwid = entry.HardwareIdPattern.TrimEnd('*');
+        if (hwid.Length == 0) hwid = @"PCI\VEN_0000&DEV_0000";
+        string version = entry.BuggedVersions[0];
+        string file = entry.DriverFile;
+        bool isPci = hwid.StartsWith("PCI", StringComparison.OrdinalIgnoreCase);
+        if (isPci) pciRules++; else nonPciRules.Add(entry.HardwareIdPattern);
+
+        // 1. the rule's hardware matcher accepts its own trigger
+        bool hw = DriverAuditor.IsHardwareMatch(entry, hwid, file, null);
+        // 2. the rule's version matcher accepts its own bugged version
+        bool ver = DriverAuditor.IsVersionBugged(version, entry);
+        if (hw && ver) reachable++; else matcherMisses.Add($"{entry.DriverFile}/{entry.HardwareIdPattern} hw={hw} ver={ver}");
+
+        // 3. the whole audit path, driven through the same entry point the app uses
+        var gpu = new GpuInfo
+        {
+            Name = entry.DeviceName, Vendor = GpuVendor.Amd,
+            ClassKeyPath = @"HKLM\X\0000", ClassSubkey = "0000",
+            DriverVersion = version, DriverFile = file, InstanceId = hwid,
+        };
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "x", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = new[] { gpu }, Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            Devices = Array.Empty<PciDevice>(),
+        };
+        var adv = DriverAuditor.Audit(profile);
+        if (adv.Any(a => a.IsBugged)) audited++;
+        else auditMisses.Add($"{entry.DriverFile}/{entry.HardwareIdPattern}");
+    }
+
+    Check("every one of the 77 rules matches its own trigger (hardware + version)", reachable == 77,
+        $"{reachable}/77 :: {string.Join(" | ", matcherMisses.Take(4))}");
+
+    // The auditor itself is complete: given a device that matches, every rule fires.
+    Check("all 77 rules fire through Audit() when a matching device is present", audited == 77,
+        $"{audited}/77 :: {string.Join(" | ", auditMisses.Take(4))}");
+
+    // KNOWN PIPELINE GAP, locked in so it cannot regress silently: the audit is driven from
+    // profile.Gpus + profile.Devices, and PciScanner only ever emits PCI\ nodes. So the 22 rules
+    // for USB / HDAUDIO / ACPI / ROOT / SWC devices have nothing to match in a real scan. The
+    // auditor is not at fault; the detection pipeline never supplies those devices.
+    Check("exactly 55 rules target PCI devices", pciRules == 55, pciRules.ToString());
+    Check("exactly 22 rules target non-PCI devices", nonPciRules.Count == 22, nonPciRules.Count.ToString());
+    Check("every scanner-produced device is PCI (so non-PCI rules are unreachable in a real scan)",
+        DesktopDevices().All(d => d.InstanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)),
+        string.Join(",", DesktopDevices().Where(d => !d.InstanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)).Select(d => d.InstanceId)));
+
+    // The most-severe-wins rule: a device matching two entries reports the worse one.
+    var overlapping = all.Where(e => e.DriverFile == "nvlddmkm.sys" && e.HardwareIdPattern.Contains("DEV_1B80")).ToList();
+    Check("the overlapping Pascal entries share a bugged version", overlapping.Count >= 2 &&
+        overlapping.All(e => e.BuggedVersions.Contains("368.39")), overlapping.Count.ToString());
+}
+// ================================================================ Wave 8, Part 2: 12-topology matrix
+
+Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");
+{
+    // ---- helpers ---------------------------------------------------------------------
+    static List<AffinityPlanner.PhysCore> PhysCoresOf(CpuTopology topo) =>
+        topo.Cpus.GroupBy(c => c.CoreId)
+            .Select(g => new AffinityPlanner.PhysCore
+            {
+                Id = g.Key,
+                First = g.Min(c => c.Index),
+                Threads = g.Select(c => c.Index).OrderBy(x => x).ToList(),
+            })
+            .OrderBy(c => c.First).ToList();
+
+    static AffinityPlanner.Want WantOf(PciDevice d, DeviceRole role, int cores) => new(d, role, cores, "sim");
+
+    static string MapOf(AffinityPlan plan) =>
+        string.Join("; ", plan.Assignments.Select(a => $"{a.Device.DeviceId}->{string.Join(",", a.Cpus)}{(a.Shared ? "S" : "")}"));
+
+    // A NIC device with the RSS keywords a real driver exposes.
+    static PciDevice Nic(string id = @"PCI\VEN_10EC&DEV_8126\1") =>
+        new()
+        {
+            InstanceId = id, Name = "Realtek Gaming 5GbE Family Controller",
+            BaseClass = 0x02, SubClass = 0x00, ProgIf = 0x00, Started = true, InterruptSupport = 6,
+            Connected = true, RssCapable = true, RssQueueOptions = new() { "1", "2", "4", "8" },
+        };
+
+    // ---- 1. 9950X3D / 7950X3D: 16C/32T, 8C 96MB CCD0 + 8C 32MB CCD1, SMT on -----------
+    {
+        var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+        Check("1. 16C/32T dual-CCD: V-Cache CCD detected", t.IsDualCcdX3D && t.VCacheGroup!.CpuRange() == "0-15");
+        Check("1. CCD0 (LPs 0..15) receives zero interrupts",
+            plan.Assignments.All(a => a.Cpus.All(c => c >= 16)), MapOf(plan));
+        Check("1. every device lands on LPs 16..31",
+            plan.Assignments.SelectMany(a => a.Cpus).All(c => c is >= 16 and <= 31));
+        var nic = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+        Check("1. RSS queues stay on CCD1 too",
+            nic.Rss is { } r1 && r1.BaseProcNumber >= 16 && r1.MaxProcNumber <= 31, nic.Rss?.Describe() ?? "null");
+    }
+
+    // ---- 2. 9900X3D / 7900X3D: 12C/24T asymmetric 6+6, SMT on ------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 12).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x00000FFFUL, 96u << 20), (0x00FFF000UL, 32u << 20) });
+        Check("2. 12C/24T asymmetric: 24 LPs, 12 cores", t.LogicalCount == 24 && t.CoreCount == 12);
+        Check("2. V-Cache CCD is LPs 0..11 (6 cores)", t.VCacheGroup!.CpuRange() == "0-11", t.VCacheGroup.CpuRange());
+
+        var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+        Check("2. CCD0 (LPs 0..11) receives zero interrupts",
+            plan.Assignments.All(a => a.Cpus.All(c => c >= 12)), MapOf(plan));
+        Check("2. every device lands on LPs 12..23",
+            plan.Assignments.SelectMany(a => a.Cpus).All(c => c is >= 12 and <= 23));
+
+        // 6 free cores on CCD1 vs 8 device slots: the budget guard must degrade by sharing,
+        // never by pinning onto the V-Cache CCD and never by throwing.
+        Check("2. more devices than cores: sharing happens on CCD1 only",
+            plan.Assignments.Any(a => a.Shared) && plan.Assignments.Where(a => a.Shared).All(a => a.Cpus.All(c => c >= 12)),
+            MapOf(plan));
+        Check("2. the GPU never shares", plan.Assignments.Count(a => a.Role == DeviceRole.Gpu) >= 1 &&
+            !plan.Assignments.Skip(1).Any(a => a.Cpus.Intersect(plan.Assignments[0].Cpus).Any()), MapOf(plan));
+        Check("2. each free core hosts at most one unshared device",
+            plan.Assignments.Where(a => !a.Shared).SelectMany(a => a.Cpus).Distinct().Count() ==
+            plan.Assignments.Where(a => !a.Shared).Sum(a => a.Cpus.Length), MapOf(plan));
+    }
+
+    // ---- 3. 9800X3D / 7800X3D: 8C/16T single-CCD 96MB V-Cache ------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 96u << 20) });
+        Check("3. single-CCD V-Cache detected", t.IsSingleCcdVCache && !t.IsDualCcdX3D);
+        Check("3. not classified as multi-CCD", !t.IsMultiCcd);
+
+        var prof = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 7 9800X3D 8-Core Processor", CpuVendor = "AMD", Cpu = t,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        Check("3. CpuKind is the single-CCD V-Cache label", prof.CpuKind == "Single CCD with 3D V-Cache", prof.CpuKind);
+
+        var plan = AffinityPlanner.Plan(t, Sets(t, cpu => cpu / 2 is 2 or 5 ? 200 : 150), null, DesktopDevices());
+        Check("3. CPU 0's two threads are protected",
+            plan.Assignments.All(a => !a.Cpus.Contains(0) && !a.Cpus.Contains(1)), MapOf(plan));
+        Check("3. the top game cores (4/5, 10/11) are protected too",
+            plan.Assignments.All(a => !a.Cpus.Contains(4) && !a.Cpus.Contains(5) && !a.Cpus.Contains(10) && !a.Cpus.Contains(11)), MapOf(plan));
+        Check("3. IRQs steer to secondary cores only", plan.Assignments.All(a => a.Cpus.All(c => c % 2 == 0)));
+    }
+
+    // ---- 4. 9950X3D with SMT DISABLED: 16C/16T ---------------------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c }, (byte)0)),
+            new[] { (0x00FFUL, 96u << 20), (0xFF00UL, 32u << 20) });
+        Check("4. SMT reported off", !t.SmtEnabled && t.LogicalCount == 16 && t.CoreCount == 16);
+        var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+        Check("4. V-Cache CCD (LPs 0..7) stays clean", plan.Assignments.All(a => a.Cpus.All(c => c >= 8)), MapOf(plan));
+
+        var nic = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+        Check("4. without SMT the two cores are a contiguous 2-LP span",
+            nic.Cpus.Length == 2 && nic.Cpus[1] - nic.Cpus[0] == 1, string.Join(",", nic.Cpus));
+        Check("4. RSS sets 1 processor per core (no SMT doubling)",
+            nic.Rss is { ThreadsPerCore: 1 } r4 && r4.NumProcessors == 2 &&
+            r4.BaseProcNumber == nic.Cpus[0] && r4.MaxProcNumber == nic.Cpus[1],
+            nic.Rss?.Describe() ?? "null");
+        Check("4. the affinity masks are valid 8-byte little-endian",
+            nic.Mask != 0 && RegWrite.MaskBytes(nic.Mask).Length == 8 &&
+            RegWrite.AsMask(new RegValue(true, RegistryValueKind.Binary, RegWrite.MaskBytes(nic.Mask))) == nic.Mask);
+    }
+
+    // ---- 5. i9-14900K: 24C/32T hybrid, 8 P w/ HT + 16 E no HT ------------------------
+    {
+        var cores = Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)1))
+            .Concat(Enumerable.Range(16, 16).Select(c => (new[] { c }, (byte)0)));
+        var t = Topo(cores, new[] { (0xFFFFFFFFUL, 36u << 20) });
+        Check("5. hybrid detected, 24C/32T", t.IsHybrid && t.CoreCount == 24 && t.LogicalCount == 32);
+        Check("5. P-cores have 2 threads, E-cores 1",
+            t.Cpus.Where(c => c.Index < 16).GroupBy(c => c.CoreId).All(g => g.Count() == 2) &&
+            t.Cpus.Where(c => c.Index >= 16).GroupBy(c => c.CoreId).All(g => g.Count() == 1));
+
+        var plan = AffinityPlanner.Plan(t, Sets(t, cpu => cpu >= 16 ? 10 : cpu / 2 is 4 or 5 ? 250 : 200), null, DesktopDevices());
+        Check("5. GPU and Input stay on P-cores", plan.Assignments.Where(a => a.Role is DeviceRole.Gpu or DeviceRole.Input)
+            .All(a => a.Cpus.All(c => c < 16)), MapOf(plan));
+        Check("5. the NIC lands on E-cores", plan.Assignments.Single(a => a.Device.DeviceId == "8126").Cpus.All(c => c >= 16), MapOf(plan));
+
+        // RssFor must read the real thread count of whichever core it lands on (1 on an E-core).
+        var nicDev = Nic();
+        var eCore = plan.Assignments.Single(a => a.Device.DeviceId == "8126").Cpus[0];
+        var rss = AffinityPlanner.RssFor(WantOf(nicDev, DeviceRole.Network, 1), new[] { eCore }, PhysCoresOf(t))!;
+        Check("5. RSS on an E-core uses 1 processor per core", rss.ThreadsPerCore == 1 && rss.NumProcessors == 1, rss.Describe());
+        var pCore = 16 - 2;   // the last P-core's first thread
+        var rssP = AffinityPlanner.RssFor(WantOf(nicDev, DeviceRole.Network, 1), new[] { pCore }, PhysCoresOf(t))!;
+        Check("5. RSS on a P-core uses 2 processors", rssP.ThreadsPerCore == 2 && rssP.NumProcessors == 2, rssP.Describe());
+
+        // CpusFor must expand both shapes correctly.
+        var gpuAsg = plan.Assignments.Single(a => a.Role == DeviceRole.Gpu);
+        Check("5. CpusFor expands a P-core to 2 threads", InterruptCheck.CpusFor(gpuAsg, t).Length == 2,
+            string.Join(",", InterruptCheck.CpusFor(gpuAsg, t)));
+        var nicAsg = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+        Check("5. CpusFor expands E-cores to 1 thread each",
+            InterruptCheck.CpusFor(nicAsg, t).Length == nicAsg.Cpus.Length,
+            string.Join(",", InterruptCheck.CpusFor(nicAsg, t)));
+
+        // Power: heterogeneous parking must not be forced off on a hybrid CPU.
+        var prof = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "Intel(R) Core(TM) i9-14900K", CpuVendor = "Intel", Cpu = t,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        Check("5. a hybrid desktop is parking-dependent", prof.ParkingDependentCpu);
+        var defs = AppOptions.DefaultsFor(prof);
+        Check("5. defaults keep Windows parking (Balanced) so P/E migration works",
+            defs.PlanTarget == PlanTargetKind.Balanced && defs.PowerProfile == PowerProfileKind.DevicesOnly,
+            $"{defs.PlanTarget}/{defs.PowerProfile}");
+    }
+
+    // ---- 6. Core Ultra 9 285K Arrow Lake: 24C/24T hybrid, no HT ----------------------
+    {
+        var cores = Enumerable.Range(0, 24).Select(c => (new[] { c }, (byte)(c is < 2 or >= 18 ? 1 : 0)));
+        var t = Topo(cores, new[] { (0x00FC0003UL, 36u << 20), (0x0003FFFCUL, 12u << 20) });
+        Check("6. Arrow Lake: hybrid, no SMT", t.IsHybrid && !t.SmtEnabled && t.CoreCount == 24);
+        Check("6. unequal L3 blocks do not fake a dual-CCD X3D", !t.IsDualCcdX3D && t.VCacheGroup is null);
+
+        var plan = AffinityPlanner.Plan(t, Sets(t, cpu => cpu is 18 or 19 ? 240 : cpu is < 2 or >= 18 ? 200 : 100), null, DesktopDevices());
+        Check("6. CPU 0 and the two top P-cores are protected",
+            string.Join(",", plan.ReservedCpus) == "0,18,19", string.Join(",", plan.ReservedCpus));
+        Check("6. GPU and Input land on remaining P-cores",
+            plan.Assignments.Where(a => a.Role is DeviceRole.Gpu or DeviceRole.Input).All(a => a.Cpus.All(c => c is 1 or >= 20)), MapOf(plan));
+        var nic = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+        Check("6. NIC uses 2 E-cores with 1 processor each",
+            nic.Rss is { ThreadsPerCore: 1 } r6 && r6.NumProcessors == 2, nic.Rss?.Describe() ?? "null");
+        Check("6. no device is stranded on a reserved core",
+            plan.Assignments.All(a => a.Cpus.All(c => !plan.ReservedCpus.Contains(c))), MapOf(plan));
+    }
+
+    // ---- 7. Extreme core starvation: 4C/8T and 4C/4T with 6 devices ------------------
+    foreach (bool smt in new[] { true, false })
+    {
+        string tag = smt ? "7a. 4C/8T" : "7b. 4C/4T";
+        var cores = Enumerable.Range(0, 4)
+            .Select(c => smt ? (new[] { c * 2, c * 2 + 1 }, (byte)0) : (new[] { c }, (byte)0));
+        var t = Topo(cores, new[] { (smt ? 0xFFUL : 0xFUL, 32u << 20) });
+
+        // Six latency-critical devices, including a shared xHCI hub carrying the mouse and the DAC.
+        var devs = new List<PciDevice>
+        {
+            Dev(@"PCI\VEN_1002&DEV_7550\1", "AMD Radeon RX 9070 XT", 0x03, 0x00, 0x00, new Attached { Monitors = 1 }),
+            Dev(@"PCI\VEN_1002&DEV_AB40\2", "AMD High Definition Audio Device", 0x04, 0x03, 0x00, new Attached { AudioEndpoints = 1 }),
+            Dev(@"PCI\VEN_1022&DEV_43FC\3", "USB 3.20 eXtensible Host Controller", 0x0C, 0x03, 0x30,
+                new Attached { Mice = 1, Keyboards = 1, HasDefaultAudio = true, UsbDevices = 3 }),
+            Dev(@"PCI\VEN_1022&DEV_15B6\4", "USB 3.10 eXtensible Host Controller", 0x0C, 0x03, 0x30, new Attached { AudioDevices = 1 }),
+            Nic(@"PCI\VEN_10EC&DEV_8126\5"),
+            Dev(@"PCI\VEN_17CB&DEV_1107\6", "Qualcomm FastConnect 7800 Wi-Fi 7", 0x02, 0x80, 0x00),
+        };
+        PciScanner.Classify(devs, Array.Empty<GpuInfo>());
+
+        AffinityPlan plan = null!;
+        bool threw = false;
+        try { plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, devs); }
+        catch (Exception ex) { threw = true; Console.WriteLine("        threw: " + ex.GetType().Name + ": " + ex.Message); }
+
+        Check($"{tag}: no exception from the planner", !threw);
+        Check($"{tag}: nothing is pinned onto core 0", plan is not null && plan.Assignments.All(a => !a.Cpus.Contains(0) && !(smt && a.Cpus.Contains(1))), plan is null ? "null" : MapOf(plan));
+        Check($"{tag}: every device still gets an assignment", plan is not null && plan.Assignments.Count == 6,
+            plan is null ? "null" : MapOf(plan));
+        Check($"{tag}: the GPU never shares", plan is not null &&
+            plan.Assignments.Count(a => a.Cpus.Intersect(plan.Assignments[0].Cpus).Any()) == 1, plan is null ? "null" : MapOf(plan));
+        Check($"{tag}: secondary cores are shared gracefully",
+            plan is not null && plan.Assignments.Any(a => a.Shared), plan is null ? "null" : MapOf(plan));
+        Check($"{tag}: every assignment is on a real core",
+            plan is not null && plan.Assignments.All(a => a.Cpus.All(c => c < t.LogicalCount)), plan is null ? "null" : MapOf(plan));
+    }
+
+    // ---- 8. LP 63 boundary and >64-LP multi-group ------------------------------------
+    {
+        Check("8. LP 63 serialises to 8 bytes little-endian 00..80",
+            RegWrite.MaskBytes(1UL << 63).SequenceEqual(new byte[] { 0, 0, 0, 0, 0, 0, 0, 0x80 }),
+            BitConverter.ToString(RegWrite.MaskBytes(1UL << 63)));
+        Check("8. LP 63 round-trips through AsMask",
+            RegWrite.AsMask(new RegValue(true, RegistryValueKind.Binary, RegWrite.MaskBytes(1UL << 63))) == 1UL << 63);
+        Check("8. FormatMask names CPU 63", RegWrite.FormatMask(1UL << 63) == "CPU 63", RegWrite.FormatMask(1UL << 63));
+        Check("8. LP 0 and LP 63 coexist in one mask",
+            RegWrite.FormatMask(1UL | (1UL << 63)) == "CPUs 0, 63", RegWrite.FormatMask(1UL | (1UL << 63)));
+        // A 32-bit shift would have overflowed here; 1UL << 31 must still be the sign-bit value.
+        Check("8. bit 31 is not a signed-overflow", (1UL << 31) == 2147483648UL && RegWrite.FormatMask(1UL << 31) == "CPU 31");
+
+        // 128-thread Threadripper: two processor groups, read-only by design.
+        var big = new CpuTopology
+        {
+            Cpus = Enumerable.Range(0, 64).Select(i => new LogicalCpu(i, i, 0, 0, false)).ToList(),
+            L3Groups = new List<CacheGroup> { new(0, 96L << 20, 0xFFFFFFFFFFFFFFFFUL), new(1, 32L << 20, 0xFFFFFFFFFFFFFFFFUL) },
+            CoreCount = 64,
+            GroupCount = 2,
+        };
+        var plan = AffinityPlanner.Plan(big, Sets(big, _ => 0), null, DesktopDevices());
+        Check("8. >64 LP / multi-group stays read-only", !plan.Applicable, plan.NotApplicableReason ?? "");
+        Check("8. the refusal explains itself", plan.NotApplicableReason!.Contains("64", StringComparison.Ordinal), plan.NotApplicableReason);
+        Check("8. no assignments are produced in read-only mode", plan.Assignments.Count == 0);
+
+        // A 64-LP single-group machine with 64 logical CPUs is still refused by the >64 rule only
+        // when groups > 1; 32 threads on one group is fine.
+        var t32 = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        Check("8. 32 LPs on one group is still applicable", AffinityPlanner.Plan(t32, Sets(t32, _ => 0), null, DesktopDevices()).Applicable);
+    }
+
+    // ---- 9. Dual GPU: Radeon iGPU + discrete RX 9070 XT -------------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var gpus = new List<GpuInfo>
+        {
+            new() { ClassSubkey = "0000", ClassKeyPath = @"HKLM\X\0000", InstanceId = @"PCI\VEN_1002&DEV_13C0\i",
+                    Name = "AMD Radeon(TM) Graphics", Vendor = GpuVendor.Amd, IsIntegrated = true },
+            new() { ClassSubkey = "0001", ClassKeyPath = @"HKLM\X\0001", InstanceId = @"PCI\VEN_1002&DEV_7550\d",
+                    Name = "AMD Radeon RX 9070 XT", Vendor = GpuVendor.Amd, IsIntegrated = false },
+        };
+        var devs = new List<PciDevice>
+        {
+            Dev(@"PCI\VEN_1002&DEV_13C0\i", "AMD Radeon(TM) Graphics", 0x03, 0x00, 0x00, new Attached { Monitors = 1 }),
+            Dev(@"PCI\VEN_1002&DEV_7550\d", "AMD Radeon RX 9070 XT", 0x03, 0x00, 0x00, new Attached { Monitors = 2 }),
+            Nic(), Dev(@"PCI\VEN_1022&DEV_15B6\6", "USB 3.10 eXtensible Host Controller", 0x0C, 0x03, 0x30),
+        };
+        PciScanner.Classify(devs, gpus);
+        var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, devs);
+        var prime = plan.Assignments.First();
+        Check("9. the discrete GPU takes the top GPU slot", prime.Device.DeviceId == "7550" && prime.Role == DeviceRole.Gpu, MapOf(plan));
+        // The iGPU drives a monitor, so it also carries a Gpu role (it is on the frame path), but it
+        // must never be ranked above the discrete card.
+        int dIdx = plan.Assignments.FindIndex(a => a.Device.DeviceId == "7550");
+        int iIdx = plan.Assignments.FindIndex(a => a.Device.DeviceId == "13C0");
+        Check("9. the iGPU is ranked below the discrete card", dIdx == 0 && iIdx > dIdx, $"discrete@{dIdx} igpu@{iIdx} :: {MapOf(plan)}");
+        Check("9. the iGPU is flagged integrated", plan.Assignments.Single(a => a.Device.DeviceId == "13C0").Device.IsIntegratedGpu);
+    }
+
+    // ---- 10. Crowded USB/PCIe: NVMe, bridges, two mouse hubs, shared hub ---------------
+    {
+        var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var devs = new List<PciDevice>
+        {
+            Dev(@"PCI\VEN_1002&DEV_7550\1", "AMD Radeon RX 9070 XT", 0x03, 0x00, 0x00, new Attached { Monitors = 1 }),
+            Dev(@"PCI\VEN_1022&DEV_43FC\2", "USB 3.20 eXtensible Host Controller", 0x0C, 0x03, 0x30,
+                new Attached { Mice = 1, Keyboards = 1, HasDefaultAudio = true, UsbDevices = 4 }),
+            Dev(@"PCI\VEN_1022&DEV_15B6\3", "USB 3.10 eXtensible Host Controller", 0x0C, 0x03, 0x30, new Attached { Mice = 1, UsbDevices = 1 }),
+            Dev(@"PCI\VEN_1022&DEV_15B7\4", "USB 3.10 eXtensible Host Controller", 0x0C, 0x03, 0x30, new Attached { Mice = 1, UsbDevices = 2 }),
+            Dev(@"PCI\VEN_15B7&DEV_5030\5", "Standard NVM Express Controller", 0x01, 0x08, 0x02),
+            Dev(@"PCI\VEN_1D97&DEV_5236\6", "Standard NVM Express Controller", 0x01, 0x08, 0x02),
+            Dev(@"PCI\VEN_1022&DEV_14DB\7", "PCI Express Root Port", 0x06, 0x04, 0x00),
+            Nic(@"PCI\VEN_10EC&DEV_8126\8"),
+        };
+        PciScanner.Classify(devs, Array.Empty<GpuInfo>());
+        var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, devs);
+        Check("10. NVMe controllers are never pinned",
+            plan.Assignments.All(a => a.Device.DeviceId is not ("5030" or "5236")), MapOf(plan));
+        Check("10. PCIe root bridges are never pinned", plan.Assignments.All(a => a.Device.DeviceId != "14DB"), MapOf(plan));
+        Check("10. the mouse hub is chosen as the input controller",
+            plan.Assignments.Single(a => a.Role == DeviceRole.Input).Device.DeviceId is "43FC" or "15B6" or "15B7", MapOf(plan));
+        Check("10. the shared mouse+DAC hub is escalated when cores allow",
+            plan.Assignments.Single(a => a.Device.DeviceId == "43FC").Cpus.Length == 2, MapOf(plan));
+        Check("10. escalation never pushes another device into sharing",
+            plan.Assignments.All(a => !a.Shared), MapOf(plan));
+        Check("10. the plan explains the shared-ISR situation",
+            plan.Notes.Any(n => n.Contains("share one ISR", StringComparison.OrdinalIgnoreCase)), string.Join(" | ", plan.Notes.Take(3)));
+        Check("10. every USB controller gets its own core",
+            plan.Assignments.Where(a => a.Role is DeviceRole.OtherUsb or DeviceRole.Input)
+                .SelectMany(a => a.Cpus).Distinct().Count() ==
+            plan.Assignments.Where(a => a.Role is DeviceRole.OtherUsb or DeviceRole.Input).Sum(a => a.Cpus.Length), MapOf(plan));
+    }
+
+    // ---- 11. Laptop / battery topology -----------------------------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 16u << 20) });
+        var prof = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Home", "25H2", 26200, 9457, "Core"),
+            Manufacturer = "LENOVO", Model = "82JQ", FormFactor = FormFactor.Laptop, FormFactorEvidence = "chassis 10",
+            CpuName = "AMD Ryzen 7 5800H with Radeon Graphics", CpuVendor = "AMD", Cpu = t,
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        Check("11. laptop is detected as a laptop", prof.IsLaptop);
+        var defs = AppOptions.DefaultsFor(prof);
+        Check("11. laptop defaults to the current active plan (vendor performance mode)",
+            defs.PlanTarget == PlanTargetKind.CurrentActive, defs.PlanTarget.ToString());
+        Check("11. laptop defaults to the Laptop cleanup preset", defs.Cleanup == CleanupPreset.Laptop, defs.Cleanup.ToString());
+        Check("11. laptop does not force battery (DC) values", !defs.ApplyOnBattery);
+        Check("11. laptop is not parking-dependent", !prof.ParkingDependentCpu);
+
+        // Desktop-only power settings must be filtered out on a laptop.
+        var built = PowerModule.Build(prof, new Journal(Path.Combine(Path.GetTempPath(), "dpc-p11-" + Guid.NewGuid().ToString("N") + ".json")), () => defs).ToList();
+        Check("11. desktop-only display settings are excluded on a laptop",
+            !built.Any(b => b.Info.Id is "power.display.off" or "power.display.dim"),
+            string.Join(",", built.Select(b => b.Info.Id).Where(i => i.StartsWith("power.display"))));
+        var boot = BootTasksModule.Build(prof, new Journal(Path.Combine(Path.GetTempPath(), "dpc-p11b-" + Guid.NewGuid().ToString("N") + ".json")), () => defs).ToList();
+        Check("11. the 0.5 ms timer task is NOT on by default on a laptop",
+            boot.Single(b => b.Info.Id == "boot.timer").Info.DefaultSelected == false);
+        Check("11. the global timer switch is NOT on by default on a laptop",
+            boot.Single(b => b.Info.Id == "boot.global-timer").Info.DefaultSelected == false);
+        Check("11. a laptop planner still protects core 0", AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices())
+            .Assignments.All(a => !a.Cpus.Contains(0)));
+    }
+
+    // ---- 12. Hostile / incomplete device nodes ---------------------------------------
+    {
+        var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+
+        var devs = new List<PciDevice>
+        {
+            // No DriverKey at all: every ClassKey/InterruptKey read is null.
+            new() { InstanceId = @"PCI\VEN_FFFF&DEV_0001\1", Name = "Unknown device", BaseClass = 0x03, SubClass = 0x00, Started = true },
+            // A GPU with no monitors, no interrupt support (line-based legacy).
+            new() { InstanceId = @"PCI\VEN_1002&DEV_9999\2", Name = "Legacy display",
+                    BaseClass = 0x03, SubClass = 0x00, ProgIf = 0x00, Started = true, InterruptSupport = 1 },
+            // A NIC that claims no RSS capability and offers no queue options.
+            new() { InstanceId = @"PCI\VEN_10EC&DEV_0001\3", Name = "Bare NIC", BaseClass = 0x02, SubClass = 0x00,
+                    Started = true, InterruptSupport = 1, RssCapable = false },
+            // A device that is not running (code 10).
+            new() { InstanceId = @"PCI\VEN_1022&DEV_15B6\4", Name = "Stopped USB controller",
+                    BaseClass = 0x0C, SubClass = 0x03, ProgIf = 0x30, Started = false, Problem = 10, InterruptSupport = 6 },
+            // A device with an empty existing affinity mask (0-byte override) already recorded.
+            new() { InstanceId = @"PCI\VEN_1022&DEV_43FC\5", Name = "USB 3.20 eXtensible Host Controller",
+                    BaseClass = 0x0C, SubClass = 0x03, ProgIf = 0x30, Started = true, InterruptSupport = 6,
+                    Attached = new Attached { Mice = 1 }, ExistingMask = 0UL },
+        };
+        PciScanner.Classify(devs, Array.Empty<GpuInfo>());
+
+        AffinityPlan plan = null!;
+        bool threw = false;
+        try { plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, devs, keepValidPins: true); }
+        catch (Exception ex) { threw = true; Console.WriteLine("        threw: " + ex.GetType().Name + ": " + ex.Message); }
+        Check("12. incomplete device nodes never throw", !threw);
+        Check("12. the stopped device is left alone",
+            plan is not null && plan.Assignments.All(a => a.Device.DeviceId != "15B6"), plan is null ? "null" : MapOf(plan));
+        Check("12. a 0-mask is not treated as a valid pin",
+            plan is not null && plan.Assignments.Where(a => a.Kept).All(a => a.Mask != 0), plan is null ? "null" : MapOf(plan));
+        Check("12. a bare NIC yields no RSS plan when it is not the chosen adapter",
+            plan is not null && plan.Assignments.Where(a => a.Device.DeviceId == "0001").All(a => a.Rss is null || !a.Device.RssCapable),
+            plan is null ? "null" : MapOf(plan));
+
+        // RSS keyword selection must cope with a driver offering no queue options.
+        var bareNic = new PciDevice { InstanceId = @"PCI\X\9", Name = "Bare", RssCapable = false };
+        Check("12. a driver with no queue keyword falls back to one queue per core",
+            RssTweak.ChooseQueues(bareNic, new RssPlan(20, 23, 4, 2)) == "2", RssTweak.ChooseQueues(bareNic, new RssPlan(20, 23, 4, 2)));
+        // And with an empty (not missing) option list.
+        var emptyOpts = new PciDevice { InstanceId = @"PCI\X\10", Name = "Empty", RssQueueOptions = new() };
+        Check("12. an empty queue-option list still produces a number",
+            int.TryParse(RssTweak.ChooseQueues(emptyOpts, new RssPlan(20, 21, 2, 1)), out _));
+
+        // ReadLive on a device with no interrupt key must not throw.
+        bool liveThrew = false;
+        try { AffinityTweak.ReadLive(devs[0]); } catch { liveThrew = true; }
+        Check("12. ReadLive on a keyless device does not throw", !liveThrew);
+
+        // A plan with zero devices must still be usable.
+        var empty = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, Array.Empty<PciDevice>());
+        Check("12. zero devices produces an empty but valid plan", empty.Applicable && empty.Assignments.Count == 0);
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>
