@@ -860,5 +860,270 @@ Console.WriteLine("Bad Driver Catalog & DriverAuditor");
 }
 
 Console.WriteLine();
+// ================================================================ audit fix waves
+
+Console.WriteLine("Wave 1 (F2.2): a corrupt journal must not eat the restore path");
+{
+    string dataDir = Path.Combine(Path.GetTempPath(), "dpc-degraded-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dataDir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dataDir;
+    try
+    {
+        const string goodUndo = "# Stutter Guard - undo script for a real machine`r`nRegSet 'x' 'y' 'DWord' 1`r`n";
+        File.WriteAllText(Paths.UndoAllScript, goodUndo);
+        File.WriteAllText(Paths.JournalFile, "{ this is not json at all ");
+
+        var dj = new Journal(Paths.JournalFile);
+        Check("corrupt journal sets IsDegraded", dj.IsDegraded);
+        Check("corrupt journal comes up empty", dj.EntryCount == 0);
+        Check("the unreadable file is kept for inspection", Directory.GetFiles(dataDir, "journal.json*.broken-*").Length == 1);
+
+        JournalRestorer.WriteUndoScripts(dj, null);
+        Check("a degraded journal does not clobber a good undo-all.ps1", File.ReadAllText(Paths.UndoAllScript) == goodUndo);
+        Check("a degraded journal refuses ClearAll", !dj.ClearAll());
+
+        dj.RecoverDegraded();
+        JournalRestorer.WriteUndoScripts(dj, null);
+        Check("after explicit recovery the script is regenerated", File.ReadAllText(Paths.UndoAllScript) != goodUndo);
+        Check("after explicit recovery ClearAll works", dj.ClearAll());
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dataDir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 1 (F2.1 / F2.3 / F2.4): write-ahead journal, lockstep undo.ps1, rollback");
+{
+    string dataDir = Path.Combine(Path.GetTempPath(), "dpc-wal-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dataDir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dataDir;
+    try
+    {
+        string jf = Path.Combine(dataDir, "journal.json");
+        var j = new Journal(jf);
+        int sidecar = 0;
+        j.SidecarWriter = _ => sidecar++;
+
+        var txn = j.BeginTransaction("t.wal");
+        j.RecordOriginal("t.wal", "reg", @"HKLM\X|A", true, "DWord", "1");
+        Check("WAL: the record is on disk before the caller mutates anything", new Journal(jf).OriginalsFor("t.wal").Count == 1);
+        Check("WAL: undo-all.ps1 is refreshed in the same step", sidecar == 1, sidecar.ToString());
+        j.RecordOriginal("t.wal", "reg", @"HKLM\X|A", true, "DWord", "9");
+        Check("WAL: a repeat of the same target neither records nor re-flushes", sidecar == 1 && j.OriginalsFor("t.wal").Single().Data == "1");
+        j.MarkApplied("t.wal");
+        j.CommitTransaction(txn);
+
+        // a second tweak whose Apply throws
+        var txn2 = j.BeginTransaction("t.fail");
+        j.RecordOriginal("t.fail", "reg", @"HKLM\X|B", true, "DWord", "0");
+        Check("WAL: the failing tweak's before-state was on disk too", new Journal(jf).OriginalsFor("t.fail").Count == 1);
+        bool rolledBack = j.RollbackTransaction(txn2);
+        j.Flush();                              // what TweakEngine.Apply does in its finally
+        Check("rollback reports a change", rolledBack);
+        Check("rollback drops the phantom record", j.OriginalsFor("t.fail").Count == 0);
+        Check("rollback survives a reload", new Journal(jf).OriginalsFor("t.fail").Count == 0);
+        Check("rollback does not touch an earlier tweak", j.OriginalsFor("t.wal").Count == 1);
+        Check("a rolled-back tweak is not marked applied", !j.IsApplied("t.fail"));
+
+        // a journal that was already read must not be lost by a rewrite
+        var reloaded = new Journal(jf);
+        Check("the committed tweak survives a reload", reloaded.IsApplied("t.wal") && reloaded.OriginalsFor("t.wal").Count == 1);
+        Check("no .tmp file is left behind", !File.Exists(jf + ".tmp"));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dataDir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 1 (F2.5 / F2.6 / F2.7 / F2.8 / F2.9)");
+{
+    string dataDir = Path.Combine(Path.GetTempPath(), "dpc-misc-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dataDir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dataDir;
+    try
+    {
+        // F2.5: the old "power.plan" pseudo-id belonged to no tweak, so its entry could never be reverted.
+        string jf = Path.Combine(dataDir, "journal.json");
+        var pj = new Journal(jf);
+        string planGuid = Guid.NewGuid().ToString();
+        pj.RecordOriginal("power.plan", "plan-created", planGuid, false, null, null);
+        pj.MarkApplied("power.plan");
+        int moved = pj.RebindTweak("power.plan", PowerModule.PlanActiveId);
+        Check("orphaned power.plan entries move to a real tweak id",
+            moved == 2 && pj.OriginalsFor("power.plan").Count == 0 &&
+            pj.OriginalsFor(PowerModule.PlanActiveId).Count == 1 && pj.IsApplied(PowerModule.PlanActiveId), moved.ToString());
+        Check("the plan-created entry is now revertible by power.active",
+            pj.OriginalsFor(PowerModule.PlanActiveId).Single() is { Kind: "plan-created", Target: var tg } && tg == planGuid);
+
+        // F2.6: sc.exe writes Start only, so DelayedAutostart has to be restored on its own.
+        var sj = new Journal(Path.Combine(dataDir, "j-svc.json"));
+        sj.RecordOriginal("svc.edgeupdate", "svc", "edgeupdate", true, null, "2|1");   // auto + delayed
+        sj.RecordOriginal("svc.SysMain", "svc", "SysMain", true, null, "2|");          // auto, value absent
+        string undo = JournalRestorer.BuildUndoScript(sj);
+        // Start 2 + DelayedAutostart 1 IS "Automatic (delayed start)", so sc.exe must be told
+        // delayed-auto; the registry value below then pins the exact second half of the pair.
+        Check("svc undo restores Start (delayed-auto for an auto+delayed service)",
+            undo.Contains("sc.exe config 'edgeupdate' start= delayed-auto"), undo);
+        Check("svc undo restores plain Start for a service without the delayed flag",
+            undo.Contains("sc.exe config 'SysMain' start= auto"), undo);
+        Check("svc undo restores DelayedAutostart = 1",
+            undo.Contains(@"RegSet 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\edgeupdate' 'DelayedAutostart' 'DWord' 1"), undo);
+        Check("svc undo removes a DelayedAutostart that wasn't there",
+            undo.Contains(@"RegDel 'Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain' 'DelayedAutostart'"), undo);
+        var split1 = ServiceControl.SplitJournal("2|1");
+        var split2 = ServiceControl.SplitJournal("2|");
+        Check("SplitJournal keeps Start and DelayedAutostart apart",
+            split1.Start == 2u && split1.Delayed == 1u && split2.Start == 2u && split2.Delayed is null);
+
+        // F2.8: every registry helper in the generated script must be literal.
+        Check("generated script uses -LiteralPath everywhere it touches a path",
+            !undo.Contains("New-Item -Path ") && undo.Contains("New-Item -LiteralPath "));
+
+        // F2.7: long PnP keys differ only in their last component and must not collide.
+        string affinity = @"HKLM\SYSTEM\CurrentControlSet\Enum\PCI\VEN_1002&DEV_7550&SUBSYS_06131043&REV_C0\6&18FCC1A5&0&00000009\Device Parameters\Interrupt Management\Affinity Policy";
+        string msi = affinity.Replace("Affinity Policy", "MessageSignaledInterruptProperties");
+        string na = BackupSet.SafeName(affinity);
+        string nb = BackupSet.SafeName(msi);
+        Check("two long sibling keys never share one .reg file", na != nb, na + " | " + nb);
+        Check("hashed names stay inside the Windows limit", na.Length <= 150 && nb.Length <= 150, na.Length + "/" + nb.Length);
+        Check("SafeName is deterministic across calls", BackupSet.SafeName(affinity) == na);
+        Check("short keys keep their old name", BackupSet.SafeName(@"HKLM\X\Y") == "HKLM_X_Y");
+
+        // F2.9: RegistryValueKind.None has no .NET type, so it must round-trip as raw bytes.
+        var none = new RegValue(true, RegistryValueKind.None, new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
+        Check("None serializes as hex", none.Serialize() == "DEADBEEF", none.Serialize());
+        Check("None round-trips", ((byte[])RegValue.Deserialize(RegistryValueKind.None, none.Serialize())).SequenceEqual(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dataDir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Wave 2 (F1.4): RSS processor bounds account for SMT");
+{
+    var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+        new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+    var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+    var nic = plan.Assignments.Single(a => a.Device.DeviceId == "8126");
+    Check("NIC is on 2 physical cores", nic.Cpus.Length == 2, string.Join(",", nic.Cpus));
+    Check("the plan carries an RSS plan for the adapter", nic.Rss is not null);
+    var rss = nic.Rss!;
+    int coreA = t.Cpus.Single(c => c.Index == nic.Cpus[0]).CoreId;
+    int coreB = t.Cpus.Single(c => c.Index == nic.Cpus[1]).CoreId;
+    Check("the two target cores are different physical cores", coreA != coreB);
+
+    var span = Enumerable.Range(rss.BaseProcNumber, rss.MaxProcNumber - rss.BaseProcNumber + 1).ToList();
+    var expected = t.Cpus.Where(c => c.CoreId == coreA || c.CoreId == coreB).Select(c => c.Index).OrderBy(x => x).ToList();
+    Check("the RSS span is exactly the threads of those 2 cores",
+        span.OrderBy(x => x).SequenceEqual(expected), string.Join(",", span) + " vs " + string.Join(",", expected));
+    Check("MaxRssProcessors counts logical processors, not cores",
+        rss.NumProcessors == 4 && rss.ThreadsPerCore == 2, rss.Describe());
+    Check("RssMaxProcNumber is the last LP of the last core", rss.MaxProcNumber == nic.Cpus[1] + 1, rss.Describe());
+    Check("RssBaseProcNumber is the first LP of the first core", rss.BaseProcNumber == nic.Cpus[0], rss.Describe());
+
+    // The exact bug that was there before: "N cores starting at base" lands on the SMT siblings of one core.
+    var oldSpan = Enumerable.Range(nic.Cpus[0], nic.Cpus.Length).ToList();
+    Check("the old formula really did stay inside one physical core",
+        oldSpan.All(lp => t.Cpus.Single(c => c.Index == lp).CoreId == coreA), string.Join(",", oldSpan));
+
+    // A no-SMT pair must still come out as the same number of processors as cores.
+    var t2 = Topo(Enumerable.Range(0, 24).Select(c => (new[] { c }, (byte)(c is < 2 or >= 18 ? 1 : 0))),
+        new[] { (0x00FC0003UL, 36u << 20), (0x0003FFFCUL, 12u << 20) });
+    var plan2 = AffinityPlanner.Plan(t2, Sets(t2, cpu => cpu is 18 or 19 ? 240 : cpu is < 2 or >= 18 ? 200 : 100), null, DesktopDevices());
+    var nic2 = plan2.Assignments.Single(a => a.Device.DeviceId == "8126");
+    Check("no-SMT: 1 thread per core", nic2.Rss is { ThreadsPerCore: 1 }, nic2.Rss?.Describe() ?? "null");
+    Check("no-SMT: processors == cores", nic2.Rss is { } r2 && r2.NumProcessors == nic2.Cpus.Length && r2.MaxProcNumber == nic2.Cpus[^1],
+        nic2.Rss?.Describe() ?? "null");
+}
+
+Console.WriteLine("Wave 2 (F1.5): a root hub carrying mouse + default audio");
+{
+    var t = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+        new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+
+    var devs = DesktopDevices();
+    var shared = devs.Single(d => d.DeviceId == "43FC");
+    Check("fixture: the mouse controller also carries the default playback device",
+        shared.Attached.Mice > 0 && shared.Attached.HasDefaultAudio);
+
+    // Enough spare cores: the controller gets the second core.
+    var few = DesktopDevices().Where(d => d.DeviceId is "7550" or "43FC" or "8126").ToList();
+    var roomy = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, few);
+    var input = roomy.Assignments.Single(a => a.Device.DeviceId == "43FC");
+    Check("with spare cores the shared hub gets 2 cores", input.Cpus.Length == 2, string.Join(",", input.Cpus));
+    Check("both cores are distinct physical cores",
+        input.Cpus.Select(c => t.Cpus.Single(x => x.Index == c).CoreId).Distinct().Count() == 2);
+    Check("the plan explains that a root hub shares one ISR",
+        roomy.Notes.Any(n => n.Contains("share one ISR")), string.Join(" || ", roomy.Notes));
+    Check("the plan says to move the DAC to another xHCI controller",
+        roomy.Notes.Any(n => n.Contains("different xHCI controller")), string.Join(" || ", roomy.Notes));
+
+    // Exactly as many devices as cores: the second core is not paid for by making something else share.
+    var tight = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
+    var inputTight = tight.Assignments.Single(a => a.Device.DeviceId == "43FC");
+    Check("with no spare core the shared hub keeps one core", inputTight.Cpus.Length == 1, string.Join(",", inputTight.Cpus));
+    Check("and says so, pointing at the DAC move",
+        tight.Notes.Any(n => n.Contains("Move the USB DAC")), string.Join(" || ", tight.Notes));
+    Check("nothing is pushed onto a shared core to pay for it",
+        tight.Assignments.All(a => !a.Shared) &&
+        tight.Assignments.SelectMany(a => a.Cpus).Distinct().Count() == tight.Assignments.Sum(a => a.Cpus.Length),
+        string.Join("; ", tight.Assignments.Select(a => $"{a.Device.DeviceId}->{string.Join(",", a.Cpus)}{(a.Shared ? "S" : "")}")));
+
+    // A mouse-only controller must not be escalated.
+    var clean = DesktopDevices().Where(d => d.DeviceId is "7550" or "8126" or "15B6").ToList();
+    var mouseOnly = Dev(@"PCI\VEN_1022&DEV_15B9&SUBSYS_7E611462&REV_00\4&Z", "USB 3.20 eXtensible Host Controller", 0x0C, 0x03, 0x30,
+        new Attached { Mice = 1, Keyboards = 1, UsbDevices = 2 });
+    clean.Add(mouseOnly);
+    PciScanner.Classify(clean, Array.Empty<GpuInfo>());
+    var plain = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, clean);
+    Check("a mouse-only controller keeps one core",
+        plain.Assignments.Single(a => a.Device.DeviceId == "15B9").Cpus.Length == 1,
+        string.Join(",", plain.Assignments.Single(a => a.Device.DeviceId == "15B9").Cpus));
+}
+
+Console.WriteLine("Wave 2 (F1.2): single-CCD 3D V-Cache");
+{
+    var x3d = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 96u << 20) });
+    var plain = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 32u << 20) });
+    var dual = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+        new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+
+    SystemProfile P(CpuTopology topo, string name) => new()
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = name, CpuVendor = "AMD", Cpu = topo, FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+    };
+
+    Check("7800X3D: a lone 96 MB L3 is detected as single-CCD V-Cache", x3d.IsSingleCcdVCache && !x3d.IsDualCcdX3D);
+    Check("7800X3D is labelled", P(x3d, "AMD Ryzen 7 7800X3D 8-Core Processor").CpuKind == "Single CCD with 3D V-Cache",
+        P(x3d, "AMD Ryzen 7 7800X3D 8-Core Processor").CpuKind);
+    Check("a plain 32 MB single CCD is not called X3D",
+        !plain.IsSingleCcdVCache && P(plain, "AMD Ryzen 7 7700X 8-Core Processor").CpuKind == "Single CCD / single L3",
+        P(plain, "AMD Ryzen 7 7700X 8-Core Processor").CpuKind);
+    Check("an X3D name wins even when the cache reads oddly",
+        P(plain, "AMD Ryzen 7 9800X3D 8-Core Processor").CpuKind == "Single CCD with 3D V-Cache");
+    Check("7950X3D stays dual-CCD", P(dual, "AMD Ryzen 9 7950X3D 16-Core Processor").CpuKind == "Dual-CCD X3D (V-Cache on one CCD)");
+}
+
+Console.WriteLine("Wave 2 (F3.3): the timer task check reads XML, not text");
+{
+    string xml = TaskSched.LogonTaskXml("d", @"PC\User", @"C:\Program Files\Stutter Guard\DpcTimerRes.exe", "5000");
+    Check("the task's own XML matches its arguments", TimerTaskTweak.ArgumentsMatch(xml, "5000"));
+    Check("a different resolution does not match", !TimerTaskTweak.ArgumentsMatch(xml, "5070"));
+    Check("re-serialized XML with different whitespace still matches",
+        TimerTaskTweak.ArgumentsMatch(xml.Replace("<Arguments>5000</Arguments>", "<Arguments>\r\n      5000\r\n    </Arguments>"), "5000"));
+    Check("malformed XML does not read as a match", !TimerTaskTweak.ArgumentsMatch("<not xml", "5000"));
+    Check("missing XML does not read as a match", !TimerTaskTweak.ArgumentsMatch(null, "5000"));
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

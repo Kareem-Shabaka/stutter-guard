@@ -10,6 +10,19 @@ public enum DeviceRole { Gpu, Input, Audio, Network, OtherUsb, Rest }
 /// <summary>A physical core that may take devices, best first.</summary>
 public sealed record RankedCore(int Cpu, int CoreId, int Rank, bool PerformanceCore, string Detail);
 
+/// <summary>
+/// The RSS keywords that make NDIS spread receive queues over exactly the cores an adapter is
+/// pinned to. *MaxRssProcessors counts <em>logical</em> processors and *RssMaxProcNumber is an
+/// inclusive logical-processor number, so on an SMT CPU both must be scaled by the core's thread
+/// count: "2 processors starting at 20" covers LPs 20 and 21, which are the two threads of ONE
+/// core, not two cores.
+/// </summary>
+public sealed record RssPlan(int BaseProcNumber, int MaxProcNumber, int NumProcessors, int ThreadsPerCore)
+{
+    public string Describe() =>
+        $"{NumProcessors} logical processor(s), LPs {BaseProcNumber}-{MaxProcNumber} ({ThreadsPerCore} thread(s) per core)";
+}
+
 public sealed class Assignment
 {
     public required PciDevice Device { get; init; }
@@ -18,6 +31,8 @@ public sealed class Assignment
     public bool Shared { get; init; }
     /// <summary>Already pinned here before, in line with the rules, so the plan keeps it.</summary>
     public bool Kept { get; init; }
+    /// <summary>For a network adapter: the RSS keywords that cover these cores exactly.</summary>
+    public RssPlan? Rss { get; init; }
     public required string Reason { get; init; }
 
     public ulong Mask => Cpus.Aggregate(0UL, (m, c) => m | (1UL << c));
@@ -172,7 +187,7 @@ public static class AffinityPlanner
         var candidates = ranked.Select((c, i) => new RankedCore(c.First, c.Id, i + 1, !hybrid || c.Eff == maxEff,
             Detail(c, bench, hybrid, maxEff))).ToList();
 
-        var order = Order(devices, notes);
+        var order = Order(devices, notes, candidates.Count);
         var assignments = Assign(order, candidates, cores, hybrid, keepValidPins);
         if (assignments.Any(a => a.Kept))
             notes.Add($"{assignments.Count(a => a.Kept)} device(s) were already pinned to an allowed core and stay there (\"Keep pins that follow the rules\").");
@@ -235,7 +250,7 @@ public static class AffinityPlanner
     private sealed record Want(PciDevice Device, DeviceRole Role, int Cores, string Reason);
 
     /// <summary>Spec step 4: the order devices get cores in.</summary>
-    private static List<Want> Order(IReadOnlyList<PciDevice> devices, List<string> notes)
+    private static List<Want> Order(IReadOnlyList<PciDevice> devices, List<string> notes, int coreBudget)
     {
         var eligible = devices.Where(d => d.Kind is not (PciKind.Never or PciKind.Storage)).ToList();
         foreach (var d in eligible.Where(d => !d.Started || d.Problem != 0))
@@ -244,6 +259,7 @@ public static class AffinityPlanner
 
         var want = new List<Want>();
         var taken = new HashSet<PciDevice>();
+        string? escalatedHub = null;   // input controller that asked for a second core
         void Add(PciDevice d, DeviceRole r, string why, int n = 1)
         {
             if (!taken.Add(d)) return;
@@ -259,6 +275,10 @@ public static class AffinityPlanner
             foreach (var g in gpus.Where(g => g.IsIntegratedGpu))
                 Add(g, DeviceRole.Gpu, "The GPU: its interrupts arrive every frame and are the most latency-critical on the PC.");
 
+        // Where the default playback device hangs is decided before the input controller's cores are
+        // handed out: a USB DAC can sit on the same root hub as the mouse.
+        var defaultAudio = eligible.FirstOrDefault(d => d.Attached.HasDefaultAudio);
+
         // 2. The USB controller with the mouse (then keyboard / game controller).
         // Placed before any secondary screen-driving iGPU so on 4-core Optimus laptops the mouse never shares with audio/network.
         var usb = eligible.Where(d => d.Kind == PciKind.UsbController).ToList();
@@ -266,7 +286,27 @@ public static class AffinityPlanner
                     ?? usb.Where(u => u.Attached.Keyboards > 0 || u.Attached.GameControllers > 0)
                           .OrderByDescending(u => u.Attached.Keyboards + u.Attached.GameControllers).FirstOrDefault();
         if (input is not null)
-            Add(input, DeviceRole.Input, $"Has your input devices ({input.Attached.Describe()}). A 1-8 kHz mouse is a steady interrupt stream of its own.");
+        {
+            bool carriesAudio = defaultAudio is not null &&
+                string.Equals(defaultAudio.InstanceId, input.InstanceId, StringComparison.OrdinalIgnoreCase);
+            if (carriesAudio)
+            {
+                // One root hub raises one interrupt for all of its ports, so the mouse and the DAC
+                // already share an ISR. Per-port affinity doesn't exist, so the controller gets a
+                // second core and the plan says plainly that only moving the DAC separates them.
+                Add(input, DeviceRole.Input,
+                    $"Carries your input devices ({input.Attached.Describe()}) and your default playback device on the same root hub. " +
+                    "A root hub raises one interrupt for every port on it, so both streams arrive through the same ISR.", 2);
+                escalatedHub = input.InstanceId;
+                notes.Add($"{input.Name} carries both your mouse and your default playback device, so their interrupts share one ISR and no affinity setting can separate them. " +
+                          "A second core is worth having here (it gives the scheduler room and costs no bandwidth), but only from spare cores. " +
+                          "For a real split, move the USB DAC to a port on a different xHCI controller; the plan lists the other controllers below.");
+            }
+            else
+            {
+                Add(input, DeviceRole.Input, $"Has your input devices ({input.Attached.Describe()}). A 1-8 kHz mouse is a steady interrupt stream of its own.");
+            }
+        }
 
         // 2b. Secondary integrated GPU that drives the laptop panel alongside a discrete GPU.
         if (discrete.Count > 0)
@@ -274,7 +314,6 @@ public static class AffinityPlanner
                 Add(g, DeviceRole.Gpu, "The integrated GPU drives a screen, so it's on the frame path too.");
 
         // 3. The active audio path.
-        var defaultAudio = eligible.FirstOrDefault(d => d.Attached.HasDefaultAudio);
         if (defaultAudio is not null)
         {
             if (taken.Contains(defaultAudio))
@@ -337,7 +376,35 @@ public static class AffinityPlanner
             };
             Add(d, DeviceRole.Rest, why);
         }
+        // A second core for the shared root hub is a want, not a right: if spending it would push
+        // another device onto a shared core, the controller keeps one and the note says why. The
+        // warning above still stands, and moving the DAC is the fix that costs nothing.
+        int demand = want.Sum(w => w.Cores);
+        if (escalatedHub is not null && demand > coreBudget)
+        {
+            int i = want.FindIndex(w => string.Equals(w.Device.InstanceId, escalatedHub, StringComparison.OrdinalIgnoreCase));
+            if (i >= 0 && want[i].Cores > 1)
+            {
+                want[i] = want[i] with { Cores = 1 };
+                notes.Add($"{want[i].Device.Name} keeps one core: {coreBudget} device core(s) are free and this plan needs {demand}. " +
+                          "Move the USB DAC to another xHCI controller to separate the two interrupt streams instead, which costs nothing.");
+            }
+        }
         return want;
+    }
+
+    /// <summary>
+    /// The RSS keywords for a network assignment: every logical processor of the target physical
+    /// cores and nothing else. BaseProcNumber is the first LP, RssMaxProcNumber the last LP of the
+    /// last core (inclusive), MaxRssProcessors the number of LPs in that span.
+    /// </summary>
+    private static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)
+    {
+        if (w.Role != DeviceRole.Network || cpus.Length == 0) return null;
+        int threads = cores.FirstOrDefault(c => c.Threads.Contains(cpus[0]))?.Threads.Count ?? 1;
+        if (threads < 1) threads = 1;
+        int last = cpus[^1];
+        return new RssPlan(cpus[0], last + threads - 1, cpus.Length * threads, threads);
     }
 
     private static List<Assignment> Assign(List<Want> order, List<RankedCore> candidates, List<PhysCore> cores, bool hybrid, bool keepValidPins)
@@ -410,7 +477,7 @@ public static class AffinityPlanner
                     if (!usedDevs.TryGetValue(coreFirst, out var kd)) usedDevs[coreFirst] = kd = new List<PciDevice>();
                     kd.Add(w.Device);
                 }
-                result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = keptCpus, Kept = true, Reason = w.Reason + " Already pinned here, kept." });
+                result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = keptCpus, Kept = true, Rss = RssFor(w, keptCpus, cores), Reason = w.Reason + " Already pinned here, kept." });
                 continue;
             }
 
@@ -459,7 +526,7 @@ public static class AffinityPlanner
                 if (!usedDevs.TryGetValue(c, out var dl)) usedDevs[c] = dl = new List<PciDevice>();
                 dl.Add(w.Device);
             }
-            result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = cpus, Shared = shared, Reason = w.Reason });
+            result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = cpus, Shared = shared, Rss = RssFor(w, cpus, cores), Reason = w.Reason });
         }
         return result;
     }

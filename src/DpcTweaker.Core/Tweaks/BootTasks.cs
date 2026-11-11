@@ -137,13 +137,38 @@ public sealed class TimerTaskTweak : TweakBase
     /// <summary>Other timer tools and the tasks that start them (SetTimerResolution, ISLC, TimerTool).</summary>
     internal static readonly Regex Equivalent = new(@"SetTimerResolution|TimerResolution|timerres|ISLC|TimerTool", RegexOptions.IgnoreCase);
 
+    /// <summary>
+    /// Compares the task's first Exec/Arguments value as data, not as raw XML text. The Task
+    /// Scheduler re-serializes whatever XML it hands back, so a substring match reports "not
+    /// applied" after any formatting change even though the task never changed.
+    /// </summary>
+    internal static bool ArgumentsMatch(string? xml, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return false;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            var ns = doc.Root?.Name.Namespace ?? System.Xml.Linq.XNamespace.None;
+            string? actual = doc.Descendants(ns + "Exec")
+                .SelectMany(e => e.Elements(ns + "Arguments"))
+                .Select(x => x.Value)
+                .FirstOrDefault();
+            return actual is not null && string.Equals(actual.Trim(), expected.Trim(), StringComparison.Ordinal);
+        }
+        catch (System.Xml.XmlException)
+        {
+            // A malformed task XML means "can't tell", which must not read as "matches".
+            return false;
+        }
+    }
+
     protected override Probe Read()
     {
         var task = TaskSched.Query(TaskPath);
         bool running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Paths.TimerExeName)).Length > 0;
         var res = Kernel.TimerResolution();
         string live = res is null ? "?" : (res.Value.Current / 10000.0).ToString("0.000", CultureInfo.InvariantCulture) + " ms";
-        bool argsMatch = task.Xml?.Contains("<Arguments>" + Args + "</Arguments>", StringComparison.Ordinal) ?? false;
+        bool argsMatch = ArgumentsMatch(task.Xml, Args);
         bool ok = task.Exists && task.Enabled && argsMatch && File.Exists(Paths.InstalledTimerExe);
         string current = task.Exists
             ? $"task {task.State}, tool {(running ? "running" : "not running")}, timer now {live}"

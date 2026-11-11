@@ -191,7 +191,12 @@ public sealed class PowerPlanTarget
         return PowerApi.GetName(g.Value) + " {" + g + "}";
     }
 
-    public Guid Ensure(TweakContext ctx)
+    /// <param name="tweakId">
+    /// The tweak that owns the plan's lifetime. It must be a real, revertible tweak id: the old
+    /// "power.plan" pseudo-id belonged to no ITweak, so its plan-created entry could never be
+    /// reverted and kept turning up in undo-all.ps1 forever.
+    /// </param>
+    public Guid Ensure(TweakContext ctx, string tweakId)
     {
         var existing = Resolve();
         if (existing is not null) return existing.Value;
@@ -199,11 +204,10 @@ public sealed class PowerPlanTarget
 
         var g = PowerApi.Duplicate(PowerApi.UltimateTemplate);
         try { PowerApi.SetName(g, TunedPlanName); } catch (Exception ex) { Log.Warn("Rename failed: " + ex.Message); }
-        ctx.Journal.RecordOriginal("power.plan", "plan-created", g.ToString(), false, null, null);
-        ctx.Journal.MarkApplied("power.plan");
+        ctx.Journal.RecordOriginal(tweakId, "plan-created", g.ToString(), false, null, null);
         _journal.SetState(StateKey, g.ToString());
         _journal.Save();
-        Log.Info("Created power plan " + g);
+        Log.Info("Created power plan " + g + " (owned by " + tweakId + ")");
         return g;
     }
 }
@@ -243,7 +247,7 @@ public sealed class PowerSettingTweak : TweakBase
     {
         var o = _options();
         uint want = _def.Target(o);
-        Guid plan = _target.Ensure(ctx);
+        Guid plan = _target.Ensure(ctx, PowerModule.PlanActiveId);
         ctx.Backup.ExportPlanOnce(plan);
 
         uint? ac = PowerApi.ReadAc(plan, _def.Sub, _def.Setting);
@@ -285,7 +289,7 @@ public sealed class PlanActiveTweak : TweakBase
 
     public override void Apply(TweakContext ctx)
     {
-        Guid plan = _target.Ensure(ctx);
+        Guid plan = _target.Ensure(ctx, PowerModule.PlanActiveId);
         var active = PowerApi.GetActive();
         if (active is not null)
             ctx.Journal.RecordOriginal(Info.Id, "power-active", "active", true, null, active.Value.ToString());
@@ -296,13 +300,16 @@ public sealed class PlanActiveTweak : TweakBase
 
 public static class PowerModule
 {
+    /// <summary>The row that owns the tuning plan's lifetime; created plans are journaled under it.</summary>
+    public const string PlanActiveId = "power.active";
+
     public static IEnumerable<ITweak> Build(SystemProfile profile, Journal journal, Func<AppOptions> options)
     {
         var target = new PowerPlanTarget(journal, options);
 
         yield return new PlanActiveTweak(new TweakInfo
         {
-            Id = "power.active",
+            Id = PlanActiveId,
             Module = "Power",
             Group = "Plan",
             Title = "Use the tuned plan",

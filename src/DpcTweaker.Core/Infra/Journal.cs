@@ -35,9 +35,33 @@ public sealed class JournalData
 }
 
 /// <summary>
+/// An open write-ahead transaction for one tweak. While it is open every RecordOriginal is
+/// flushed to disk (and to undo-all.ps1) before the caller changes anything, so a crash can
+/// never leave the machine changed with no record of its previous state.
+/// </summary>
+public sealed class JournalTransaction
+{
+    internal JournalTransaction(string tweakId, int originalsMark, bool hadApplied)
+    {
+        TweakId = tweakId;
+        OriginalsMark = originalsMark;
+        HadApplied = hadApplied;
+    }
+
+    public string TweakId { get; }
+
+    /// <summary>How many entries existed when the transaction opened: everything after it is the transaction's.</summary>
+    internal int OriginalsMark { get; }
+
+    /// <summary>True when the tweak was already marked applied by an earlier run.</summary>
+    internal bool HadApplied { get; }
+}
+
+/// <summary>
 /// The tweak journal: the exact state before every change, per tweak, plus which
 /// tweaks the app applied (so a later mismatch shows as Drifted, not Not applied).
-/// Saved to C:\ProgramData\DPC Latency Tweaker\journal.json after every change.
+/// Saved to C:\ProgramData\Stutter Guard\journal.json after every change, before the
+/// change itself is made.
 /// </summary>
 public sealed class Journal
 {
@@ -49,12 +73,14 @@ public sealed class Journal
 
     private readonly object _gate = new();
     private readonly string _file;
+    private readonly List<JournalTransaction> _txns = new();
     private JournalData _data;
 
     public Journal(string file)
     {
         _file = file;
-        _data = Load(file);
+        _data = Load(file, out bool degraded);
+        IsDegraded = degraded;
     }
 
     public static Journal OpenDefault()
@@ -65,52 +91,163 @@ public sealed class Journal
 
     public string FilePath => _file;
 
-    private static JournalData Load(string file)
+    /// <summary>
+    /// True when journal.json existed but couldn't be read at startup. The app keeps working,
+    /// but it must not overwrite a good undo-all.ps1 with the empty state it recovered with:
+    /// that script is the only way back when the app itself won't run.
+    /// </summary>
+    public bool IsDegraded { get; private set; }
+
+    /// <summary>
+    /// Called after every durable flush so undo-all.ps1 is regenerated in lockstep with
+    /// journal.json. The engine points this at <see cref="JournalRestorer.WriteUndoScripts"/>.
+    /// </summary>
+    public Action<Journal>? SidecarWriter { get; set; }
+
+    private static JournalData Load(string file, out bool degraded)
     {
+        degraded = false;
+        if (!File.Exists(file)) return new JournalData();
+
+        string? text = null;
         try
         {
-            if (File.Exists(file))
-                return JsonSerializer.Deserialize<JournalData>(File.ReadAllText(file), JsonOpts) ?? new JournalData();
+            text = File.ReadAllText(file);
+            if (text.Trim().Length == 0)
+            {
+                // An empty file is a half-written save: keep a copy and start over.
+                degraded = true;
+                PreserveBroken(file);
+                Log.Error("Journal was empty, starting a new one.");
+                return new JournalData();
+            }
+            var data = JsonSerializer.Deserialize<JournalData>(text, JsonOpts);
+            if (data is null)
+            {
+                degraded = true;
+                PreserveBroken(file);
+                Log.Error("Journal deserialized to null, starting a new one.");
+                return new JournalData();
+            }
+            return data;
         }
         catch (Exception ex)
         {
-            // Keep the broken file for inspection rather than overwriting it.
-            try { File.Copy(file, file + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: true); } catch { }
+            degraded = true;
+            PreserveBroken(file);
             Log.Error("Journal unreadable, starting a new one: " + ex.Message);
+            return new JournalData();
         }
-        return new JournalData();
     }
 
+    /// <summary>Keep the broken file for inspection rather than overwriting it.</summary>
+    private static void PreserveBroken(string file)
+    {
+        try { File.Copy(file, file + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: true); } catch { }
+    }
+
+    /// <summary>Explicit recovery: accept the recovered journal and allow undo-all.ps1 to be rewritten.</summary>
+    public void RecoverDegraded()
+    {
+        IsDegraded = false;
+        Log.Info("Journal degradation latch cleared by explicit recovery.");
+    }
+
+    /// <summary>Atomic: write a temp file, then swap it in, so a crash never leaves half a journal.</summary>
     public void Save()
     {
         lock (_gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
+            string json = JsonSerializer.Serialize(_data, JsonOpts);
             string tmp = _file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(_data, JsonOpts));
+            File.WriteAllText(tmp, json);
             File.Move(tmp, _file, overwrite: true);
         }
     }
 
-    /// <summary>Records the before-state, only the first time this tweak touches this target.</summary>
-    public void RecordOriginal(string tweakId, string kind, string target, bool existed, string? valueKind, string? data)
+    /// <summary>Persist the journal, then regenerate undo-all.ps1 from it. Never throws.</summary>
+    public void Flush()
+    {
+        try { Save(); } catch (Exception ex) { Log.Error("Journal save failed: " + ex.Message); }
+        try { SidecarWriter?.Invoke(this); } catch (Exception ex) { Log.Warn("undo-all.ps1 refresh failed: " + ex.Message); }
+    }
+
+    // ---------------------------------------------------------------- write-ahead transactions
+
+    public JournalTransaction BeginTransaction(string tweakId)
     {
         lock (_gate)
         {
+            var txn = new JournalTransaction(tweakId, _data.Originals.Count, _data.Applied.ContainsKey(tweakId));
+            _txns.Add(txn);
+            return txn;
+        }
+    }
+
+    public void CommitTransaction(JournalTransaction txn)
+    {
+        lock (_gate) _txns.Remove(txn);
+    }
+
+    /// <summary>
+    /// The tweak failed, so its before-states are phantom records: drop everything this
+    /// transaction added and leave journal.json / undo-all.ps1 as they were. Only the newest
+    /// transaction can be rolled back (that is the only shape the engine uses).
+    /// </summary>
+    public bool RollbackTransaction(JournalTransaction txn)
+    {
+        lock (_gate)
+        {
+            if (_txns.Count == 0 || !ReferenceEquals(_txns[^1], txn))
+            {
+                Log.Warn("Rollback ignored: journal transaction for " + txn.TweakId + " is not the newest one.");
+                return false;
+            }
+            _txns.RemoveAt(_txns.Count - 1);
+
+            bool changed = false;
+            if (txn.OriginalsMark < _data.Originals.Count)
+            {
+                _data.Originals.RemoveRange(txn.OriginalsMark, _data.Originals.Count - txn.OriginalsMark);
+                changed = true;
+            }
+            if (!txn.HadApplied && _data.Applied.Remove(txn.TweakId)) changed = true;
+            return changed;
+        }
+    }
+
+    /// <summary>
+    /// Records the before-state, only the first time this tweak touches this target.
+    /// Inside a transaction the record is flushed to disk (and to undo-all.ps1) before
+    /// this method returns, so the caller may mutate the system afterwards.
+    /// </summary>
+    public void RecordOriginal(string tweakId, string kind, string target, bool existed, string? valueKind, string? data)
+    {
+        bool added = false;
+        bool inTransaction;
+        lock (_gate)
+        {
+            inTransaction = _txns.Count > 0;
             bool already = _data.Originals.Any(o =>
                 o.TweakId == tweakId && o.Kind == kind && string.Equals(o.Target, target, StringComparison.OrdinalIgnoreCase));
-            if (already) return;
-            _data.Originals.Add(new JournalEntry
+            if (!already)
             {
-                TweakId = tweakId,
-                Kind = kind,
-                Target = target,
-                Existed = existed,
-                ValueKind = valueKind,
-                Data = data,
-                When = DateTime.Now,
-            });
+                _data.Originals.Add(new JournalEntry
+                {
+                    TweakId = tweakId,
+                    Kind = kind,
+                    Target = target,
+                    Existed = existed,
+                    ValueKind = valueKind,
+                    Data = data,
+                    When = DateTime.Now,
+                });
+                added = true;
+            }
         }
+        // Write-ahead: the before-state is durable before the change happens.
+        if (added && inTransaction) Flush();
     }
 
     public IReadOnlyList<JournalEntry> OriginalsFor(string tweakId)
@@ -135,6 +272,36 @@ public sealed class Journal
     {
         lock (_gate)
             return _data.Originals.Select(o => o.TweakId).Concat(_data.Applied.Keys).Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Moves every entry from one tweak id to another. Used to repair an id no tweak owns
+    /// any more (its entries would be unrevertible and would keep showing up in undo-all.ps1).
+    /// </summary>
+    public int RebindTweak(string from, string to)
+    {
+        if (string.Equals(from, to, StringComparison.Ordinal)) return 0;
+        lock (_gate)
+        {
+            int moved = 0;
+            foreach (var e in _data.Originals.Where(o => o.TweakId == from).ToList())
+            {
+                bool duplicate = _data.Originals.Any(o => !ReferenceEquals(o, e) && o.TweakId == to && o.Kind == e.Kind &&
+                    string.Equals(o.Target, e.Target, StringComparison.OrdinalIgnoreCase));
+                if (duplicate) continue;
+                e.TweakId = to;
+                moved++;
+            }
+            if (moved > 0) _data.Originals.RemoveAll(o => o.TweakId == from);
+
+            if (_data.Applied.TryGetValue(from, out var when))
+            {
+                _data.Applied.Remove(from);
+                if (!_data.Applied.ContainsKey(to)) _data.Applied[to] = when;
+                moved++;
+            }
+            return moved;
+        }
     }
 
     public void MarkApplied(string tweakId)
@@ -162,12 +329,22 @@ public sealed class Journal
         }
     }
 
-    public void ClearAll()
+    /// <summary>
+    /// Forget everything. Refuses on a journal that failed to load, unless recovery was
+    /// explicit: wiping it would also wipe the evidence of what still has to be undone.
+    /// </summary>
+    public bool ClearAll(bool force = false)
     {
         lock (_gate)
         {
+            if (IsDegraded && !force)
+            {
+                Log.Warn("ClearAll refused: the journal was unreadable at startup.");
+                return false;
+            }
             _data.Originals.Clear();
             _data.Applied.Clear();
+            return true;
         }
     }
 

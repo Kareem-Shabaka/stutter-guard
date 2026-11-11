@@ -46,6 +46,17 @@ public sealed class CpuTopology
 
     public bool IsDualCcdX3D => VCacheGroup is not null;
 
+    /// <summary>
+    /// A single-CCD part whose one L3 is far bigger than a normal CCD's (7800X3D / 9800X3D: 96 MB
+    /// where the same die without V-Cache has 32 MB). Nothing to route around, since there is no
+    /// second CCD, but the user should still see what they own.
+    /// </summary>
+    public bool IsSingleCcdVCache =>
+        !IsHybrid && L3Groups.Count == 1 && L3Groups[0].SizeBytes >= SingleCcdVCacheBytes;
+
+    /// <summary>96 MB V-Cache vs 32 MB plain CCD: 64 MB separates them with room to spare.</summary>
+    private const long SingleCcdVCacheBytes = 64L * 1024 * 1024;
+
     public string Describe()
     {
         var parts = new List<string>
@@ -61,6 +72,7 @@ public sealed class CpuTopology
                 parts.Add($"efficiency class {cls.Key}: CPUs {FormatCpus(cls.Select(c => c.Index))}");
         }
         if (IsDualCcdX3D) parts.Add("V-Cache CCD = CPUs " + VCacheGroup!.CpuRange());
+        else if (IsSingleCcdVCache) parts.Add("single CCD with 3D V-Cache");
         if (MultipleProcessorGroups) parts.Add($"{GroupCount} processor groups (read-only in v1)");
         return string.Join("; ", parts);
     }
