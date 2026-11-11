@@ -17,7 +17,7 @@ public static class ScanReport
         var p = engine.Profile;
         var sb = new StringBuilder();
         sb.AppendLine("Stutter Guard - scan report");
-        sb.AppendLine($"Generated {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}, app 0.7.0, built {BuiltAt()}");
+        sb.AppendLine($"Generated {DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}, app {BuildInfo.Version}, built {BuiltAt()}");
         sb.AppendLine(new string('=', 72));
         sb.AppendLine();
 

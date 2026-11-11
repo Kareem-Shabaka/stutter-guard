@@ -126,7 +126,7 @@ public sealed class MainViewModel : ObservableObject
         private set => Set(ref _globalBusy, value);
     }
 
-    public string Version => "0.7.0, built " + BuildTime;
+    public string Version => BuildInfo.Version + ", built " + BuildTime;
 
     /// <summary>When this .exe was published: makes an old copy obvious.</summary>
     public static string BuildTime

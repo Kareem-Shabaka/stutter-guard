@@ -1,3 +1,7 @@
+param(
+    # Optional: mirror the generated icons into this folder (for design preview).
+    [string]$VaultDir = ""
+)
 # generate-icons.ps1: Generates app.png and multi-size app.ico for Stutter Guard
 Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase
 
@@ -176,8 +180,8 @@ $icoBytes = $icoStream.ToArray()
 [System.IO.File]::WriteAllBytes("$assetsDir\app.ico", $icoBytes)
 Write-Host "app.ico written ($($icoBytes.Length) bytes)"
 
-# Also copy to Obsidian Vault folder for easy preview/access
-$vaultDir = "C:\Users\Compumarts\Documents\Obsidian Vault\6 Stutter guard"
+$vaultDir = if ($VaultDir) { $VaultDir } else { "" }   # pass -VaultDir to mirror the icons into a folder
+# Optional: copy the generated set into a design vault. Pass -VaultDir to use it.
 if (Test-Path $vaultDir) {
     Copy-Item "$assetsDir\app.png" "$vaultDir\stutter-guard-icon.png" -Force
     Copy-Item "$assetsDir\app.ico" "$vaultDir\stutter-guard-icon.ico" -Force

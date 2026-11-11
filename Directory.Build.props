@@ -1,0 +1,14 @@
+<Project>
+  <!-- One place to bump the version for every project in the solution. -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <!-- Keep ProductVersion exactly "1.0.0" instead of appending +<commit>. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>Stutter Guard</Product>
+    <Company>Kareem Shabaka</Company>
+    <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under GPL-3.0 with Non-Commercial Rider.</Copyright>
+  </PropertyGroup>
+</Project>
