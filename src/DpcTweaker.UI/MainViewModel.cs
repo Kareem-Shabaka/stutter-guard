@@ -16,6 +16,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _restartNeeded;
     /// <summary>Set when something other than a row state needs a restart (a failed adapter restart).</summary>
     private bool _restartForced;
+    private int _driftedCount;
     private bool _globalBusy;
     private int _refreshing;
 
@@ -94,6 +95,18 @@ public sealed class MainViewModel : ObservableObject
         get => _loadingText;
         private set => Set(ref _loadingText, value);
     }
+
+    /// <summary>Applied tweaks whose live state was undone behind the app's back (a driver update).</summary>
+    public int DriftedCount
+    {
+        get => _driftedCount;
+        private set
+        {
+            if (Set(ref _driftedCount, value)) OnPropertyChanged(nameof(HasDrift));
+        }
+    }
+
+    public bool HasDrift => _driftedCount > 0;
 
     public string StatusText
     {
@@ -236,6 +249,7 @@ public sealed class MainViewModel : ObservableObject
         int drifted = rows.Count(r => r.Status == TweakStatus.Drifted);
         // Derived, not sticky: reverting the last pending change clears the banner again.
         RestartNeeded = pending > 0 || _restartForced;
+        DriftedCount = drifted;
         StatusText = $"{applied} applied · {pending} pending restart · {drifted} drifted";
     }
 
