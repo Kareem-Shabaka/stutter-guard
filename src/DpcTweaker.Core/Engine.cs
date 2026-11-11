@@ -166,6 +166,7 @@ public sealed class TweakEngine
             }
         }
         RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));
+        if (results.Any(r => r.Ok)) DriftWatcher.Remember(this);
         return results;
     }
 
@@ -283,12 +284,19 @@ public sealed class TweakEngine
         progress?.Report(results.All(r => r.Ok)
             ? $"{results.Count} drifted tweak(s) put back."
             : $"{results.Count(r => r.Ok)} of {results.Count} drifted tweak(s) put back.");
+        if (results.Any(r => r.Ok)) DriftWatcher.Remember(this);
         return results;
     }
 
     /// <summary>Re-applies everything that has drifted since it was applied.</summary>
     public IReadOnlyList<TweakResult> HealDrifted(IProgress<string>? progress = null) =>
         Heal(DriftedTweaks(), progress);
+
+    /// <summary>
+    /// Drift plus its likely cause, for the Home banner. Compares the live system with the journal
+    /// and with the driver fingerprint recorded at the last apply.
+    /// </summary>
+    public DriftReport ScanDrift() => DriftWatcher.Scan(this);
 
     /// <summary>The status a row should show, folding in the last apply/revert error.</summary>
     public TweakState StateOf(ITweak t)

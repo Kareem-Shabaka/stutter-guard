@@ -22,6 +22,18 @@ public static class Agent
                 case "restore-device-power":
                     DevicePower.RestoreFromBackup();
                     return 0;
+                case "drift-check":
+                {
+                    // Read-only: reports drift to the log and through the exit code, so a logon
+                    // task or CI step can notice a driver update without opening the GUI.
+                    var profile = Detection.Detector.Detect();
+                    var journal = Journal.OpenDefault();
+                    var engine = new TweakEngine(profile, journal);
+                    var report = engine.ScanDrift();
+                    if (!report.HasDrift) { Log.Info("Drift check: nothing drifted."); return 0; }
+                    Log.Warn($"Drift check: {report.Headline}. {report.Detail}");
+                    return 10;   // 10 = drift found, distinct from the generic failure code 1
+                }
                 default:
                     Log.Warn("Agent: unknown verb '" + verb + "'");
                     return 2;

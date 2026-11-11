@@ -145,6 +145,13 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>Called when a new apply/revert cycle starts, so an old reason doesn't outlive it.</summary>
     public void ClearForcedRestart() => _restartForced = false;
+
+    /// <summary>The Home page scanned for drift: keep the status line and the Safety count in step.</summary>
+    public void OnDriftScanned(int driftedCount)
+    {
+        DriftedCount = driftedCount;
+        if (driftedCount > 0) StatusText = $"{driftedCount} tweak(s) drifted — see Home";
+    }
     public async Task InitializeAsync()
     {
         Loading = true;
