@@ -14,13 +14,24 @@ Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen
 
 ## 🚨 What's New in v0.7.1: Driver Latency Advisory Engine & Catalog
 
-Hardware and driver combinations on modern gaming PCs are virtually infinite. Even with optimized CPU core isolation, a single mechanically bugged kernel driver can monopolize the system queue and trigger catastrophic DPC latency spikes (ranging from 2,000 µs to over 8,000 µs).
+### The Problem Every PC Gamer Faces
+A player invests in a top-tier gaming PC (RTX 4080, RX 7900 XTX, Ryzen 7800X3D/9950X3D, or Core i9), boots up an esports or AAA title, and sees a solid 200+ average FPS on the counter. Yet, every few seconds, the screen hitches, a frame drops during a flick shot, or the audio crackles. 
 
-**Stutter Guard v0.7.1 introduces an embedded Driver Latency Advisory Engine:**
-- **77 Verified Driver Regression Profiles:** Embedded database cataloging known DPC/ISR storms across GPU, Network, Audio, Storage, and System hardware classes.
-- **Deterministic Version Parsing & Vendor Normalization:** Automatically resolves complex vendor version conventions (e.g., converting Windows 4-part NVIDIA display driver strings `32.0.15.3118` → `531.18`, Realtek branch identifiers, and Intel Ethernet releases).
-- **Dynamic Action Resolution:** Evaluates live hardware against the catalog and explicitly prescribes whether to **Update to a newer release**, **Roll back to a confirmed stable baseline**, or **Reconfigure/Remove** problematic audio processing objects (APOs) and polling helpers.
-- **Live UI & Scan Report Visibility:** Problematic drivers are immediately surfaced on the **Recommendations** screen with measured latency penalties (~µs), root-cause failure mechanisms, and direct vendor download links, alongside a dedicated `DRIVER ADVISORIES` section in exportable scan reports.
+Gamers often assume the hardware is defective, blame the game engine, or resort to reinstalling Windows. In reality, the culprit is almost always a **bugged hardware driver**—such as a Wi-Fi card polling for access points mid-match, an audio processing service looping in the background, or a GPU driver holding an internal lock during power-state transitions.
+
+### Collecting the Data: From Real-World Kernel Traces (X) to a Verified Solution (Y)
+To solve this permanently, thousands of real-world reports were synthesized:
+- **Where the data came from (X):** Unfiltered LatencyMon kernel traces, verified Windows Driver Kit (WDK) issue reports, audio production (DAW) community logs, and vendor bug trackers across NVIDIA, AMD, Intel, Realtek, and Microsoft.
+- **What was built with it (Y):** A deterministic, vendor-locked catalog of **77 confirmed driver regressions** covering **286 specific bugged driver versions**. Every entry documents the exact hardware ID, the root-cause failure mechanism, the observed DPC latency penalty (e.g., 2,500 µs to 8,000 µs spikes), and the proven stable release.
+
+### How Stutter Guard Puts It to Work
+Instead of forcing gamers to spend days scouring obscure forums to diagnose micro-stutters, Stutter Guard automates the entire process in seconds:
+1. **One-Click Audit:** Upon opening the app, Stutter Guard inspects installed GPUs, network cards, audio devices, and storage controllers, translating raw Windows driver strings (such as NVIDIA's internal `32.0.15.3118` format) into clear release versions (`531.18`).
+2. **Actionable Direction:** If a bugged driver is detected, the **Recommendations** screen provides an immediate, plain-English fix:
+   - **Update Driver:** When a newer release has patched the regression.
+   - **Roll Back Driver:** When a recent driver update introduced a known stutter regression and an older baseline is rock-solid.
+   - **Reconfigure or Remove:** When aggressive OEM audio processing objects (APOs) or background polling bloatware need to be neutralized.
+3. **The Complete System "ECU Tune":** Once faulty drivers are repaired, Stutter Guard applies the full architectural optimization: quarantining game cores from device interrupts, disabling peripheral sleep latency, locking system timers at 0.5 ms, and flattening 1% low frame times.
 
 ---
 
