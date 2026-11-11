@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>StutterGuard</AssemblyName>
+    <RootNamespace>DpcTweaker.App</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.7.0</Version>
+    <Product>Stutter Guard</Product>
+    <Description>Measured, reversible DPC latency and stutter tuning for Windows.</Description>
+    <Authors>Kareem Shabaka</Authors>
+    <Company>Kareem Shabaka</Company>
+    <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under GPL-3.0 with Non-Commercial Rider.</Copyright>
+    <!-- Fluent theme (ThemeMode) is marked experimental in some .NET versions. -->
+    <NoWarn>$(NoWarn);WPF0001;CA1416</NoWarn>
+    <!-- One self-contained .exe -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DpcTweaker.Core\DpcTweaker.Core.csproj" />
+    <ProjectReference Include="..\DpcTweaker.UI\DpcTweaker.UI.csproj" />
+  </ItemGroup>
+
+</Project>
