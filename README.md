@@ -6,37 +6,71 @@
 [![Version](https://img.shields.io/badge/Version-0.7.1-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%99%A5-ea4aaa.svg)](https://github.com/sponsors/Kareem-Shabaka)
 
-**Stutter Guard** is a measured, fully reversible DPC latency, driver regression advisory, and micro-stutter optimization tool for Windows 10 and 11.
+> **"Why does a high-end gaming PC running at 200+ average FPS still hitch, micro-stutter, or drop audio?"**  
+> Average FPS measures raw compute throughput when scenes are static. **1% Lows, frame pacing, and DPC kernel latency** dictate what happens during an aim flick, a rapid turn, or an intense multiplayer firefight. Stutter Guard is built from the ground up to eliminate micro-stutters and lock in real-time responsiveness.
 
 Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen 9 9950X3D + Radeon RX 9070 XT: worst LatencyMon interrupt-to-process drop from **733 µs → 11.6 µs**). Zero snake oil. Zero black-box registry scripts. Every tweak in the application documents **what it does**, **why it works**, **what it costs**, **failure modes**, and **the empirical evidence**.
 
 ---
 
-## 🚨 What's New in v0.7.1: Driver Latency Advisory Engine & Catalog
+## 🚀 The v0.7.1 Driver Latency Advisory Engine
 
-### The Problem Every PC Gamer Faces
-A player invests in a top-tier gaming PC (RTX 4080, RX 7900 XTX, Ryzen 7800X3D/9950X3D, or Core i9), boots up an esports or AAA title, and sees a solid 200+ average FPS on the counter. Yet, every few seconds, the screen hitches, a frame drops during a flick shot, or the audio crackles. 
+### The Challenge: Infinite Hardware Combinations & Bugged Drivers
+Modern gaming PCs represent millions of possible hardware combinations: CPUs, graphics cards, motherboards, network adapters, audio interfaces, and high-polling USB peripherals. Every single component runs its own vendor device driver.
 
-Gamers often assume the hardware is defective, blame the game engine, or resort to reinstalling Windows. In reality, the culprit is almost always a **bugged hardware driver**—such as a Wi-Fi card polling for access points mid-match, an audio processing service looping in the background, or a GPU driver holding an internal lock during power-state transitions.
+Often, sudden micro-stuttering isn't caused by weak hardware—it is triggered by a **single bugged driver version** silently stalling the Windows kernel. For instance, a Wi-Fi card driver polling for nearby networks mid-game, or an Ethernet driver sleeping and waking mid-packet, can stall a CPU core for 3,000 to 8,000 microseconds. Traditional benchmarks like Cinebench or 3DMark Time Spy never expose this because they only measure raw compute power under static load.
 
-### Collecting the Data: From Real-World Kernel Traces (X) to a Verified Solution (Y)
-To solve this permanently, thousands of real-world reports were synthesized:
-- **Where the data came from (X):** Unfiltered LatencyMon kernel traces, verified Windows Driver Kit (WDK) issue reports, audio production (DAW) community logs, and vendor bug trackers across NVIDIA, AMD, Intel, Realtek, and Microsoft.
-- **What was built with it (Y):** A deterministic, vendor-locked catalog of **77 confirmed driver regressions** covering **286 specific bugged driver versions**. Every entry documents the exact hardware ID, the root-cause failure mechanism, the observed DPC latency penalty (e.g., 2,500 µs to 8,000 µs spikes), and the proven stable release.
+### The Solution: Turning Internet-Wide Troubleshooting into an Instant Fix
+Instead of requiring gamers to spend weeks scouring obscure hardware forums, Reddit troubleshooting posts, GitHub issue trackers, and technical LatencyMon logs to figure out why an audio stream popped or a frame dropped:
 
-### How Stutter Guard Puts It to Work
-Instead of forcing gamers to spend days scouring obscure forums to diagnose micro-stutters, Stutter Guard automates the entire process in seconds:
-1. **One-Click Audit:** Upon opening the app, Stutter Guard inspects installed GPUs, network cards, audio devices, and storage controllers, translating raw Windows driver strings (such as NVIDIA's internal `32.0.15.3118` format) into clear release versions (`531.18`).
-2. **Actionable Direction:** If a bugged driver is detected, the **Recommendations** screen provides an immediate, plain-English fix:
-   - **Update Driver:** When a newer release has patched the regression.
-   - **Roll Back Driver:** When a recent driver update introduced a known stutter regression and an older baseline is rock-solid.
-   - **Reconfigure or Remove:** When aggressive OEM audio processing objects (APOs) or background polling bloatware need to be neutralized.
-3. **The Complete System "ECU Tune":** Once faulty drivers are repaired, Stutter Guard applies the full architectural optimization: quarantining game cores from device interrupts, disabling peripheral sleep latency, locking system timers at 0.5 ms, and flattening 1% low frame times.
+1. **Internet-Wide Data Aggregation:** Stutter Guard incorporates an automated research and verification pipeline that systematically harvested, parsed, and corroborated real-world driver bug reports, vendor hotfixes, and kernel DPC/ISR telemetry dumps from communities across the entire internet.
+2. **The 77-Driver Regression Catalog:** Synthesized into an embedded, verified database spanning every major Device Manager class: GPUs (NVIDIA, AMD, Intel), Wi-Fi & Ethernet adapters, Audio DACs & OEM drivers, Storage controllers, and System power management agents.
+3. **Instant Automated Diagnosis:** In under 5 seconds, Stutter Guard scans installed hardware, normalizes complex vendor version schemes (e.g., converting Windows 4-part NVIDIA strings `32.0.15.3118` → `531.18`), and provides an explicit, actionable prescription right on screen:
+   - **Update** to a confirmed stable release (or newer).
+   - **Roll back** to a verified stable baseline if running a bugged regression.
+   - **Reconfigure or remove** problematic background polling utilities and audio processing bloatware.
+
+---
+
+## 🛠️ How Stutter Guard Works: The Complete Two-Step Solution
+
+Stutter Guard operates on a clear two-step principle: **Fix the mechanical defects first, then apply the high-performance calibration.**
+
+```
++-----------------------------------------------------------------------------------+
+|                        STEP 1: THE MECHANICAL HEALTH CHECK                        |
+|                                                                                   |
+|  Audits hardware against the internet-harvested 77-driver regression catalog.     |
+|  Identifies and resolves bugged kernel drivers before touching any system state.  |
+|  --> Output: Clean, verified baseline drivers with zero DPC/ISR storms.           |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|                           STEP 2: THE FULL "ECU TUNE"                             |
+|                                                                                   |
+|  Calibrates Windows scheduling, interrupt routing, and link power states:         |
+|  - Quarantines gaming cores (100% interrupt-free for the game render thread).     |
+|  - Routes GPU, mouse, network, and audio IRQs to dedicated secondary cores.       |
+|  - Strips latency-inducing PHY power gating (EEE, Green Ethernet, ASPM).          |
+|  - Locks global timer resolution at native 0.5 ms.                                |
+|  - Trims idle maintenance bursts without touching anti-cheat or critical services.|
+|  --> Output: Flat frame-time graphs, elevated 1% lows, and locked input pacing.   |
++-----------------------------------------------------------------------------------+
+```
+
+### The Car ECU Tune Analogy
+
+Imagine a high-performance turbocharged car running a restrictive factory economy ECU map:
+- **The Dyno Pull (Cinebench / 3DMark Time Spy):** On a dyno at wide-open throttle, the car produces its rated peak horsepower. However, on the street, that same factory tune suffers from turbo boost lag on throttle tip-in and sputters at redline due to conservative emissions throttling.
+- **Stock Windows:** Out of the box, Windows is tuned for fleet power conservation and office multi-tasking. It scatters interrupts across all cores indiscriminately. When a high-polling mouse moves or a network packet arrives, Windows dumps that interrupt directly onto the CPU core executing the game's render loop—stalling the frame from 5 ms to 35 ms.
+- **The Stutter Guard Tune:** Applying a calibrated performance ECU tune eliminates boost lag and stabilizes redline execution, trading idle sleep states for immediate transient responsiveness. Stutter Guard applies that exact tuning to Windows: gaming cores remain strictly dedicated to the game, peripheral interrupts live on isolated secondary cores, and power-saving sleep transitions are eliminated.
 
 ---
 
 ## Table of Contents
-- [Why Stutter Guard? (The Micro-Stutter Problem & The ECU Analogy)](#why-stutter-guard-the-micro-stutter-problem--the-ecu-analogy)
+- [The v0.7.1 Driver Latency Advisory Engine](#-the-v071-driver-latency-advisory-engine)
+- [How Stutter Guard Works: The Two-Step Solution](#️-how-stutter-guard-works-the-complete-two-step-solution)
 - [Key Modules & Capabilities](#key-modules--capabilities)
 - [Comprehensive Step-by-Step Usage Guide](#comprehensive-step-by-step-usage-guide)
   - [Phase 1: Pre-Flight Baseline Measurement](#phase-1-pre-flight-baseline-measurement)
@@ -59,45 +93,11 @@ Instead of forcing gamers to spend days scouring obscure forums to diagnose micr
 
 ---
 
-## Why Stutter Guard? (The Micro-Stutter Problem & The ECU Analogy)
-
-Even on flagship gaming rigs (RTX 4090 / RX 7900 XTX / 7800X3D / 9950X3D / Core i9), frame drops and 1% low micro-stutters occur regardless of raw GPU horsepower or clock speeds. 
-
-### The Car ECU Tune vs. Dyno Analogy
-
-Consider a turbocharged car running a restrictive factory economy ECU map:
-- **The Dyno (Cinebench & 3DMark Time Spy):** On a steady-state dyno pull, the car reaches its rated peak horsepower under wide-open throttle. But on the road, that same car exhibits noticeable turbo lag on throttle tip-in and sputters at redline due to conservative factory fuel trim and emissions throttling. Synthetic benchmarks only test continuous compute capacity; they never expose transient preemption stalls.
-- **The Factory Map (Stock Windows):** Out of the box, Windows is configured for fleet power conservation: link-state power gating (PCIe ASPM), USB selective suspend, network PHY sleep states, and balanced CPU C-states. Furthermore, the Windows interrupt arbiter scatters hardware IRQs across all logical cores indiscriminately. When a high-polling mouse movement, network packet burst, or GPU state change fires an interrupt, Windows routinely dumps that interrupt onto the exact core executing the game's render thread. That single frame takes 35 ms instead of 5 ms to draw, producing an unmistakable micro-stutter.
-- **The Performance Tune (Stutter Guard):** Applying a calibrated ECU tune eliminates boost lag, ensures immediate throttle response, and stabilizes redline execution, trading deep idle efficiency for immediate transient responsiveness. Stutter Guard applies that exact architectural calibration to Windows: isolating gaming cores completely, locking timer resolution at 0.5 ms, capping C-states at C1, and eliminating peripheral sleep delays.
-- **Mechanical Faults vs. Tuning:** An ECU tune cannot fix a cracked spark plug or blown gasket. If a system runs a mechanically bugged kernel driver (such as a Wi-Fi driver monopolizing DIRQL for 3.5 ms during background beacon scans), that faulty component must be diagnosed and replaced first. Stutter Guard handles both: isolating faulty drivers via its catalog, and then applying the scheduling tune.
-
-```
-+-----------------------------------------------------------------------------------+
-|                            STUTTER GUARD ARCHITECTURE                             |
-+-----------------------------------------------------------------------------------+
-|  DIAGNOSTIC ENGINE (Fault Isolation)   -->  Detects & fixes mechanically broken   |
-|  - 77-Driver DPC/ISR Catalog                drivers (prescribes Update / Rollback)|
-|  - Real-time Hardware ID Matching                                                 |
-|  - Vendor Version Normalization                                                   |
-+-----------------------------------------------------------------------------------+
-                                         │
-                                         ▼
-+-----------------------------------------------------------------------------------+
-|  SCHEDULING ENGINE (The ECU Flash)     -->  Quarantines game cores, eliminates    |
-|  - Hardware IRQ Affinity Routing            interrupt contention, and locks       |
-|  - SMT Stolen-Time Core Benchmarking        real-time frame pacing                |
-|  - PHY / ASPM / C-State Power Tuning                                              |
-|  - Native 0.5 ms Global Timer Sync                                                |
-+-----------------------------------------------------------------------------------+
-```
-
----
-
 ## Key Modules & Capabilities
 
 | Module | Core Functionality |
 | :--- | :--- |
-| **Driver Advisory Engine** *(New in v0.7.1)* | Real-time audit against 77 catalogued driver regressions. Automatically normalizes vendor versions (NVIDIA display drivers, Realtek, Intel) and prescribes concrete remediation: **Update**, **Roll back**, or **Reconfigure/Remove**. |
+| **Driver Advisory Engine** *(New in v0.7.1)* | Real-time audit against 77 catalogued driver regressions harvested from internet community reports. Automatically normalizes vendor versions (NVIDIA display drivers, Realtek, Intel) and prescribes concrete remediation: **Update**, **Roll back**, or **Reconfigure/Remove**. |
 | **Home (System Scan)** | Read-only hardware and OS topology inspection: Windows build and UBR, CPU core grouping (CCDs / 3D V-Cache / Intel P & E cores / SMT mapping), chassis form-factor detection, GPU drivers and driver files, Virtualization-Based Security (VBS), system timer resolution, active WHEA hardware errors, driver advisories summary, and integrated progressive **Core Benchmark**. Scan reports export cleanly to text. |
 | **Interrupts & Affinity** | Hardware-aware IRQ affinity engine. Automatically preserves gaming cores completely interrupt-free (CPU 0/1; the 3D V-Cache CCD on AMD X3D; top-ranked CCDs or P-cores on Intel). Ranks secondary cores with an integrated progressive Core Benchmark (timer wake-up latency, speed, interrupt load, SMT stolen time) and assigns devices strategically: GPU, primary mouse USB controller, default audio, wired/wireless NIC RSS queues (on 2 adjacent cores), and remaining USB controllers. Supports safe MSI mode conversions. |
 | **Network** | Eliminates latency-inducing PHY power-saving modes on physical wired network adapters directly from driver properties: Energy Efficient Ethernet (EEE / 802.3az), Green Ethernet, Gigabit Lite, Power Saving Mode, Realtek ASPM/CLKREQ, Selective Suspend, Flow Control, and Interrupt Moderation. Automatically restarts the NIC without requiring a full Windows reboot. |
