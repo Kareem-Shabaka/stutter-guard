@@ -45,6 +45,21 @@ public static class Presets
     };
 }
 
+public sealed class BadDriverEntry
+{
+    [JsonPropertyName("deviceClass")] public string DeviceClass { get; set; } = "";
+    [JsonPropertyName("deviceName")] public string DeviceName { get; set; } = "";
+    [JsonPropertyName("hardwareIdPattern")] public string HardwareIdPattern { get; set; } = "";
+    [JsonPropertyName("driverFile")] public string DriverFile { get; set; } = "";
+    [JsonPropertyName("buggedVersions")] public List<string> BuggedVersions { get; set; } = new();
+    [JsonPropertyName("recommendedVersion")] public string RecommendedVersion { get; set; } = "";
+    [JsonPropertyName("typicalLatencyUs")] public int TypicalLatencyUs { get; set; }
+    [JsonPropertyName("failureMechanism")] public string FailureMechanism { get; set; } = "";
+    [JsonPropertyName("symptom")] public string Symptom { get; set; } = "";
+    [JsonPropertyName("fix")] public string Fix { get; set; } = "";
+    [JsonPropertyName("severity")] public string Severity { get; set; } = "High";
+}
+
 public sealed class ServiceEntry
 {
     [JsonPropertyName("name")] public string Name { get; set; } = "";
@@ -154,8 +169,15 @@ public static class Catalogs
     private static readonly Lazy<GlobCatalog<TaskEntry>> _tasks = new(() =>
         LoadTasks(ReadResource("tasks.json")));
 
+    private static readonly Lazy<List<BadDriverEntry>> _badDrivers = new(() =>
+        LoadBadDrivers(ReadResource("bad_drivers.json")));
+
     public static GlobCatalog<ServiceEntry> Services => _services.Value;
     public static GlobCatalog<TaskEntry> Tasks => _tasks.Value;
+    public static IReadOnlyList<BadDriverEntry> BadDrivers => _badDrivers.Value;
+
+    public static List<BadDriverEntry> LoadBadDrivers(string json) =>
+        JsonSerializer.Deserialize<List<BadDriverEntry>>(json) ?? new();
 
     public static GlobCatalog<ServiceEntry> LoadServices(string json) =>
         new(JsonSerializer.Deserialize<ServiceFile>(json)?.Services ?? new(), e => e.Name);

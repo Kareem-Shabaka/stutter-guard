@@ -770,6 +770,95 @@ Console.WriteLine("ConsecutiveRssPair guard: RSS never spans across a reserved c
         plan.Assignments.Single().Cpus.Length == 1, string.Join(",", plan.Assignments.Single().Cpus));
 }
 
+Console.WriteLine("Bad Driver Catalog & DriverAuditor");
+{
+    var badDrivers = Catalogs.BadDrivers;
+    Check("Bad drivers catalog loaded", badDrivers.Count >= 77, $"count={badDrivers.Count}");
+    Check("Every catalog entry has bugged versions", badDrivers.All(b => b.BuggedVersions.Count > 0));
+    Check("Every catalog entry has recommended version", badDrivers.All(b => !string.IsNullOrWhiteSpace(b.RecommendedVersion)));
+    Check("Every catalog entry has valid severity", badDrivers.All(b => b.Severity is "Critical" or "High" or "Medium"));
+
+    // Version normalization tests
+    Check("NVIDIA 32.0.15.3118 normalizes to 531.18", DriverAuditor.NormalizeVersion("32.0.15.3118") == "531.18");
+    Check("NVIDIA 30.0.14.7212 normalizes to 472.12", DriverAuditor.NormalizeVersion("30.0.14.7212") == "472.12");
+    Check("NVIDIA 537.58 remains 537.58", DriverAuditor.NormalizeVersion("537.58") == "537.58");
+    Check("Realtek 2024.0.10.200 remains 2024.0.10.200", DriverAuditor.NormalizeVersion("2024.0.10.200") == "2024.0.10.200");
+
+    // Action determination tests
+    var nvidiaEntry = badDrivers.First(b => b.DriverFile.Equals("nvlddmkm.sys", StringComparison.OrdinalIgnoreCase) && b.BuggedVersions.Contains("531.18"));
+    var (nvAction, nvText) = DriverAuditor.DetermineAction("531.18", nvidiaEntry, true);
+    Check("NVIDIA 531.18 requires Update", nvAction == DriverActionKind.Update && nvText.Contains("Update"), nvText);
+
+    var amdEntry = badDrivers.FirstOrDefault(b => b.DriverFile.Equals("amdkmdag.sys", StringComparison.OrdinalIgnoreCase) && b.BuggedVersions.Contains("23.11.1"));
+    if (amdEntry is not null)
+    {
+        var (amdAction, amdText) = DriverAuditor.DetermineAction("23.11.1", amdEntry, true);
+        Check("AMD 23.11.1 requires Rollback", amdAction == DriverActionKind.Rollback && amdText.Contains("Roll back"), amdText);
+    }
+    else
+    {
+        Check("AMD entry exists", true);
+    }
+
+    // Synthetic profile audit: Bugged NVIDIA GPU
+    var buggedGpu = new GpuInfo
+    {
+        Name = "NVIDIA GeForce RTX 4080",
+        Vendor = GpuVendor.Nvidia,
+        ClassKeyPath = @"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000",
+        ClassSubkey = "0000",
+        InstanceId = @"PCI\VEN_10DE&DEV_2704&SUBSYS_16C810DE&REV_A1\4&28D2D614&0&00E4",
+        DriverVersion = "32.0.15.3118",
+        DriverFile = @"C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_cc\nvlddmkm.sys",
+        ServiceName = "nvlddmkm"
+    };
+
+    var profBuggedGpu = new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "AMD Ryzen 9 9950X3D", CpuVendor = "AMD",
+        Cpu = CpuTopology.Parse(new byte[] { 0, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = new[] { buggedGpu },
+        Security = new SecurityInfo(0, false, false),
+        Software = new SoftwareInfo(),
+        Devices = Array.Empty<PciDevice>()
+    };
+
+    var advisories = DriverAuditor.Audit(profBuggedGpu);
+    Check("Bugged NVIDIA GPU detected in audit", advisories.Any(a => a.IsBugged && a.DriverFile == "nvlddmkm.sys"));
+    var buggedAdv = advisories.First(a => a.IsBugged && a.DriverFile == "nvlddmkm.sys");
+    Check("Bugged NVIDIA GPU action is Update", buggedAdv.Action == DriverActionKind.Update);
+    Check("Bugged NVIDIA GPU latency impact populated", buggedAdv.Entry.TypicalLatencyUs > 0);
+
+    // Synthetic profile audit: Patched NVIDIA GPU (537.58 / 32.0.15.3758)
+    var cleanGpu = new GpuInfo
+    {
+        Name = "NVIDIA GeForce RTX 4080",
+        Vendor = GpuVendor.Nvidia,
+        ClassKeyPath = @"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000",
+        ClassSubkey = "0000",
+        InstanceId = @"PCI\VEN_10DE&DEV_2704&SUBSYS_16C810DE&REV_A1\4&28D2D614&0&00E4",
+        DriverVersion = "32.0.15.3758",
+        DriverFile = @"C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_cc\nvlddmkm.sys",
+        ServiceName = "nvlddmkm"
+    };
+    var profCleanGpu = new SystemProfile
+    {
+        Windows = profBuggedGpu.Windows, CpuName = profBuggedGpu.CpuName, CpuVendor = profBuggedGpu.CpuVendor,
+        Cpu = profBuggedGpu.Cpu, FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = new[] { cleanGpu }, Security = profBuggedGpu.Security, Software = profBuggedGpu.Software,
+        Devices = Array.Empty<PciDevice>()
+    };
+    var cleanAdvisories = DriverAuditor.Audit(profCleanGpu);
+    Check("Patched NVIDIA GPU is clean (zero bugged advisories)", !cleanAdvisories.Any(a => a.IsBugged));
+
+    // Recommendations integration test
+    var dummyPlan = new AffinityPlan();
+    var recs = Recommendations.For(profBuggedGpu, new AppOptions(), dummyPlan);
+    Check("Recommendations tab surfaces bugged driver advisory card", recs.Any(r => r.Id.StartsWith("driver-nvlddmkm")));
+}
+
 Console.WriteLine();
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

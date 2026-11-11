@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using DpcTweaker.Core.Catalog;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Interrupts;
@@ -72,6 +73,29 @@ public static class ScanReport
                 sb.AppendLine($"      network: {(d.Connected == true ? "connected" : d.Connected == false ? "not connected" : "state unknown")}, RSS {(d.RssCapable ? "yes, queues " + string.Join("/", d.RssQueueOptions) : "no")}");
         }
         if (p.Devices.Count == 0) sb.AppendLine("  (none read)");
+        sb.AppendLine();
+
+        var driverAudit = DriverAuditor.Audit(p);
+        sb.AppendLine("DRIVER ADVISORIES");
+        var buggedDrivers = driverAudit.Where(a => a.IsBugged).ToList();
+        if (buggedDrivers.Count == 0)
+        {
+            sb.AppendLine("  All detected catalogued devices are running verified stable/clean driver versions (no known DPC regressions).");
+        }
+        else
+        {
+            foreach (var adv in buggedDrivers)
+            {
+                sb.AppendLine($"  [HAZARD - {adv.Entry.Severity.ToUpperInvariant()}] {adv.DeviceName} ({adv.DriverFile})");
+                sb.AppendLine($"      Hardware ID:         {adv.HardwareId}");
+                sb.AppendLine($"      Installed Version:   {adv.InstalledVersion}");
+                sb.AppendLine($"      Action:              {adv.ActionText}");
+                sb.AppendLine($"      Typical Latency:     ~{adv.Entry.TypicalLatencyUs:N0} us DPC/ISR execution spike");
+                sb.AppendLine($"      Failure Mechanism:   {adv.Entry.FailureMechanism}");
+                sb.AppendLine($"      Prescribed Fix:      {adv.Entry.Fix}");
+                sb.AppendLine();
+            }
+        }
         sb.AppendLine();
 
         var plan = engine.Plan;

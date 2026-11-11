@@ -1,0 +1,1366 @@
+[
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce GTX 1080 / 1070 (Pascal Family)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_1B80*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "368.39",
+      "368.69",
+      "368.81"
+    ],
+    "recommendedVersion": "368.95",
+    "typicalLatencyUs": 4200,
+    "failureMechanism": "Kernel-mode DPC watchdog timeout violations caused by excessive serialization in nvlddmkm.sys during micro-architectural power state (P-State) transitions between P0 and P2/P8. The driver executes prolonged spinloop routines while waiting for hardware frequency/voltage PLL lock confirmation across the newly introduced Pascal GP104 dynamic power gating controller.",
+    "symptom": "Catastrophic DPC latency spikes ranging from 2000µs to over 5000µs in LatencyMon, severe audio dropouts via ASIO/WASAPI, and intermittent desktop frame stuttering when switching between 2D and 3D workloads.",
+    "fix": "Upgrade to hotfix 368.95 or 372.54 where PLL synchronization routines were converted from continuous spinlocks to asynchronous interrupt-driven notifications.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX / GTX Series (Display Container Telemetry Engine)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&CC_0300*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "531.18",
+      "531.26"
+    ],
+    "recommendedVersion": "531.29",
+    "typicalLatencyUs": 2600,
+    "failureMechanism": "A dangling handle and circular reference leak in the NvContainer telemetry session interface causes NvDisplay.ContainerLocalSystem to loop at 10-15% sustained CPU core load immediately following game termination. This spawns continuous user-to-kernel IOCTL barrages into nvlddmkm.sys, flooding the Windows kernel I/O subsystem and stalling the DPC/ISR processing queue.",
+    "symptom": "Sustained high CPU usage by nvcontainer.exe post-gaming, periodic frame stuttering in subsequent application launches, and elevated nvlddmkm.sys DPC latency hanging consistently between 1800µs and 3000µs.",
+    "fix": "Upgrade to driver version 531.29 or higher. Immediate mitigation: Restart or terminate the 'NVIDIA Display Container LS' service via services.msc, or delete nvtelemetry.dll from Program Files\\NVIDIA Corporation.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX 30-Series / 40-Series (Ampere & Ada Lovelace)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&CC_0300*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "535.98",
+      "536.23",
+      "536.40"
+    ],
+    "recommendedVersion": "536.67",
+    "typicalLatencyUs": 3800,
+    "failureMechanism": "NVIDIA-acknowledged regression in the memory and core clock scheduler: nvlddmkm.sys blocks the system DPC queue during dynamic hardware P-State transitions triggered by hardware-accelerated video decoding (NVDEC) or background Chromium/Electron app rendering. The driver executes blocking polling calls against the Falcon micro-controller while asserting elevated IRQL levels (DISPATCH_LEVEL).",
+    "symptom": "LatencyMon alerts identifying nvlddmkm.sys exceeding the 2000µs real-time audio threshold, micro-stuttering during concurrent YouTube playback and high-refresh-rate gaming, and dropped samples in digital audio workstations (DAWs).",
+    "fix": "Upgrade to driver 536.67 or 536.99. Workaround: In NVIDIA Control Panel, set 'Power management mode' from 'Optimal power' to 'Prefer maximum performance' to eliminate intermediate low-power clock state transitions.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX 40-Series / RTX 30-Series (Multi-Plane Overlay & MCLK Shifting)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&CC_0300*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "546.01",
+      "546.17",
+      "546.29",
+      "546.33"
+    ],
+    "recommendedVersion": "551.23",
+    "typicalLatencyUs": 4500,
+    "failureMechanism": "High latency caused by memory clock (MCLK) dynamic frequency switching (P0 to P8 and vice-versa) during Multi-Plane Overlay (MPO) composite plane handoffs on multi-monitor setups with mismatched refresh rates. The kernel driver stalls the GPU display engine queue via nvlddmkm.sys while renegotiating internal GDDR6/GDDR6X timing parameters and PCIe ASPM states.",
+    "symptom": "1% low frametime spikes, audio popping/crackling over USB DACs, LatencyMon recording nvlddmkm.sys execution times up to 4500µs, and random desktop stuttering when dragging windows across monitors running mismatched refresh rates (e.g., 240Hz and 60Hz).",
+    "fix": "Upgrade to 551.23, 551.52, or newer. Workaround: Disable Multi-Plane Overlay (MPO) via the 'OverlayTestMode' DWORD registry key set to '5' in HKLM\\SOFTWARE\\Microsoft\\Windows\\Dwm.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX 3080 / 3090 (Ampere Launch Regression)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_2204*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "466.11",
+      "466.27",
+      "466.47",
+      "466.77"
+    ],
+    "recommendedVersion": "466.79",
+    "typicalLatencyUs": 3100,
+    "failureMechanism": "Spinlock contention within the G-Sync presentation synchronization thread in nvlddmkm.sys. When variable refresh rate (VRR) is engaged alongside GPU hardware-accelerated scheduling (HAGS), the driver's display synchronization barrier fails to relinquish control promptly within its allocated interrupt service routine window, stalling kernel worker threads on the primary CPU core.",
+    "symptom": "Severe frame time variance, hitching during 3D scene transitions, visual tearing despite G-Sync active, and DPC latency spikes in LatencyMon above 3000µs.",
+    "fix": "Update to driver 466.79 Hotfix or 471.11+. Alternative workaround: Disable 'Hardware-accelerated GPU scheduling' (HAGS) in Windows Graphics Settings and disable G-Sync for windowed mode.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "NVIDIA High Definition Audio Controller",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_0FB9*",
+    "driverFile": "nvhda64v.sys",
+    "buggedVersions": [
+      "1.3.39.16",
+      "1.3.40.14"
+    ],
+    "recommendedVersion": "1.4.0.1",
+    "typicalLatencyUs": 4500,
+    "failureMechanism": "Line-based pin interrupt (INTx) sharing collisions. By default, nvhda64v.sys initializes in line-based IRQ mode, frequently sharing IRQ 16 or 17 with motherboard USB xHCI host controllers or SATA controllers. The resulting ISR storm delays execution of DPCs across all co-assigned devices.",
+    "symptom": "Catastrophic DPC spikes (3000-8000 us) in nvhda64v.sys and Wdf01000.sys, audio crackling during display state changes, and DAW buffer dropouts when moving USB mice or writing to disk.",
+    "fix": "Switch NVIDIA High Definition Audio Controller to Message Signaled Interrupts (MSI) mode using MSI Utility v2/v3, setting interrupt priority to 'High' or 'Undefined', or completely disable the NVIDIA HD Audio device in Device Manager if HDMI/DP audio is unused.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "NVIDIA USB Type-C Port Policy Controller",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_1AD8*",
+    "driverFile": "nvppc.sys",
+    "buggedVersions": [
+      "1.38.831.832",
+      "1.41.0.0"
+    ],
+    "recommendedVersion": "Disable in Device Manager / Driver Rollback to native UCSI",
+    "typicalLatencyUs": 2100,
+    "failureMechanism": "Aggressive UCSI/ACPI status query polling loop over an unbuffered I2C bridge interface between the GPU core and the onboard Cypress CCG5 Type-C controller (Turing RTX 20-series Founders Edition and select vendor PCBs). The synchronous polling blocking call locks the kernel scheduler during DPC execution while awaiting hardware ACK signals.",
+    "symptom": "Cyclic micro-freezes every few seconds accompanied by DPC execution spikes in nvppc.sys or ACPI.sys hovering between 1500µs and 2500µs, independent of 3D load.",
+    "fix": "Disable the 'NVIDIA USB Type-C Port Policy Controller' under System Devices in Windows Device Manager if the GPU USB-C port is not in active use for VR HMDs or display connections.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek RTL8821CE 802.11ac PCIe Wireless Network Adapter",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_C821",
+    "driverFile": "rtwlane.sys",
+    "buggedVersions": [
+      "2024.0.10.209",
+      "2024.0.10.218",
+      "2024.0.10.220",
+      "2024.0.10.223"
+    ],
+    "recommendedVersion": "2024.0.10.228",
+    "typicalLatencyUs": 8500,
+    "failureMechanism": "Periodic passive-level Wi-Fi background scan invokes rtwlane!PlatformZeroMemory within an unthrottled DPC routine at DISPATCH_LEVEL. Concurrently, PCIe ASPM L1.2 exit latency exceeding hardware tolerance triggers bus master timeouts, forcing the driver into synchronous hardware polling loops while holding the spinlock.",
+    "symptom": "Periodic audio crackling, severe frame drops every 30 to 60 seconds in gaming, LatencyMon flags rtwlane.sys with highest observed DPC execution time exceeding 8ms.",
+    "fix": "Update to driver 2024.0.10.228 or newer; disable 'Roaming Aggressiveness' (set to Lowest); set 'PCIe ASPM' to Disabled in BIOS or configure Windows Power Plan 'PCI Express -> Link State Power Management' to Off.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek RTL8822CE 802.11ac PCIe Adapter",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_C822",
+    "driverFile": "rtwlane.sys",
+    "buggedVersions": [
+      "2024.0.10.215",
+      "2024.0.10.222",
+      "2024.0.10.225"
+    ],
+    "recommendedVersion": "2024.0.10.229",
+    "typicalLatencyUs": 6200,
+    "failureMechanism": "Improper interrupt mitigation configuration under MSI-X mode causes DIRQL interrupt storms during multi-client beacon frame parsing. The DPC routine rtwlane!RxProcessIndicateQueue fails to yield within the recommended 100us budget when processing 802.11ac aggregated MAC protocol data units (A-MPDUs).",
+    "symptom": "Real-time audio dropouts in DAW software (ASIO buffer underruns), micro-stuttering during concurrent network downloads and audio playback.",
+    "fix": "Upgrade to v2024.0.10.229; disable 802.11d Support in Advanced Driver Properties; force Windows Network Throttling Index to FFFFFFFF via registry.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek RTL8852BE / RTL8852CE Wi-Fi 6 / 6E PCIe Adapter",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_B852",
+    "driverFile": "rtw64e.sys",
+    "buggedVersions": [
+      "6001.10.350.0",
+      "6001.15.119.0",
+      "6001.15.124.0",
+      "6001.15.130.0"
+    ],
+    "recommendedVersion": "6001.15.145.0",
+    "typicalLatencyUs": 9800,
+    "failureMechanism": "OFDMA and Target Wake Time (TWT) scheduling regressions causing spinlock contention between NDIS Miniport DPC and thread execution contexts in rtw64e!NdisMQueueDpcEx. Furthermore, 6GHz passive channel scans continuously thrash PCIe L1 substates, resulting in high exit-latency stalls.",
+    "symptom": "Severe LatencyMon DPC spikes (6ms to 12ms), system-wide micro-freezes, and packet bursts causing 1% low FPS drops during online gameplay.",
+    "fix": "Install driver 6001.15.145.0 or later; set 'Concurrent Channels Support' to Disabled; disable Target Wake Time (TWT) and set Roaming Sensitivity to Low via Device Manager.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Wireless-AC 9260 / 9560 160MHz",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_2526",
+    "driverFile": "Netwtw08.sys",
+    "buggedVersions": [
+      "21.80.2.1",
+      "21.90.3.2",
+      "22.0.0.6",
+      "22.40.0.7"
+    ],
+    "recommendedVersion": "22.160.0.3",
+    "typicalLatencyUs": 4300,
+    "failureMechanism": "Background scanning routines for 802.11k/v Neighbor Reports and DFS radar validation in Netwtw08!ilrDpcHandler monopolize CPU cores. Inability to yield the processor within NDIS DPC time limits results in prolonged execution on core 0.",
+    "symptom": "Periodic audio glitching during Bluetooth and Wi-Fi concurrent operation, latency spikes up to 4.5ms detected in LatencyMon attributed to Netwtw08.sys.",
+    "fix": "Upgrade to Intel PROSet/Wireless driver 22.160.0.3; disable '802.11a/b/g Wireless Mode' fallback; set 'MIMO Power Save Mode' to 'No SMPS'; set 'Throughput Booster' to Disabled.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Wi-Fi 6 AX200 / AX201 160MHz",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_2723",
+    "driverFile": "Netwtw10.sys",
+    "buggedVersions": [
+      "22.100.0.3",
+      "22.130.0.5",
+      "22.150.0.3",
+      "22.190.0.4",
+      "22.200.2.1"
+    ],
+    "recommendedVersion": "23.40.0.4",
+    "typicalLatencyUs": 7200,
+    "failureMechanism": "Unthrottled background Wi-Fi roaming scans coupled with uAPSD (Unscheduled Automatic Power Save Delivery) trigger synchronous MMIO register polling loops inside Netwtw10!WaitHardwareReady. The driver stalls execution awaiting hardware state transition from low-power C-states.",
+    "symptom": "DAW dropouts, audible audio clicks during video calls, frame hitching in high refresh rate monitors whenever network throughput fluctuates.",
+    "fix": "Update to Intel package 23.40.0.4 or higher; set 'Roaming Aggressiveness' to 1 (Lowest); disable 'U-APSD support'; change PCIe Link State Power Management to 'Moderate Power Savings' or 'Off'.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Wi-Fi 6E AX210 / AX211 160MHz",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_2725",
+    "driverFile": "Netwtw12.sys",
+    "buggedVersions": [
+      "22.170.0.3",
+      "22.220.0.4",
+      "22.240.0.6",
+      "23.10.0.8"
+    ],
+    "recommendedVersion": "23.60.1.2",
+    "typicalLatencyUs": 6800,
+    "failureMechanism": "Scanning DPC storm caused by 6GHz Preferred Scanning Channel (PSC) enumeration. Netwtw12!bdHostHandleRxInterrupt queues excessive DPCs across multiple MSI-X vectors without proper core affinity delegation, causing severe lock contention on multi-threaded processors.",
+    "symptom": "DPC/ISR execution times peaking at 5ms to 7ms on core 0, dropped samples in professional audio interfaces (Focusrite, RME), VR tethering jitter.",
+    "fix": "Update to driver 23.60.1.2; bind the adapter MSI-X interrupts to non-primary CPU cores using the Microsoft Interrupt Affinity Tool (MPSSvc); disable 'Ultra High Band (6GHz)' if not connecting to Wi-Fi 6E networks.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Wi-Fi 7 BE200 / BE202 320MHz",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_272B",
+    "driverFile": "Netwtw14.sys",
+    "buggedVersions": [
+      "23.0.0.10",
+      "23.10.0.8",
+      "23.20.0.4",
+      "23.30.0.6"
+    ],
+    "recommendedVersion": "23.60.1.2",
+    "typicalLatencyUs": 5900,
+    "failureMechanism": "Multi-Link Operation (MLO) state synchronization engine performs nested spinlock acquisitions across 2.4GHz, 5GHz, and 6GHz link-state state machines inside Netwtw14!MloLinkFsmProcessEvent, blocking DPC dispatching threads during band switching.",
+    "symptom": "LatencyMon reporting DPC execution spikes in Netwtw14.sys, inconsistent multi-gigabit throughput accompanied by Windows UI micro-stutters.",
+    "fix": "Upgrade to driver 23.60.1.2 or higher; in adapter advanced settings, set 'Channel Width for 6GHz' to 160MHz temporarily if MLO is unstable on non-compliant Wi-Fi 7 APs; disable 802.11be functionality if connecting to legacy networks.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "MediaTek MT7921 / AMD RZ608 Wi-Fi 6 PCIe Adapter",
+    "hardwareIdPattern": "PCI\\VEN_14C3&DEV_7961",
+    "driverFile": "mtkwl6ex.sys",
+    "buggedVersions": [
+      "3.0.1.1167",
+      "3.0.1.1198",
+      "3.0.1.1207",
+      "3.0.1.1239",
+      "3.3.0.496"
+    ],
+    "recommendedVersion": "3.3.0.908",
+    "typicalLatencyUs": 18500,
+    "failureMechanism": "Firmware-to-host interface lockups during PCIe ASPM L1.1/L1.2 state recovery. The driver attempts to wake the device via MMIO, encounters an unready bus, and enters an infinite polling loop within mtkwl6ex!WlanPciDpc, triggering NDIS timeouts or DPC watchdog violations.",
+    "symptom": "System-wide hard freezes lasting 10-50ms, LatencyMon DPC latency exceeding 18ms, audio dropout/buzzing (BRRR-sound), occasional BSOD code 0x133 DPC_WATCHDOG_VIOLATION.",
+    "fix": "Update to driver version 3.3.0.908 or 3.4.0.1287; completely disable PCIe ASPM for the Wi-Fi slot in BIOS; set Windows PCIe Link State Power Management to 'Off'; disable 'Fast Startup' in Windows Control Panel.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "MediaTek MT7922 / AMD RZ616 Wi-Fi 6E PCIe Adapter",
+    "hardwareIdPattern": "PCI\\VEN_14C3&DEV_7922",
+    "driverFile": "mtkwl6ex.sys",
+    "buggedVersions": [
+      "3.3.0.608",
+      "3.3.0.686",
+      "3.3.0.713",
+      "3.3.0.770"
+    ],
+    "recommendedVersion": "3.3.2.1039",
+    "typicalLatencyUs": 14200,
+    "failureMechanism": "Packet aggregation de-aggregation ring buffer exhaustion under heavy sustained load. The ISR queues high volumes of DPCs to mtkwl6ex!NormalRxDpcHandler without hardware backpressure signaling, consuming up to 100% of an assigned logical CPU thread.",
+    "symptom": "Micro-stuttering in high-framerate competitive games, recurring ASIO buffer under-runs, mouse cursor stuttering when downloading at speeds > 500 Mbps.",
+    "fix": "Install driver 3.3.2.1039 or OEM package 3.4.0.1287; disable 802.11ax mode (run in 802.11ac mode) as a temporary mitigation; enforce Message Signaled Interrupts (MSI) via MSI Mode Utility V3.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Qualcomm Atheros QCA6174A / QCA9377 Wireless Network Adapter",
+    "hardwareIdPattern": "PCI\\VEN_168C&DEV_003E",
+    "driverFile": "qcppev8xx.sys",
+    "buggedVersions": [
+      "12.0.0.916",
+      "12.0.0.953",
+      "12.0.0.1118",
+      "12.0.0.1159"
+    ],
+    "recommendedVersion": "12.0.0.1280",
+    "typicalLatencyUs": 11500,
+    "failureMechanism": "Roaming algorithm invokes continuous synchronous channel calibration. The driver executes qcppev8xx!A_SCAN_HANDLER at DIRQL while masking base interrupts, stalling hardware dispatch queues and preventing graphics/audio DPCs from processing in real-time.",
+    "symptom": "Extreme audio stuttering every 10-15 seconds, complete mouse micro-freezes during network roaming, LatencyMon flags qcppev8xx.sys with excessive ISR-to-DPC latency.",
+    "fix": "Update to driver 12.0.0.1280 or install Microsoft generic fallback 12.0.0.318; in registry [HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\<Index>], set 'ScanWhenAssociated' to 0 and 'RoamAggressiveness' to 0.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Broadcom BCM4352 / BCM4360 802.11ac Adapter",
+    "hardwareIdPattern": "PCI\\VEN_14E4&DEV_43B1",
+    "driverFile": "bcmwl63a.sys",
+    "buggedVersions": [
+      "6.30.223.228",
+      "7.35.118.0",
+      "7.35.267.0",
+      "7.35.352.0"
+    ],
+    "recommendedVersion": "6.30.223.256",
+    "typicalLatencyUs": 12800,
+    "failureMechanism": "Single-vector line-based interrupt serialization storm due to broken MSI implementation on Windows 10/11. The driver's internal WMM/QoS queue management loop in bcmwl63a!wlc_dpc deadlocks under heavy transmission bursts, holding processor execution at DISPATCH_LEVEL.",
+    "symptom": "Massive frame hitching, real-time DAW audio dropouts (clicks/pops), LatencyMon report exceeds 10,000us attributed directly to bcmwl63a.sys.",
+    "fix": "Roll back to legacy Windows 8.1 certified driver 6.30.223.256; disable WMM (Wi-Fi Multimedia) in adapter advanced settings; use MSI Mode Utility to explicitly force Line-Based Interrupts or fix MSI affinity to secondary core.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Ethernet Controller I225-V / I226-V (2.5GbE)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_15F3; PCI\\VEN_8086&DEV_125C",
+    "driverFile": "e2f68.sys",
+    "buggedVersions": [
+      "1.0.1.4",
+      "1.0.2.8",
+      "1.0.2.14",
+      "2.1.1.7",
+      "2.1.2.3",
+      "2.1.3.15"
+    ],
+    "recommendedVersion": "2.1.4.3",
+    "typicalLatencyUs": 3850,
+    "failureMechanism": "PCIe Active State Power Management (ASPM) L1/L1.1/L1.2 transition latency coupled with hardware packet buffer underruns and Energy Efficient Ethernet (EEE) Low Power Idle (LPI) entry/exit renegotiation loops. PHY link-state synchronization loss stalls the DMA engine, triggering ISR storms and cascading DPC timeouts inside e2f68.sys!e2f_clean_tx_irq and e2f_msix_clean_rings.",
+    "symptom": "Periodic 1-2 second link disconnects, LatencyMon DPC execution spikes >3500 us, severe audio crackling/ASIO buffer underruns in DAWs, and micro-stutters in real-time gaming during network burst transfers.",
+    "fix": "Flash adapter NVM firmware to version >=1.45 (I225) or >=2.14 (I226); disable 'Energy Efficient Ethernet' (EEE), 'Ultra Low Power Mode', and 'PCIe ASPM' in the Advanced driver tab; set Windows Power Plan PCIe Link State Power Management to 'Off'; configure Interrupt Moderation Rate to 'Off' or 'Low'.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek Gaming 2.5GbE Family Controller (RTL8125 / RTL8125B / RTL8125BG)",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_8125",
+    "driverFile": "rt640x64.sys",
+    "buggedVersions": [
+      "10.045.0928.2020",
+      "10.046.0121.2021",
+      "10.050.0511.2021",
+      "10.056.0119.2022",
+      "10.060.0615.2022"
+    ],
+    "recommendedVersion": "10.073.0725.2024",
+    "typicalLatencyUs": 3400,
+    "failureMechanism": "Kernel spinlock contention within rt640x64!RtlHandleInterrupt and rt640x64!ReceivePacketsProcess during concurrent multi-queue packet dispatching. Misconfigured Receive Side Scaling (RSS) induces core-hopping and deferred procedure call starvation, exacerbated by aggressive Green Ethernet link state transitions that stall descriptor ring buffer reclamation.",
+    "symptom": "LatencyMon flags rt640x64.sys with execution times exceeding 3000 us, 1% low frame-time drops in competitive FPS titles during network activity, and audio dropouts when operating at low audio buffer sizes (<=128 samples).",
+    "fix": "Upgrade to Realtek standalone driver >=10.071.0315.2024; disable 'Green Ethernet', 'Gigabit Lite', 'Energy Efficient Ethernet', 'Power Saving Mode', and 'Advanced EEE'; enable RSS and allocate 4 queues; disable 'Auto Disable Gigabit'; set Interrupt Moderation to 'Disabled' or 'Extreme' based on core budget.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek PCIe GbE Family Controller (RTL8111 / RTL8168 / RTL8411)",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_8168; PCI\\VEN_10EC&DEV_8167",
+    "driverFile": "rt640x64.sys",
+    "buggedVersions": [
+      "9.1.410.2015",
+      "10.1.505.2015",
+      "10.38.1118.2019",
+      "10.42.0526.2020"
+    ],
+    "recommendedVersion": "10.072.0520.2024",
+    "typicalLatencyUs": 2200,
+    "failureMechanism": "Unthrottled Line-Based Interrupt (INTx) saturation resulting from default Windows Update driver fallback. The miniport ISR routine executes an unbounded loop in rt640x64!RealtekDpcRoutine to process descriptor rings without yielding the execution thread, starving Core 0 and interfering with the real-time scheduling of audio and frame presentation threads.",
+    "symptom": "High DPC latency on CPU Core 0, USB audio interface clicks and pops during background downloads or LAN streaming, audio crackles in YouTube/Discord.",
+    "fix": "Replace Windows generic driver with official Realtek WHQL installer; convert the device from Line-Based Interrupts to Message Signaled Interrupts (MSI) with priority 'Normal' or 'High' using MSI Utility v3; disable 'Energy Efficient Ethernet' and 'Green Ethernet'.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Realtek Gaming 5GbE Family Controller (RTL8126)",
+    "hardwareIdPattern": "PCI\\VEN_10EC&DEV_8126",
+    "driverFile": "rt640x64.sys",
+    "buggedVersions": [
+      "10.068.0815.2023",
+      "10.070.1220.2023"
+    ],
+    "recommendedVersion": "10.073.0725.2024",
+    "typicalLatencyUs": 2900,
+    "failureMechanism": "5GBASE-T PHY state desynchronization during high-MTU or jumbo frame reception, causing the DMA controller to lock the RX ring buffer. The NDIS miniport DPC spins on hardware descriptor ownership bits (OWN bit clearance delay), exceeding the 1000 us Windows DPC execution budget.",
+    "symptom": "Frame hitching, transient packet loss, audio interface dropouts during local multi-gigabit file transfers, and DPC latency spikes registered in LatencyMon above 2500 us.",
+    "fix": "Update driver to version >=10.073.0725.2024; increase Transmit Buffers to 1024 and Receive Buffers to 1024; disable 'Energy Efficient Ethernet' and 'Large Send Offload v2 (IPv4 & IPv6)' if processing real-time UDP streams.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Ethernet Connection (I219-V / I219-LM)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_15B8; PCI\\VEN_8086&DEV_15BC; PCI\\VEN_8086&DEV_15D7",
+    "driverFile": "e1d68x64.sys",
+    "buggedVersions": [
+      "12.15.23.1",
+      "12.18.9.1",
+      "12.18.9.23",
+      "12.19.0.16"
+    ],
+    "recommendedVersion": "12.19.2.55",
+    "typicalLatencyUs": 2700,
+    "failureMechanism": "Intel PCH integrated MAC-to-PHY interconnect (PCIe-to-Kumeran/Lewisburg interface) power-gating latency during L1.2 exit states. During TCP segmentation offload (TSO) transfers, e1d68x64!e1d_clean_tx_irq acquires a kernel spinlock while waiting for DMA line acknowledgment from low-power clock domains.",
+    "symptom": "Periodic cursor micro-freezes, LatencyMon reporting e1d68x64.sys with DPC times >2000 us, and ASIO audio dropout flags under high browser network activity.",
+    "fix": "Install Intel PROSet driver package >=28.2 (driver 12.19.2.55); disable 'Energy Efficient Ethernet', 'System Idle Power Saver', and 'Reduce speed on power down'; set Interrupt Moderation to 'Low' or 'Disabled' in driver Advanced properties.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Killer E2200 / E2400 / E2500 / E3000 / E3100 Gigabit & 2.5GbE",
+    "hardwareIdPattern": "PCI\\VEN_1969&DEV_E0B1; PCI\\VEN_1969&DEV_E0A1; PCI\\VEN_8086&DEV_3100",
+    "driverFile": "KNetPxi64.sys",
+    "buggedVersions": [
+      "2.1.1352",
+      "2.2.1448",
+      "2.3.1502",
+      "2.4.3337",
+      "3.0.1528"
+    ],
+    "recommendedVersion": "2.4.3337.0 (Bare INF without Control Center)",
+    "typicalLatencyUs": 5800,
+    "failureMechanism": "Deep Packet Inspection (DPI) kernel-level NDIS filter driver (KNetPxi64.sys) intercepts every network buffer via internal synchronization primitives. Packet classification and bandwidth throttling algorithms serialize network queues, resulting in massive inter-processor interrupt (IPI) overhead and prolonged DPC execution queues.",
+    "symptom": "Severe LatencyMon DPC spikes >5000 us, major audio degradation/crackling in digital audio workstations, intermittent kernel BSODs (DRIVER_IRQL_NOT_LESS_OR_EQUAL), and severe game hitching.",
+    "fix": "Run Killer Uninstaller to remove the Killer Control Center and its NDIS filter service; manually install the bare OEM INF driver (or generic Intel/Qualcomm driver without software suite); confirm KNetPxi64.sys is absent from 'Get-NetAdapterBinding'.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Marvell AQtion / Aquantia AQC107 / AQC113 / AQC113CS (10GbE)",
+    "hardwareIdPattern": "PCI\\VEN_1D6A&DEV_D107; PCI\\VEN_1D6A&DEV_04C0; PCI\\VEN_1D6A&DEV_14C0",
+    "driverFile": "aqnic65.sys",
+    "buggedVersions": [
+      "2.1.017.0",
+      "2.2.1.0",
+      "3.0.012.0",
+      "3.1.3.0",
+      "3.1.6.0"
+    ],
+    "recommendedVersion": "3.1.8.0",
+    "typicalLatencyUs": 4600,
+    "failureMechanism": "Thermal-induced PHY clock modulation combined with an inefficient polling loop in aqnic65!AqHwInterruptHandler during multi-gigabit line-rate transfers. Inefficient handling of Large Receive Coalescing (RSC) descriptors forces extended spinlock holds across NUMA nodes, starving the Windows thread scheduler.",
+    "symptom": "DPC latency spikes up to 5000 us in LatencyMon, audio dropouts during high-speed LAN file transfers (e.g., NAS backups), and occasional transient link renegotiation down to 1 Gbps or 5 Gbps.",
+    "fix": "Flash firmware to >=1.3.24 (AQC107) or >=1.5.0 (AQC113); update to Marvell driver >=3.1.8.0; disable 'Recv Segment Coalescing (IPv4 & IPv6)'; set 'Interrupt Moderation' to Low; affix an active cooling fan to the adapter heatsink to eliminate thermal throttling.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Network",
+    "deviceName": "Intel Ethernet Server Adapter I210-AT / I211-AT",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_1533; PCI\\VEN_8086&DEV_1539",
+    "driverFile": "e1r68x64.sys",
+    "buggedVersions": [
+      "12.12.50.6",
+      "12.14.7.0",
+      "12.15.184.0",
+      "12.17.10.8"
+    ],
+    "recommendedVersion": "12.18.9.10",
+    "typicalLatencyUs": 2100,
+    "failureMechanism": "Interrupt Throttle Rate (ITR) calculation bug under bursty UDP traffic profiles. The driver's dynamic interrupt moderation algorithm oscillates erratically between zero moderation (causing interrupt storms) and high-latency batching, leading to RX descriptor starvation and delayed DPC completions in e1r68x64.sys.",
+    "symptom": "Periodic DPC latency spikes between 1500 us and 2500 us, audio pops during concurrent Discord voice streaming and high-tickrate game sessions.",
+    "fix": "Update to Intel PROSet driver >=12.18.9.10; explicitly set Interrupt Moderation to 'Adaptive' or override the registry parameter ITR to a fixed value of 2000 or 4000; disable 'Energy Efficient Ethernet' and PCIe ASPM L1/L1.2.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce GTX 1080 / 1070 / 1060 (Pascal)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_1B80*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "368.39",
+      "368.69"
+    ],
+    "recommendedVersion": "368.95",
+    "typicalLatencyUs": 3800,
+    "failureMechanism": "Driver routine stalls during dynamic GPU clock gating and P-state switching via DxgkCbSynchronizeExecution. Memory controller frequency downclocking introduces severe MMIO register polling delays while holding a kernel spinlock at IRQL DISPATCH_LEVEL.",
+    "symptom": "Real-time audio stutter, buffer underruns in DAWs, and micro-stuttering in high-refresh-rate 3D workloads immediately upon Pascal GPU release.",
+    "fix": "Upgrade to hotfix driver 368.95 or newer; set Power Management Mode in NVIDIA Control Panel to 'Prefer maximum performance' to inhibit MCLK dynamic frequency scaling.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX 3080 / 3090 / 3070 (Ampere)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_2204*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "466.11",
+      "466.27",
+      "466.47",
+      "466.77"
+    ],
+    "recommendedVersion": "471.11",
+    "typicalLatencyUs": 1850,
+    "failureMechanism": "Contention in nvlddmkm.sys interrupt service routine dispatch loops interacting with PCIe Resizable BAR (ReBAR) transactions and ASPM L1 substate exit latency. High-frequency unaligned BAR1 aperture writes force the driver into synchronous wait-states at elevated IRQL.",
+    "symptom": "Sporadic 1% low frametime hitching in DirectX 12 games and DPC execution times exceeding 1500 us reported by LatencyMon under mixed I/O loads.",
+    "fix": "Flash updated vBIOS with validated ReBAR timings, update driver to 471.11 or later, or set PCIe ASPM to 'Disabled' in motherboard UEFI.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "NVIDIA Display Container LS / Telemetry Service",
+    "hardwareIdPattern": "PCI\\VEN_10DE*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "531.18",
+      "531.26"
+    ],
+    "recommendedVersion": "531.29",
+    "typicalLatencyUs": 2200,
+    "failureMechanism": "User-mode process NvContainerUser32.exe enters an unconstrained busy-wait spinloop on an IPC event pipe triggered by the driver. This creates thread pool starvation and forces nvlddmkm.sys to constantly serialize context switches and DPC event dispatches across CPU cores 0 and 1.",
+    "symptom": "Persistent 10-15% background CPU utilization by NVIDIA Container after closing any 3D game or session, accompanied by 1500-2500 us nvlddmkm.sys DPC routine spikes.",
+    "fix": "Install NVIDIA GeForce Hotfix Driver 531.29, or terminate NvContainerUser32.exe and disable NVIDIA Display Container LS service.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX 4090 / 4080 / 4070 (Ada Lovelace)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_2684*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "535.98",
+      "536.23",
+      "536.40"
+    ],
+    "recommendedVersion": "536.67",
+    "typicalLatencyUs": 2600,
+    "failureMechanism": "Lock contention in nvlddmkm.sys DPC handling routines during hardware-accelerated GPU scheduling (HAGS) command buffer synchronization. Thread synchronization primitives spin excessively waiting on WDDM 3.1 flip queue completion events during variable refresh rate (G-Sync) transitions.",
+    "symptom": "LatencyMon alerts identifying nvlddmkm.sys with peak execution times over 2000 us; audible clicks and pops in external USB DACs (ASIO) when moving windows or browsing with hardware acceleration enabled.",
+    "fix": "Upgrade to driver 536.67 or newer; disable Hardware-Accelerated GPU Scheduling (HAGS) in Windows Graphics Settings, or disable Multi-Plane Overlay (MPO) via registry.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX Series (All Turing, Ampere, Ada)",
+    "hardwareIdPattern": "PCI\\VEN_10DE*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "546.01",
+      "546.17",
+      "546.29",
+      "546.33"
+    ],
+    "recommendedVersion": "551.23",
+    "typicalLatencyUs": 2400,
+    "failureMechanism": "Multi-monitor asymmetric refresh rate timing desynchronization. The driver's dynamic memory clock (MCLK) switching algorithm constantly toggles between P0 and P8 power states due to mismatched vertical blanking intervals (VBI), triggering continuous blocking calls in nvlddmkm.sys at IRQL DISPATCH_LEVEL.",
+    "symptom": "Severe frame drops in primary display gaming window when hardware-accelerated video renders on secondary display, with LatencyMon flagging nvlddmkm.sys for repeated >2000 us latency spikes.",
+    "fix": "Upgrade to driver 551.23; align multi-monitor refresh rates to exact multiples (e.g., 144Hz and 72Hz), or lock MCLK to maximum frequency using third-party tools (NVIDIA Profile Inspector Force P0 state).",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "NVIDIA GeForce RTX Mobile Series (Optimus / Hybrid Graphics)",
+    "hardwareIdPattern": "PCI\\VEN_10DE&DEV_2520*",
+    "driverFile": "nvlddmkm.sys",
+    "buggedVersions": [
+      "522.25",
+      "526.47",
+      "526.98",
+      "527.56"
+    ],
+    "recommendedVersion": "528.49",
+    "typicalLatencyUs": 3100,
+    "failureMechanism": "PCIe bus dynamic D3hot-to-D0 power state transitions managed by NVIDIA Optimus runtime power management (RTD3). The driver execution block stalls waiting for PCIe link re-training and L1.2 exit acknowledgment, blocking OS kernel scheduling via synchronous DPC execution.",
+    "symptom": "Transient 1-second system freezes, mouse hitching, and LatencyMon reporting nvlddmkm.sys peak execution exceeding 3000 us whenever discrete GPU powers up from an idle sleep state.",
+    "fix": "Upgrade to driver 528.49 or newer; configure Windows Graphics settings to bind desktop applications strictly to the integrated GPU, or engage Advanced Optimus / BIOS MUX switch to discrete-only mode.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RX 6000 / RX 5000 Series (Navi / RDNA 1 & 2)",
+    "hardwareIdPattern": "PCI\\VEN_1002&DEV_73BF*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "22.5.2 (30.0.21017.1000)",
+      "22.6.1 (30.0.21023.1015)",
+      "22.7.1 (31.0.12011.4008)",
+      "22.8.1 (31.0.12015.1008)",
+      "22.8.2 (31.0.12015.1010)",
+      "22.10.1 (31.0.12027.7000)",
+      "22.10.2 (31.0.12027.9001)",
+      "22.10.3 (31.0.12027.9004)",
+      "22.11.1 (31.0.12029.4011)",
+      "22.11.2 (31.0.12029.10015)"
+    ],
+    "recommendedVersion": "22.5.1 (30.0.15021.11005)",
+    "typicalLatencyUs": 3850,
+    "failureMechanism": "Kernel execution queue spinlock contention inside amdkmdag.sys following the DirectX 11 driver pipeline rewrite in 22.5.2. Heavy WDDM 3.1 command submission serialization blocks DPC routine completion, exacerbated by aggressive asynchronous shader pre-caching routines hogging kernel worker threads.",
+    "symptom": "System-wide micro-stuttering, LatencyMon DPC execution warnings exceeding 3500us for amdkmdag.sys, real-time audio crackling, and severe 1% low frame-time drops in DirectX 11 applications.",
+    "fix": "Perform clean driver uninstall via Display Driver Uninstaller (DDU) in Windows Safe Mode and roll back to Adrenalin 22.5.1, or disable Hardware Accelerated GPU Scheduling (HAGS) via registry (HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers -> set HwSchMode to 1).",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RX 7000 Series (RDNA 3 Multi-Monitor / MCLK DPM)",
+    "hardwareIdPattern": "PCI\\VEN_1002&DEV_744C*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "23.9.1 (31.0.21029.1006)",
+      "23.9.2 (31.0.21029.6002)",
+      "23.9.3 (31.0.21029.10001)",
+      "23.10.1 (31.0.22017.1005)",
+      "23.10.2 (31.0.22017.3004)",
+      "23.11.1 (31.0.23013.1023)"
+    ],
+    "recommendedVersion": "23.12.1 (31.0.23013.1029)",
+    "typicalLatencyUs": 6400,
+    "failureMechanism": "VRAM Memory Clock (MCLK) Dynamic Power Management (DPM) state thrashing on multi-monitor configurations with mixed refresh rates or resolutions. The amdkmdag.sys DPC routine synchronously halts kernel execution while polling for phase-locked loop (PLL) re-lock and vertical blanking synchronization across disparate display timing controllers.",
+    "symptom": "Periodic 5ms+ latency spikes in LatencyMon attributed to amdkmdag.sys during mixed desktop workloads, dropouts in external USB audio interfaces during hardware-accelerated video decoding (YouTube/Chromium), and transient desktop window lag.",
+    "fix": "Standardize display refresh rates across all panels to matching multiples (e.g., set both to 120Hz), configure Custom Resolution Utility (CRU) using CVT-RB2 to expand VBLANK margins, or upgrade to Adrenalin 23.12.1 where high idle power and MCLK switching DPC loops were patched.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RDNA Discrete / Hybrid Architecture (ULPS Engine)",
+    "hardwareIdPattern": "PCI\\VEN_1002&CC_0300*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "21.10.2 (30.0.13025.5005)",
+      "22.5.1 (30.0.15021.11005)",
+      "22.11.2 (31.0.12029.10015)",
+      "23.5.2 (31.0.14057.5006)",
+      "23.9.1 (31.0.21029.1006)",
+      "24.1.1 (31.0.24002.92)"
+    ],
+    "recommendedVersion": "23.8.2 (31.0.21023.2010)",
+    "typicalLatencyUs": 8900,
+    "failureMechanism": "Ultra Low Power State (ULPS) wake delay. Upon secondary adapter or deep core power state transitions (D3hot/D3cold exit), amdkmdag.sys invokes a busy-wait loop in an elevated IRQL context while re-initializing the internal power rail regulators and re-enumerating the display engine bus topology.",
+    "symptom": "Hard 8ms to 15ms DPC hangs in LatencyMon when launching applications, waking from idle, or engaging cross-adapter graphics switching; complete audio stream cutout for up to a quarter of a second.",
+    "fix": "Disable ULPS entirely via the Windows Registry: search for keys named 'EnableUlps' and 'EnableUlps_NA' under HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318} and modify their values from 1 to 0, then perform a hard reboot.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "AMD High Definition Audio Controller",
+    "hardwareIdPattern": "HDAUDIO\\FUNC_01&VEN_1002*",
+    "driverFile": "AtihdWT6.sys",
+    "buggedVersions": [
+      "10.0.1.23",
+      "10.0.1.24",
+      "10.0.1.27",
+      "10.0.1.28",
+      "10.0.1.30"
+    ],
+    "recommendedVersion": "10.0.1.16",
+    "typicalLatencyUs": 4150,
+    "failureMechanism": "Interrupt storm generated by unbuffered DisplayPort/HDMI Audio presence-detect queries and rapid audio endpoint clock synchronization loops. When Variable Refresh Rate (FreeSync) dynamically alters display pixel clocks, AtihdWT6.sys triggers continuous ISR cycles and holds DPC execution while validating audio packet timestamps.",
+    "symptom": "Severe crackling and buffer underruns in low-latency ASIO audio software, high interrupt-to-DPC conversion latency, LatencyMon reporting excessive ISR/DPC execution time on AtihdWT6.sys.",
+    "fix": "In Device Manager, expand 'Sound, video and game controllers', right-click 'AMD High Definition Audio Device' and select 'Disable device' if HDMI/DP audio is unused. Alternatively, update driver to generic 'High Definition Audio Device' (HdAudio.sys) provided by Microsoft.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RX 7000 Series (RDNA 3 Anti-Lag+ Subsystem)",
+    "hardwareIdPattern": "PCI\\VEN_1002&DEV_7448*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "23.9.1 (31.0.21029.1006)",
+      "23.9.2 (31.0.21029.6002)",
+      "23.9.3 (31.0.21029.10001)",
+      "23.10.1 (31.0.22017.1005)"
+    ],
+    "recommendedVersion": "23.12.1 (31.0.23013.1029)",
+    "typicalLatencyUs": 2950,
+    "failureMechanism": "Radeon Anti-Lag+ framework injected dynamic code detours to intercept native game presentation queues. The hook synchronizations escalated into kernel-level amdkmdag.sys DPC spin-waits when reconciling CPU/GPU render pacing, causing severe serialization stalls in the Windows kernel graphics subsystem (dxgkrnl.sys).",
+    "symptom": "Extreme frame-time jitter, game crashes, multiplayer anti-cheat triggers (e.g., Valve Anti-Cheat), and recurring DPC execution spikes near 3ms causing simultaneous audio buffer drops.",
+    "fix": "Toggle off 'Radeon Anti-Lag' and 'Anti-Lag+' in the AMD Software: Adrenalin Edition global gaming settings, or upgrade to Adrenalin 23.12.1 or newer where Anti-Lag+ was completely removed and re-architected.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RX 6000 Series (Navi 21 / 22 / 23 PCIe Interface)",
+    "hardwareIdPattern": "PCI\\VEN_1002&DEV_73BF&SUBSYS_0E3A1002*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "22.11.2 (31.0.12029.10015)",
+      "23.2.1 (31.0.14017.1005)",
+      "23.4.1 (31.0.14043.1000)",
+      "23.7.1 (31.0.21001.2005)"
+    ],
+    "recommendedVersion": "23.8.2 (31.0.21023.2010)",
+    "typicalLatencyUs": 5200,
+    "failureMechanism": "PCIe Active State Power Management (ASPM) L1 and L1 Substates (L1.1/L1.2) link exit delay. When the GPU switches from low-power link states back to full L0 execution, memory-mapped I/O (MMIO) register transactions issued by amdkmdag.sys stall pending physical layer PHY retraining, exceeding real-time kernel scheduling thresholds.",
+    "symptom": "Stuttering when initiating user input after brief periods of mouse/keyboard inactivity, LatencyMon alerts indicating amdkmdag.sys exceeded acceptable DPC boundaries, audible 'pops' through audio interfaces.",
+    "fix": "Set PCIe Link State Power Management to 'Off' in the active Windows Power Plan (Advanced Power Settings -> PCI Express -> Link State Power Management). Alternatively, disable PCIe ASPM globally in the motherboard UEFI/BIOS under AMD CBS / PBS settings.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "AMD Radeon RX 6000 / RX 7000 Series (AFMF Interpolation Engine)",
+    "hardwareIdPattern": "PCI\\VEN_1002&CC_030000*",
+    "driverFile": "amdkmdag.sys",
+    "buggedVersions": [
+      "24.1.1 (31.0.24002.92)",
+      "24.2.1 (31.0.24019.1006)",
+      "24.3.1 (31.0.24027.1012)"
+    ],
+    "recommendedVersion": "24.5.1 (31.0.24033.1003)",
+    "typicalLatencyUs": 3300,
+    "failureMechanism": "AMD Fluid Motion Frames (AFMF) optical flow motion vector calculation engine holds exclusive driver locks during dynamic scenes with high-velocity motion. The motion analysis fallback routine blocks the primary kernel display pipeline thread, queueing deferred procedure calls past acceptable boundaries.",
+    "symptom": "1% low frame-rate drops during high-speed camera rotation in 3D titles, burst audio crackling on secondary DACs, LatencyMon DPC measurement climbing to 3.3ms for amdkmdag.sys.",
+    "fix": "Disable AMD Fluid Motion Frames in Adrenalin Software under Gaming -> Graphics options, or upgrade to Adrenalin 24.5.1 or newer where optical flow dispatch queue management is separated from the critical WDDM presentation path.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Arc A770 / A750 Desktop Graphics",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_56A0*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.3490",
+      "31.0.101.3491",
+      "31.0.101.3793",
+      "31.0.101.3802"
+    ],
+    "recommendedVersion": "31.0.101.4369",
+    "typicalLatencyUs": 6500,
+    "failureMechanism": "Fallback to dynamic 256MB MMIO aperture windows when Resizable BAR (ReBAR) is unnegotiated or PCIe ASPM L1.1/L1.2 wake latency exceeds 32us. igdkmdn64.sys enters an active spin-wait loop inside the DPC routine during host-to-device command buffer flushing, causing KeAcquireSpinLockRaiseToDpc contention and blocking thread dispatching.",
+    "symptom": "Severe audio dropouts in ASIO/WASAPI buffer sizes below 256 samples, micro-stutters and frame-time hitches during 3D scene transitions, catastrophic latency spikes flagged in LatencyMon under igdkmdn64.sys.",
+    "fix": "Force-enable 'Above 4G Decoding' and 'Re-Size BAR Support' in motherboard UEFI; set PCIe ASPM to 'Disabled' or 'L0s Only' in Windows Power Plan via PowerCfg (/setacvalueindex scheme_current sub_pcipexpress express 0); clean install driver 31.0.101.4369 or newer via DDU.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Arc A380 / A310 Desktop Graphics",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_56A5*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.4091",
+      "31.0.101.4146",
+      "31.0.101.4255"
+    ],
+    "recommendedVersion": "31.0.101.4577",
+    "typicalLatencyUs": 4200,
+    "failureMechanism": "GuC (Graphics MicroController) firmware interrupt coalescing breakdown under WDDM 3.0 Hardware-accelerated GPU Scheduling (HAGS). A race condition between DxgkDdiSubmitCommandVirtual and the GuC ring-buffer dispatch forces synchronous fallback waits within the kernel ISR handler, overflowing DPC queues.",
+    "symptom": "Periodic audio pops/crackles during concurrent video playback (AV1/HEVC hardware decode) and lightweight 3D tasks; sustained DPC routine execution exceeding 4ms.",
+    "fix": "Disable Hardware-accelerated GPU Scheduling (HAGS) in Windows Graphics Settings; update to driver 31.0.101.4577 or later where the GuC command submission synchronization primitives were refactored.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Iris Xe Graphics (Tiger Lake-U / Alder Lake-P Mobile)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_9A49*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "30.0.101.1069",
+      "30.0.101.1340",
+      "31.0.101.1999",
+      "31.0.101.3413"
+    ],
+    "recommendedVersion": "31.0.101.4146",
+    "typicalLatencyUs": 3800,
+    "failureMechanism": "Display Power Saving Technology (DPST 2.0) and Panel Self Refresh (PSR2) link state transitions cause PCIe root port wake stalls. The driver's display engine transitions (DC6/DC9 entry/exit) execute synchronous wait loops within igdkmdn64.sys ISRs during eDP AUX channel transactions.",
+    "symptom": "Buffer underruns in professional digital audio workstations (DAWs); periodic 1% low frame drops every 2 to 5 seconds when desktop composition changes.",
+    "fix": "Disable Panel Self Refresh (PSR) and Intel Display Power Saving Technology via Intel Graphics Command Center; execute registry edit: HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000 -> set 'PSR2Enable'=dword:00000000 and 'DisDrvDisplayPowerSavings'=dword:00000001.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Arc A770M / A730M Mobile Graphics",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_5690*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.4311",
+      "31.0.101.4314",
+      "31.0.101.4335"
+    ],
+    "recommendedVersion": "31.0.101.4826",
+    "typicalLatencyUs": 5100,
+    "failureMechanism": "Dynamic hybrid graphics switching (Intel Dynamic Tuning Technology / Advanced Optimus mux transitions) causing unhandled PCIe D3hot-to-D0 latency violations. igdkmdn64.sys repeatedly polls power management status registers via synchronous MMIO reads while holding high-IRQL spinlocks.",
+    "symptom": "Total OS stuttering for 5-10ms when rendering offloads from Iris Xe iGPU to Arc dGPU; high DPC count registered by Wdf01000.sys and igdkmdn64.sys.",
+    "fix": "Set Windows Display Settings to 'High Performance' globally to prevent continuous runtime power cycling of the dGPU; enforce PCIe Link State Power Management to 'Off' on AC power.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Arc A-Series Desktop Graphics (A770, A750, A580)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_56A1*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.4575",
+      "31.0.101.4644",
+      "31.0.101.4672"
+    ],
+    "recommendedVersion": "31.0.101.4952",
+    "typicalLatencyUs": 2900,
+    "failureMechanism": "DirectX 9/11 translation layer (D3D9On12 / DXBC compiler worker threads) memory defragmentation bottleneck across non-contiguous ReBAR allocations. igdkmdn64.sys invokes KeFlushIoBuffers and issues full TLB invalidations while processing DPC queues.",
+    "symptom": "Micro-stuttering and irregular 1% low frame pacing in older DirectX 9/11 competitive titles (e.g., CS:GO, DOTA 2); LatencyMon logs driver latency spikes oscillating between 2000us and 3500us.",
+    "fix": "Clean install driver version 31.0.101.4952 or newer which introduced rewritten DX9/DX11 native execute paths; toggle 'DirectX 9 Native Support' flags in Intel Command Center.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Core Ultra Arc Graphics (Meteor Lake Xe-LPG)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_7D55*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.5122",
+      "31.0.101.5186",
+      "31.0.101.5252"
+    ],
+    "recommendedVersion": "31.0.101.5382",
+    "typicalLatencyUs": 3400,
+    "failureMechanism": "Low-Power Island (LPI) fabric power transitions interacting with Unified Memory Architecture (UMA) ring bus. When transitioning between NPU offloading and Xe-LPG render passes, igdkmdn64.sys hits lock contention inside its DxgkDdiQueryDependentEngineGroup handler.",
+    "symptom": "Real-time audio processing buffer dropouts during concurrent AI model inferencing (DirectML/OpenVINO) and visual render pipelines; intermittent mouse cursor stuttering on desktop.",
+    "fix": "Upgrade to driver 31.0.101.5382 or later; update Intel Dynamic Tuning Technology (DTT) driver to version 9.0.11405.42569 or higher via OEM firmware updates; adjust OEM battery profile to 'Performance Mode'.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "GPU",
+    "deviceName": "Intel Arc A-Series Desktop Graphics (All Models)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_56*",
+    "driverFile": "igdkmdn64.sys",
+    "buggedVersions": [
+      "31.0.101.5333",
+      "31.0.101.5379",
+      "31.0.101.5382"
+    ],
+    "recommendedVersion": "31.0.101.5522",
+    "typicalLatencyUs": 2400,
+    "failureMechanism": "Faulty interrupt moderation telemetry handling inside the KMD-to-GuC logging engine. Debug trace routines embedded in release builds trigger high-frequency IO unmapped page reads, prolonging execution inside the primary ISR vector.",
+    "symptom": "LatencyMon warns: 'The system appears to be having trouble handling real-time audio and other tasks' identifying igdkmdn64.sys with highest observed execution time hovering between 2000us and 2500us.",
+    "fix": "Update to driver 31.0.101.5522 or higher; disable Intel Driver & Support Assistant (DSA) telemetry services ('Intel Content Protection HECI Service' and 'Intel Arc Control Service') via services.msc.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Realtek High Definition Audio (ALC892/ALC1150/ALC1220)",
+    "hardwareIdPattern": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_1220*",
+    "driverFile": "RTKVHD64.sys",
+    "buggedVersions": [
+      "6.0.1.8569",
+      "6.0.8955.1",
+      "6.0.9088.1",
+      "6.0.9239.1"
+    ],
+    "recommendedVersion": "6.0.9088.1 (Stripped OEM-INF) or Generic Microsoft hdaudio.sys (10.0.22621.1+)",
+    "typicalLatencyUs": 3850,
+    "failureMechanism": "RTKVHD64.sys DPC routine enters a synchronous MMIO polling loop waiting for HD Audio Azalia link codec response flags (CORB/RIRB engine registers) without yielding execution. If coupled with aggressive PCIe ASPM (L1 Substates), the controller wake time combined with busy-wait spinning drives execution duration past the Windows 2,000 us DPC watchdog threshold.",
+    "symptom": "Periodic audio crackling, pops during initial playback stream initialization, LatencyMon DPC spikes on RTKVHD64.sys between 3,000 us and 4,500 us, and micro-stuttering in 1% low frame times.",
+    "fix": "Disable PCIe ASPM on root port via registry/BIOS. Replace manufacturer package with generic 'High Definition Audio Device' (hdaudio.sys) or update to realtek UAD release with trimmed INF removing OEM APO payloads; disable Link State Power Management in Windows Power Plan.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Nahimic / A-Volute Audio Effects APO Component",
+    "hardwareIdPattern": "SWC\\VEN_AVOL&AID_0001*",
+    "driverFile": "NahimicService.sys",
+    "buggedVersions": [
+      "2.5.20.0",
+      "3.0.0.1008",
+      "3.2.14.0",
+      "4.9.4.0"
+    ],
+    "recommendedVersion": "Completely remove or upgrade to Nahimic APO 4.10.2.0+ with background service disabled",
+    "typicalLatencyUs": 4500,
+    "failureMechanism": "A-Volute APO installs kernel hooks and inter-process RPC pipes with NahimicService.exe to monitor process execution for real-time spatialization. During CoreAudio stream dispatch, NahimicService.sys acquires an unbuffered spinlock at DISPATCH_LEVEL to synchronize state buffers with audiodg.exe, causing thread starvation and high ISR/DPC deferral times on Core 0.",
+    "symptom": "Massive DPC spikes attributed to Wdf01000.sys and NahimicService.sys; severe audio dropouts, persistent 2,000 us to 5,000 us LatencyMon baseline, extreme stutter when launching 3D applications or Discord audio streams.",
+    "fix": "Stop and disable 'NahimicService' in services.msc. Remove Nahimic APO components via Device Manager -> Software Components (A-Volute / Nahimic) and delete corresponding sys files from C:\\Windows\\System32\\drivers.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Waves MaxxAudio APO Integration (Dell/HP OEM)",
+    "hardwareIdPattern": "SWC\\VEN_WAVES&AID_0001*",
+    "driverFile": "WavesSysSvc64.sys",
+    "buggedVersions": [
+      "1.1.22.0",
+      "9.24.0.0",
+      "10.0.0.125",
+      "10.0.66.160"
+    ],
+    "recommendedVersion": "Disable Waves MaxxAudio Service or upgrade to 12.0.0.280+",
+    "typicalLatencyUs": 2700,
+    "failureMechanism": "WavesSysSvc64.sys conducts real-time frequency-domain FFT acoustic transforms via a single shared uniprocessor DPC worker routine. When sample rates alternate or background microphone arrays are active, the driver holds execution at DISPATCH_LEVEL while waiting on ring-3 shared memory IPC responses from WavesAudioService.",
+    "symptom": "Audible clicks during continuous media playback, high 1% low frame-time drops in gaming, continuous LatencyMon warning on WavesSysSvc64.sys exceeding 2,500 us.",
+    "fix": "Disable Waves Audio Services ('WavesSysSvc', 'Waves Audio Central Service') in services.msc. Prevent MaxxAudioPro.exe from auto-starting. Switch Realtek controller driver from OEM-specific UAD to clean minimal generic UAD.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "ASUS Sonic Studio III / Sonic Radar Component",
+    "hardwareIdPattern": "SWC\\VEN_ASUS&CID_WASAPI_APO*",
+    "driverFile": "SS3VirtualAudioDevice01.sys",
+    "buggedVersions": [
+      "2.3.1.0",
+      "3.16.1.0",
+      "3.16.15.0"
+    ],
+    "recommendedVersion": "Complete removal of Sonic Studio suite; fallback to clean Realtek ALC UAD package",
+    "typicalLatencyUs": 3200,
+    "failureMechanism": "Driver injects a virtual audio bus filter to intercept rendering endpoints. A race condition inside the IOCTL dispatch loop of SS3VirtualAudioDevice01.sys causes the thread to spin on queued I/O request packets (IRPs) during multi-channel stream downmixing, blocking lower-priority audio buffers.",
+    "symptom": "System-wide micro-stuttering, buffer underruns in high-sample-rate DAW applications (ASIO/WASAPI Exclusive), persistent DPC spikes registered against SS3VirtualAudioDevice01.sys and RTKVHD64.sys.",
+    "fix": "Uninstall Sonic Studio III and Sonic Radar via Apps & Features. Remove ASUS Sonic Studio Virtual Audio Device in Device Manager, delete SS3VirtualAudioDevice01.sys, and reboot.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "DTS:X Ultra / DTS Headphone:X APO Service",
+    "hardwareIdPattern": "SWC\\VEN_DTS&AID_0001*",
+    "driverFile": "DtsApo4x64.sys",
+    "buggedVersions": [
+      "1.1.30.0",
+      "1.10.22.0",
+      "2020.3.1.1"
+    ],
+    "recommendedVersion": "DTS APO4 Driver 1.11.1.0 or removal of DTS processing service",
+    "typicalLatencyUs": 2400,
+    "failureMechanism": "DtsApo4x64.sys performs synchronous licensing verification and metadata validation within the real-time audio pipeline at IRQL DISPATCH_LEVEL. A lock contention between the user-mode DTS APO service and the kernel processing object leads to thread preemption failures and DPC queue starvation.",
+    "symptom": "Intermittent audio cutouts lasting 50-100 ms, LatencyMon flagged DtsApo4x64.sys or audiodg.exe DPC routines exceeding 2,000 us, and hitched frames in borderless full-screen games.",
+    "fix": "Disable DTS Audio Processing Object under sound properties -> Enhancements (select 'Disable all enhancements'). Disable DTS APO4 Service in Windows Services. Uninstall DTS Software Component via Device Manager.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Dolby Atmos / Dolby DAX3 Audio Processing Object",
+    "hardwareIdPattern": "SWC\\VEN_DOLBY&AID_0001*",
+    "driverFile": "DolbyDAX3APO.sys",
+    "buggedVersions": [
+      "3.20501.517.0",
+      "3.20602.646.0",
+      "3.30302.320.0"
+    ],
+    "recommendedVersion": "3.30500.560.0 or Windows native Spatial Sound API",
+    "typicalLatencyUs": 2100,
+    "failureMechanism": "DolbyDAX3APO.sys executes telemetry logging and device profile verification through blocking registry calls within the high-priority CoreAudio stream render loop. During transitions between 2-channel stereo and multi-channel surround, driver locks buffer processing, pushing DPC execution time past tolerable real-time limits.",
+    "symptom": "Real-time audio buffer dropouts in DAWs, LatencyMon reporting continuous DPC spikes near 2,000-2,500 us, crackling when audio streams initiate or suspend.",
+    "fix": "Set Dolby DAX API Service to 'Manual' or 'Disabled'. In Windows Sound Settings, toggle Spatial Sound to 'Off'. Strip Dolby Software Components via pnputil /delete-driver.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Realtek Universal Audio Service Component",
+    "hardwareIdPattern": "SWC\\VEN_10EC&SID_0001*",
+    "driverFile": "RtkAudUService64.sys",
+    "buggedVersions": [
+      "1.0.0.428",
+      "1.0.355.0",
+      "1.0.510.0"
+    ],
+    "recommendedVersion": "1.0.640.0+ or completely severed via UAD-Generic packaging",
+    "typicalLatencyUs": 2900,
+    "failureMechanism": "Driver component triggers constant asynchronous RPC notifications to RtkAudUService64.exe for jack detection and power policy verification. Jack state polling forces the hardware to oscillate between active and low-power D3hot states, leading to PCIe bus stalls and deferred execution of audio packet queues.",
+    "symptom": "Cyclic 2,500 us to 3,000 us DPC spikes logged against RtkAudUService64.sys and Wdf01000.sys, audio crackling upon plugging/unplugging headphones, and UI hitching on taskbar volume adjustment.",
+    "fix": "Disable 'Realtek Audio Universal Service' in services.msc. Set 'Jack Detection' to static instead of dynamic sensing inside Realtek Audio Console, or enforce D0 state via registry: Set 'SendD3AtStop' to 0 in driver parameters.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Realtek ALC4080 / ALC4082 USB Audio Controller",
+    "hardwareIdPattern": "USB\\VID_0BDA&PID_4014*",
+    "driverFile": "RTKUSBA64.sys",
+    "buggedVersions": [
+      "6.3.9600.2299",
+      "6.3.9600.2307",
+      "6.3.9600.2333"
+    ],
+    "recommendedVersion": "6.3.9600.2342+ with Motherboard Firmware/MCU update for ALC4080",
+    "typicalLatencyUs": 5100,
+    "failureMechanism": "ALC4080/4082 connects via USB 2.0 internal bus instead of classic Intel/AMD Azalia HD Audio link. Under high USB endpoint traffic, RTKUSBA64.sys experiences USB isochronous transfer buffer underruns. The driver's failure to handle USB microframe packet loss triggers repetitive hardware reset routines and extended IRP retry loops at DISPATCH_LEVEL.",
+    "symptom": "Extreme audio stutter, complete sound disappearance for 2-3 seconds, explosive loud pops, and catastrophic DPC latency spikes in LatencyMon exceeding 5,000 us on RTKUSBA64.sys and usbport.sys.",
+    "fix": "Flash motherboard vendor-supplied ALC4080/ALC4082 USB audio MCU firmware fix. In Device Manager, disable USB Selective Suspend on the audio device root hub. Switch to standard Windows Class Audio Driver (usbaudio2.sys) or use an external dedicated USB DAC.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Microsoft USB Audio Class 2.0 Native Driver",
+    "hardwareIdPattern": "USB\\MS_COMP_USBAUDIO2",
+    "driverFile": "usbaudio2.sys",
+    "buggedVersions": [
+      "10.0.19041.1",
+      "10.0.19041.1202",
+      "10.0.22000.1",
+      "10.0.22621.1"
+    ],
+    "recommendedVersion": "10.0.22621.2506",
+    "typicalLatencyUs": 2450,
+    "failureMechanism": "Synchronous I/O request packet (IRP) completion and serialized microframe isochronous transfer scheduling inside usbaudio2!ProcessIsochPackets. Under system load, the driver holds an internal spinlock while enumerating descriptor packets across split USB transactions, triggering high deferred procedure call (DPC) execution times in the USB stack (usbport.sys/USBXHCI.SYS) and failing to maintain 1ms audio frame deadlines without OEM ASIO drivers.",
+    "symptom": "Pops, clicks, robotic audio pitch shift, and buffer underruns during CPU-intensive tasks or concurrent PCIe/GPU load; LatencyMon flags usbaudio2.sys and USBXHCI.SYS with DPC execution >2000 µs.",
+    "fix": "Install the dedicated vendor-supplied ASIO driver rather than the Windows class driver. If forced to use usbaudio2.sys, disable dynamic USB Link Power Management (LPM) via registry ('EnableLpm'=dword:00000000) and elevate the Windows Audio service thread priority via MMCSS (Multimedia Class Scheduler Service) 'Pro Audio' scheduling profile.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Focusrite Scarlett USB (2nd/3rd/4th Gen) Audio Interface",
+    "hardwareIdPattern": "USB\\VID_1235&PID_8210",
+    "driverFile": "focusriteusb.sys",
+    "buggedVersions": [
+      "4.63.24.564",
+      "4.65.5.0",
+      "4.102.4.714",
+      "4.119.13.0"
+    ],
+    "recommendedVersion": "4.120.0.231",
+    "typicalLatencyUs": 4200,
+    "failureMechanism": "Worker-thread starvation and spinlock contention in focusriteusb.sys during asynchronous URB completion routines. On modern hybrid multi-core topologies (Intel 12th-14th Gen Alder/Raptor Lake), thread affinities for the streaming engine are inadvertently scheduled onto Efficient (E) cores, causing the driver's streaming DPC queue to miss microframe deadlines when E-cores exit C6/C8 package C-states.",
+    "symptom": "Catastrophic audio dropout (complete silence requiring interface power-cycle), severe buffer under-runs, and sharp 1% low frame drops in gaming/DAW workloads accompanied by LatencyMon reporting focusriteusb.sys DPCs exceeding 4000 µs.",
+    "fix": "Upgrade to Focusrite Control driver version >= 4.120.0. In Windows power options, set USB Selective Suspend to 'Disabled', force the processor affinity of FocusriteAudioServer.exe to Performance (P) cores via Process Lasso, and disable USB 3.0 controller PCIe ASPM via BIOS.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "MOTU M-Series (M2, M4, M6) USB Audio",
+    "hardwareIdPattern": "USB\\VID_07FD&PID_0008",
+    "driverFile": "MotuProAudio.sys",
+    "buggedVersions": [
+      "4.0.8.8478",
+      "4.0.9.0125",
+      "4.0.9.2605"
+    ],
+    "recommendedVersion": "4.0.9.2908",
+    "typicalLatencyUs": 3100,
+    "failureMechanism": "Unbounded loop in MotuProAudio.sys interrupt service routine (ISR) / DPC handoff while parsing out-of-order xHCI Isochronous Transfer Blocks (TRBs). On AMD AM4/AM5 X570/B550/B650 chipsets with high USB transaction traffic, the driver fails to acknowledge completed URBs within the allocated 125 µs isochronous interval, triggering continuous ISR re-entry and DPC latency spikes.",
+    "symptom": "Periodic audio crackling, robotic voice playback in VoIP/Discord, buffer stuttering in DAWs at 64/128 buffer sizes, and LatencyMon reporting high interrupt-to-DPC latency on MotuProAudio.sys.",
+    "fix": "Flash MOTU hardware to the latest firmware (>= v1.02/v2.00 depending on serial unit rev) and upgrade driver to >= 4.0.9.2908. Connect the device exclusively to an Intel or CPU-direct AMD USB host controller (avoid ASMedia/secondary chipset controllers), and disable Global C-States in the motherboard BIOS.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Behringer U-Phoria (UMC202HD, UMC204HD, UMC404HD)",
+    "hardwareIdPattern": "USB\\VID_1397&PID_0507",
+    "driverFile": "umcaudio.sys",
+    "buggedVersions": [
+      "4.59.0.0",
+      "5.0.0.0",
+      "5.12.0.0"
+    ],
+    "recommendedVersion": "5.57.0.0",
+    "typicalLatencyUs": 5800,
+    "failureMechanism": "Flawed Thesycon OEM driver implementation (v4.x/early v5.x) causing buffer wrap-around synchronization deadlocks inside umcaudio.sys. When operating at non-integer multiples of 44.1/48kHz or when Windows dynamically switches output formats, the driver engages in spinlock thrashing at IRQL DISPATCH_LEVEL waiting for host controller xHCI ring buffer tail pointers.",
+    "symptom": "Spontaneous audio freeze accompanied by a sustained high-pitch buzzing tone, immediate buffer overrun in DAWs using ASIO, and LatencyMon DPC measurement spiking to 5000-8000 µs on umcaudio.sys.",
+    "fix": "Upgrade to Thesycon-based Behringer driver v5.57.0 or higher. Set internal ASIO buffer depth to 'Safe Mode' inside the UMC Control Panel to enforce conservative double-buffering. In Device Manager, uncheck 'Allow the computer to turn off this device to save power' on all USB Root Hub instances.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Yamaha Steinberg USB ASIO (UR-C, UR-RT, UR Series)",
+    "hardwareIdPattern": "USB\\VID_0499&PID_172F",
+    "driverFile": "ysusb_audio.sys",
+    "buggedVersions": [
+      "2.0.3.0",
+      "2.0.4.0",
+      "2.1.1.0",
+      "2.1.3.0"
+    ],
+    "recommendedVersion": "2.1.6.0",
+    "typicalLatencyUs": 2900,
+    "failureMechanism": "ysusb_audio.sys employs a serialization mutex when demultiplexing integrated MIDI and multichannel 32-bit audio data packets. Concurrently querying Yamaha Steinberg USB Control Panel UI state creates an inversion priority condition where high-priority real-time audio threads wait on lower-priority GUI communication IOCTLs inside the kernel driver.",
+    "symptom": "Micro-stutters and dropped audio frames during window drag, window resize, or GUI state changes in Steinberg Cubase/Nuendo or other DAWs. LatencyMon logs spikes >2500 µs in ysusb_audio.sys and Wdf01000.sys.",
+    "fix": "Update to Yamaha Steinberg USB driver v2.1.6 or higher. Disable 'High Precision Event Timer' (HPET) in Windows if using legacy BIOS modes, ensure the interface is plugged into a USB 3.0 native port with an SS-certified cable, and avoid running the hardware control panel concurrently with real-time DAW sessions.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Audient iD Series (iD4, iD14, iD22, iD44)",
+    "hardwareIdPattern": "USB\\VID_2708&PID_0006",
+    "driverFile": "AudientUSB.sys",
+    "buggedVersions": [
+      "4.1.4.0",
+      "4.2.1.0",
+      "4.3.4.0"
+    ],
+    "recommendedVersion": "4.3.7.0",
+    "typicalLatencyUs": 3400,
+    "failureMechanism": "Buffer ring synchronization deadlock in AudientUSB.sys upon resume from Modern Standby (S0ix) or S3 power states. The driver's internal endpoint context fails to tear down stale DMA URB structures, resulting in an unhandled failure loop at DISPATCH_LEVEL during packet transmission that stalls the Windows core I/O manager.",
+    "symptom": "Total loss of audio sync following PC wake, crackling that steadily worsens over time without a system reboot, and DPC latency spikes in AudientUSB.sys reaching 3000-4000 µs.",
+    "fix": "Update Audient iD application and driver suite to v4.3.7 or newer. Disable Windows Fast Startup (Control Panel -> Power Options -> System Settings) to enforce a cold kernel state on boot, preventing the corrupted DMA buffer ring state from surviving across shutdowns.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Audio",
+    "deviceName": "Universal Audio Volt Series (Volt 1, 2, 4, 176, 276, 476)",
+    "hardwareIdPattern": "USB\\VID_2B53&PID_0001",
+    "driverFile": "uavolt.sys",
+    "buggedVersions": [
+      "5.30.0.0",
+      "5.35.0.0",
+      "5.50.0.0"
+    ],
+    "recommendedVersion": "5.60.0.0",
+    "typicalLatencyUs": 2800,
+    "failureMechanism": "Inefficient DPC batch processing in uavolt.sys (Thesycon variant). When operating at low ASIO buffer sizes (32/64 samples) under high system interrupt loads, the driver fails to yield the processor core within the 100 µs safe threshold, causing cumulative DPC latency spikes and cascade starvation for graphics and storage sub-systems.",
+    "symptom": "Audible clicks, 1% low frame-time hitches in 3D gaming applications when Discord/OBS or other audio-monitoring clients are streaming the interface inputs; LatencyMon flags uavolt.sys with execution times exceeding 2500 µs.",
+    "fix": "Deploy UA Volt driver package v5.60.0+. Disable PCIe Active State Power Management (ASPM) for the root complex USB xHCI controller, set the ASIO Buffer Size to at least 128 samples for mixed gaming/streaming workloads, and disable Core Isolation / Memory Integrity (VBS/HVCI) if absolute minimum DPC latency is required.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "Standard NVM Express Controller (PCIe ASPM L1.2 Sub-state Issue)",
+    "hardwareIdPattern": "PCI\\CC_010802",
+    "driverFile": "stornvme.sys",
+    "buggedVersions": [
+      "10.0.19041.1",
+      "10.0.19045.2130",
+      "10.0.22000.1",
+      "10.0.22621.1"
+    ],
+    "recommendedVersion": "10.0.22621.2506",
+    "typicalLatencyUs": 4500,
+    "failureMechanism": "Excessive PCIe Active State Power Management (ASPM) L1.2 exit latency (T_power_on). When stornvme.sys issues an I/O request to an NVMe drive residing in an L1.2 low-power sub-state, the hardware PHY resume delay causes storport.sys to stall execution inside StorPortNotification / miniport completion routines while waiting for controller register access, blocking DPC queues on the associated logical core.",
+    "symptom": "Periodic 2ms to 8ms DPC latency spikes in storport.sys and stornvme.sys during background or bursty disk read/write cycles, causing audio dropouts in DAWs and micro-stutters in frame presentation.",
+    "fix": "Disable PCIe ASPM for storage devices via Power Options (set 'PCI Express -> Link State Power Management' to 'Off') or disable NVMe Autonomous Power State Transitions (APST) via registry by setting 'PrimaryNVNeIdleTimeout'=dword:00000000 under the disk controller service key.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "Samsung NVMe Controller",
+    "hardwareIdPattern": "PCI\\VEN_144D&DEV_A804",
+    "driverFile": "secnvme.sys",
+    "buggedVersions": [
+      "3.1.0.1901",
+      "3.2.0.1910",
+      "3.3.0.2003"
+    ],
+    "recommendedVersion": "10.0.22621.2506 (Microsoft Inbox stornvme.sys)",
+    "typicalLatencyUs": 8500,
+    "failureMechanism": "Spinlock contention in secnvme!ProcessInterruptQueue during asynchronous I/O completion. The driver implements non-yielding polling loops on its completion submission queues under heavy multi-queue load, preventing thread preemption and keeping the core running at DISPATCH_LEVEL for extended periods.",
+    "symptom": "Severe storport.sys and secnvme.sys DPC latency spikes exceeding 5000us under disk I/O, audible pops and clicks in ASIO buffers (<=128 samples), and 0.1% low frame drops in gaming.",
+    "fix": "Uninstall the Samsung NVMe proprietary driver via Device Manager and force the device to use the Microsoft inbox standard driver (stornvme.sys).",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "Intel RST VMD Managed Controller",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_9A0B",
+    "driverFile": "iaStorVD.sys",
+    "buggedVersions": [
+      "18.0.1.1138",
+      "18.1.1.1033",
+      "18.6.1.1016",
+      "19.0.0.1067",
+      "19.5.0.1037"
+    ],
+    "recommendedVersion": "19.5.5.1052",
+    "typicalLatencyUs": 3800,
+    "failureMechanism": "Intel Volume Management Device (VMD) virtualization layer adds an unoptimized translation shim between StorPort and the NVMe physical functions. iaStorVD.sys blocks inside iaStorVD!RaidCompleteRequest during power state transitions and device reset commands due to internal lock starvation across multiple virtual RAID channels.",
+    "symptom": "Intermittent LatencyMon spikes attributable to iaStorVD.sys and storport.sys hovering between 2000us and 5000us, mouse hitching, and dropouts in USB audio interfaces.",
+    "fix": "Update Intel VMD driver to branch 19.5.5.1052+ or 20.x, or disable Intel VMD/RST in UEFI BIOS entirely, switching the NVMe controller configuration to standard AHCI/NVMe mode to load Microsoft's stornvme.sys.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "Intel Rapid Storage Technology SATA AHCI Controller",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_A102",
+    "driverFile": "iaStorAC.sys",
+    "buggedVersions": [
+      "15.7.0.1014",
+      "15.9.0.1015",
+      "16.8.0.1000",
+      "17.2.0.1078",
+      "17.5.0.1017"
+    ],
+    "recommendedVersion": "10.0.22621.1 (Microsoft Inbox storahci.sys)",
+    "typicalLatencyUs": 2900,
+    "failureMechanism": "Aggressive SATA Link Power Management (LPM - HIPM/DIPM) state negotiations executed synchronously within the miniport's ISR/DPC routine (iaStorAC!AhciHwInterrupt). When a SATA SSD/HDD resumes from Partial or Slumber states, the driver executes hard busy-waits for the SATA PHY electrical lock rather than using non-blocking asynchronous timers.",
+    "symptom": "Periodic micro-stutters lasting 1ms to 4ms whenever a secondary SATA drive wakes up from idle; high storport.sys DPC execution time reported in LatencyMon.",
+    "fix": "Replace iaStorAC.sys with the Microsoft inbox 'Standard SATA AHCI Controller' (storahci.sys) via Device Manager, or disable Link Power Management across all ports in the Intel RST Control Panel / Windows Power Plan ('AHCI Link Power Management - HIPM/DIPM' set to 'Active').",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "ASMedia 106x/116x Serial ATA Controller",
+    "hardwareIdPattern": "PCI\\VEN_1B21&DEV_0612",
+    "driverFile": "asstahci64.sys",
+    "buggedVersions": [
+      "3.0.2.0",
+      "3.1.8.0",
+      "3.2.1.0",
+      "3.2.3.0"
+    ],
+    "recommendedVersion": "10.0.22621.1 (Microsoft Inbox storahci.sys)",
+    "typicalLatencyUs": 11000,
+    "failureMechanism": "Defective interrupt moderation and broken MSI/MSI-X handling inside asstahci64.sys. The driver enters tight KeStallExecutionProcessor polling loops checking command completion status registers when drives process fragmented NCQ (Native Command Queuing) workloads, hogging CPU cores at IRQL DISPATCH_LEVEL.",
+    "symptom": "Extreme DPC/ISR execution times (up to 15000us) attributed to asstahci64.sys and storport.sys, persistent audio crackling/glitching regardless of audio buffer size, and severe frame pacing hitches.",
+    "fix": "Force-install the native Microsoft 'Standard SATA AHCI Controller' (storahci.sys) over the ASMedia driver via Device Manager ('Update driver' -> 'Browse my computer' -> 'Let me pick from a list of available drivers on my computer').",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "Storage",
+    "deviceName": "Intel Chipset SATA RAID/AHCI Controller (Legacy RST)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_2822",
+    "driverFile": "iaStorA.sys",
+    "buggedVersions": [
+      "13.1.0.1058",
+      "13.2.4.1000",
+      "14.8.0.1042",
+      "15.2.0.1020"
+    ],
+    "recommendedVersion": "10.0.22621.1 (Microsoft Inbox storahci.sys)",
+    "typicalLatencyUs": 4200,
+    "failureMechanism": "Dynamic Device Power Management and controller-level clock gating stall storport.sys miniport callbacks. iaStorA.sys exhibits spinlock wait deadlocks across hyper-threaded logical processors while dispatching non-queued flush commands (IOCTL_STORAGE_MANAGE_DATA_SET_ATTRIBUTES).",
+    "symptom": "Random system-wide freezes of 3ms to 6ms, recurrent DPC watchdog violations under heavy SATA SSD write operations, and buffer under-runs in real-time streaming engines.",
+    "fix": "Roll back to Microsoft inbox storahci.sys if running non-RAID SATA, or disable Dynamic Power Gating and DIPM via the Windows Registry key 'LPM' and 'LPMSTATE' under 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\iaStorA\\Parameters\\Device'.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Microsoft ACPI-Compliant Control Method Battery",
+    "hardwareIdPattern": "ACPI\\PNP0C0A",
+    "driverFile": "ACPI.sys",
+    "buggedVersions": [
+      "10.0.19041.1",
+      "10.0.22000.1",
+      "10.0.22621.1"
+    ],
+    "recommendedVersion": "10.0.22631.3007",
+    "typicalLatencyUs": 4500,
+    "failureMechanism": "Synchronous evaluation of ACPI _BST (Battery Status) and _BIF (Battery Information) objects executes an Embedded Controller (EC) SMBus transaction polling loop inside the DPC routine. The thread yields via an unthrottled spinlock wait while the physical EC micro-controller asserts wait states on the shared EC LPC/eSPI bus, blocking the core's DPC queue for up to 5 milliseconds.",
+    "symptom": "Periodic audio dropouts (clicks/pops) every 10 to 60 seconds matching polling intervals, severe LatencyMon DPC execution time spikes attributed to ACPI.sys, and micro-stutters during battery discharge or charge threshold transitions.",
+    "fix": "Disable 'Microsoft ACPI-Compliant Control Method Battery' in Device Manager when operating on fixed AC mains power, or upgrade laptop EC/BIOS firmware to resolve hardware-level eSPI/SMBus protocol timeouts.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Intel Dynamic Tuning Technology (DTT / DPTF)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_9A0D",
+    "driverFile": "dptf_cpu.sys",
+    "buggedVersions": [
+      "8.7.10400.15556",
+      "8.7.10700.17508",
+      "9.0.11405.39294"
+    ],
+    "recommendedVersion": "9.0.11410.40058",
+    "typicalLatencyUs": 4200,
+    "failureMechanism": "DPTF/DTT participant drivers schedule high-frequency DPCs to poll SoC thermal zones (_TMP) and recalculate active/passive cooling equations (_PSV, _ACx). When coordinating dynamic power budgets between CPU and GPU, the driver requests synchronous ACPI control method evaluations that block other system DPCs behind global ACPI table mutexes.",
+    "symptom": "Major frame-time spikes (1% lows dropping below 15 FPS) during multi-workload thermal shifts, audio crackling during combined CPU/GPU load bursts, and dptf_cpu.sys/esif_lf.sys appearing at the top of LatencyMon driver routines.",
+    "fix": "Disable 'Intel Dynamic Tuning Technology' inside BIOS/UEFI settings, or stop and set 'Intel(R) Innovation Platform Framework Service' startup type to Disabled in services.msc.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Intel Management Engine Interface (HECI)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_7AE8",
+    "driverFile": "TeeDriverW10x64.sys",
+    "buggedVersions": [
+      "2124.100.0.1096",
+      "2145.1.42.0",
+      "2201.16.0.2641"
+    ],
+    "recommendedVersion": "2306.4.3.0",
+    "typicalLatencyUs": 3100,
+    "failureMechanism": "Host Embedded Controller Interface (HECI) hardware circular buffer status reads generate interrupts that stall in TeeDriverW10x64.sys during PCIe Host-to-ME power gating state negotiations. When transitions between runtime D0 and D3hot occur, the driver executes lengthy MMIO read cycles while holding a high-IRQL spinlock.",
+    "symptom": "Random system-wide DPC execution spikes between 2500us and 4000us, sudden audio crackles when waking or sleeping PCIe links, and latency spikes associated with TeeDriverW10x64.sys.",
+    "fix": "Upgrade Intel MEI driver to version 2306.4.3.0 or higher. Alternatively, create a DWORD registry entry 'EnableHECIPowerGating'=0 under 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\MEIx64\\Parameters' to prevent autonomous low-power transitions.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Corsair iCUE Low-Level Hardware Access Driver",
+    "hardwareIdPattern": "ROOT\\CorsairLLAccess",
+    "driverFile": "CorsairLLAccess64.sys",
+    "buggedVersions": [
+      "3.38.61",
+      "4.12.214",
+      "4.33.138",
+      "5.1.1114"
+    ],
+    "recommendedVersion": "5.14.93",
+    "typicalLatencyUs": 3800,
+    "failureMechanism": "Direct, unsynchronized I/O port trapping across SMBus controller base addresses (0x0B00-0x0B1F) to poll DDR4/DDR5 SPD and thermal diode sensors. The kernel-mode driver locks the SMBus host controller while competing against ACPI thermal polling, resulting in repeated hardware timeouts, bus arbitration locks, and blocked DPC dispatcher threads.",
+    "symptom": "Periodic severe DPC/ISR stuttering occurring precisely on sensor refresh intervals (e.g., every 1000ms), dropped frames in VR applications, and frequent buffer underruns in ASIO audio setups.",
+    "fix": "Disable RAM and Motherboard monitoring within iCUE Settings -> Plugins/Sensors, or replace the hardware monitoring feature by deleting CorsairLLAccess64.sys and stopping the iCUE Service.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Razer Synapse Power/Device Management Driver",
+    "hardwareIdPattern": "USB\\VID_1532&PID_0078",
+    "driverFile": "rzpmgrk.sys",
+    "buggedVersions": [
+      "1.0.0.112",
+      "1.0.1.144",
+      "1.0.2.167"
+    ],
+    "recommendedVersion": "3.8.1215.121415",
+    "typicalLatencyUs": 2400,
+    "failureMechanism": "rzpmgrk.sys dispatches high-frequency synchronous I/O Request Packets (IRPs) across composite USB HID interfaces to poll battery states and synchronize multi-zone Chroma lighting effects. Because the IRPs are processed synchronously in the driver completion path without adequate yielding, USB xHCI root hub DPCs are repeatedly delayed.",
+    "symptom": "LatencyMon identifies high ISR/DPC execution times on both rzpmgrk.sys and USBPORT.sys/Wdf01000.sys, causing mouse input hitching and audio dropouts when operating wireless mice in wired/docked charging states.",
+    "fix": "Uninstall Razer Synapse software and delete residual rzpmgrk.sys / rzudd.sys drivers from System32\\drivers, or configure lighting to onboard device profiles and terminate all Razer background telemetry services.",
+    "severity": "Medium"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "NZXT CAM Hardware Monitor Kernel Driver",
+    "hardwareIdPattern": "ROOT\\NZXT_CAM_DEVICE",
+    "driverFile": "CAMOpenHardwareMonitor.sys",
+    "buggedVersions": [
+      "4.35.0",
+      "4.40.1",
+      "4.50.2"
+    ],
+    "recommendedVersion": "4.60.0",
+    "typicalLatencyUs": 4600,
+    "failureMechanism": "Aggressive polling of Super I/O chipsets via legacy ISA ports 0x290/0x295 and 0x4E/0x4F. The driver frequently issues KeStallExecutionProcessor calls within ring-0 while reading LPC/eSPI hardware monitoring registers for fan tachometers and liquid temperature sensors, blocking CPU cores from context-switching out of DPC execution.",
+    "symptom": "Rhythmic frame pacing stutter (spiking 1% and 0.1% lows in DirectX/Vulkan games), LatencyMon DPC execution spikes surpassing 4000us on CAMOpenHardwareMonitor.sys, and crackling across USB audio interfaces.",
+    "fix": "Update NZXT CAM to version 4.60.0 or higher, or permanently close NZXT CAM and disable CAMOpenHardwareMonitor.sys in Windows device configuration, switching fan control to UEFI BIOS curve control.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "ASUS System Control Interface",
+    "hardwareIdPattern": "ACPI\\ASUS0100",
+    "driverFile": "AsusSysControlInterface.sys",
+    "buggedVersions": [
+      "1.0.0.18",
+      "2.2.33.0",
+      "3.1.1.0"
+    ],
+    "recommendedVersion": "3.1.22.0",
+    "typicalLatencyUs": 3500,
+    "failureMechanism": "Executes continuous ACPI WMI method calls (WMBB/WMBC) to poll battery threshold percentages, keyboard backlight state, and fan profiles. These synchronous ACPI evaluations contend with internal OS thread scheduling, raising IRQL to DISPATCH_LEVEL and locking kernel resources during ASL interpreter loops.",
+    "symptom": "Periodic LatencyMon alarms on ACPI.sys and AsusSysControlInterface.sys, audible clicks in real-time DAW monitoring, and micro-stuttering on ASUS ROG/TUF gaming laptops.",
+    "fix": "Update ASUS System Control Interface to v3.1.22.0 or newer via MyASUS/ASUS support page. On gaming laptops, uninstall ASUS Armoury Crate and AsusSysControlInterface, replacing them with the lightweight, direct EC-calling open-source utility G-Helper.",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Dell SupportAssist PC-Doctor Diagnostic Driver",
+    "hardwareIdPattern": "ROOT\\PCDSRVC_DEVICE",
+    "driverFile": "pcdrdevice64.sys",
+    "buggedVersions": [
+      "2.0.0.1182",
+      "2.0.0.1345",
+      "2.0.0.1411"
+    ],
+    "recommendedVersion": "2.0.0.1500",
+    "typicalLatencyUs": 6800,
+    "failureMechanism": "Background telemetry threads invoke pcdrdevice64.sys to scan physical PCI configuration spaces and query hardware registers across all PCIe bridges. The driver maps physical memory regions using MmMapIoSpace and initiates non-preemptible I/O loops that saturate core execution queues and starve audio stream DPCs.",
+    "symptom": "LatencyMon reports extreme DPC latency spikes (frequently 6000-9000us), complete real-time audio dropouts, and sudden system stutter lasting several seconds while background diagnostic sweeps occur.",
+    "fix": "Uninstall Dell SupportAssist, Dell SupportAssist Remediation, and Dell TechHub via Programs and Features. Delete pcdrdevice64.sys from C:\\Windows\\System32\\drivers.",
+    "severity": "Critical"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Intel Serial IO I2C Host Controller",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_4B68",
+    "driverFile": "iaLPSS2_I2C.sys",
+    "buggedVersions": [
+      "30.100.2020.7",
+      "30.100.2104.1",
+      "30.100.2134.1"
+    ],
+    "recommendedVersion": "30.100.2237.26",
+    "typicalLatencyUs": 3900,
+    "failureMechanism": "Defective interrupt coalescing on I2C slave transactions (commonly connected to precision touchpads and sensor hubs). The driver enters an interrupt storm cycle where iaLPSS2_I2C.sys requests excessive DPC executions without clearing the underlying peripheral hardware interrupt mask at the controller level.",
+    "symptom": "Extreme LatencyMon DPC execution times on iaLPSS2_I2C.sys, mouse cursor stuttering when using precision touchpads, and intermittent sound dropouts while moving the pointer.",
+    "fix": "Update Intel Serial IO driver to 30.100.2237.26 or newer through the OEM support catalog, or disable 'Intel Serial IO I2C Host Controller' power-saving (uncheck 'Allow the computer to turn off this device to save power' in Device Manager).",
+    "severity": "High"
+  },
+  {
+    "deviceClass": "System",
+    "deviceName": "Intel Integrated Sensor Solution (ISH)",
+    "hardwareIdPattern": "PCI\\VEN_8086&DEV_43FC",
+    "driverFile": "ish.sys",
+    "buggedVersions": [
+      "3.1.0.4212",
+      "3.1.0.4431"
+    ],
+    "recommendedVersion": "3.1.0.4566",
+    "typicalLatencyUs": 2800,
+    "failureMechanism": "High-frequency circular DMA buffer processing between the host CPU and the low-power Integrated Sensor Hub core. The driver receives unthrottled sensor interrupt events (accelerometers, gyros, and ALS) over an internal IPC channel, generating heavy Inter-Processor Interrupt (IPI) loads and DPCs that serialize on a single CPU core.",
+    "symptom": "System-wide hitching during physical laptop movement or screen ambient lighting adjustments, and LatencyMon DPC warnings pointing directly to ish.sys or ish_bus.sys.",
+    "fix": "Update the Intel ISH driver to version 3.1.0.4566 or higher, or disable 'Intel Integrated Sensor Solution' in the Device Manager under System Devices on stationary laptop configurations.",
+    "severity": "Medium"
+  }
+]
