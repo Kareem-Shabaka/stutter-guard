@@ -213,6 +213,83 @@ public sealed class TweakEngine
         return r;
     }
 
+    // ---------------------------------------------------------------- drift detection & healing
+
+    /// <summary>
+    /// Tweaks the app applied whose live state no longer matches. Every tweak answers this through
+    /// TweakBase.Detect: a mismatch plus an "applied" journal mark is exactly Drifted. That covers
+    /// AMD GPU keys, MSI mode, interrupt affinity, the NIC power/RSS keywords and the global timer
+    /// switch alike, because each of them reads its own state back from the system.
+    /// </summary>
+    public static IReadOnlyList<ITweak> FindDrifted(IEnumerable<ITweak> tweaks)
+    {
+        var list = new List<ITweak>();
+        foreach (var t in tweaks)
+        {
+            try
+            {
+                if (t.Detect().Status == TweakStatus.Drifted) list.Add(t);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Couldn't read {t.Info.Id} while checking for drift: {ex.Message}");
+            }
+        }
+        return list;
+    }
+
+    /// <summary>How many applied tweaks have been undone behind the app's back (driver update, Windows Update).</summary>
+    public int DriftedCount => FindDrifted(Tweaks).Count;
+
+    public IReadOnlyList<ITweak> DriftedTweaks() => FindDrifted(Tweaks);
+
+    /// <summary>
+    /// Re-applies the given tweaks inside journal transactions. A second apply does not duplicate
+    /// the recorded before-state: RecordOriginal keeps only the first entry per (tweak, kind,
+    /// target), so the baseline from the original run survives and revert still works.
+    /// </summary>
+    public IReadOnlyList<TweakResult> Heal(IEnumerable<ITweak> tweaks, IProgress<string>? progress = null)
+    {
+        var ctx = NewContext();
+        var results = new List<TweakResult>();
+        foreach (var t in tweaks)
+        {
+            progress?.Report("Re-applying " + t.Info.Title + "...");
+            var txn = Journal.BeginTransaction(t.Info.Id);
+            try
+            {
+                try
+                {
+                    t.Apply(ctx);
+                    Journal.MarkApplied(t.Info.Id);
+                    _lastErrors.Remove(t.Info.Id);
+                    results.Add(new TweakResult(t, true, null));
+                    Log.Info("Re-applied drifted " + t.Info.Id);
+                }
+                catch (Exception ex)
+                {
+                    Journal.RollbackTransaction(txn);
+                    _lastErrors[t.Info.Id] = ex.Message;
+                    results.Add(new TweakResult(t, false, ex.Message));
+                    Log.Error($"Re-apply {t.Info.Id} failed: {ex.Message}");
+                }
+            }
+            finally
+            {
+                Journal.CommitTransaction(txn);
+                Journal.Flush();
+            }
+        }
+        progress?.Report(results.All(r => r.Ok)
+            ? $"{results.Count} drifted tweak(s) put back."
+            : $"{results.Count(r => r.Ok)} of {results.Count} drifted tweak(s) put back.");
+        return results;
+    }
+
+    /// <summary>Re-applies everything that has drifted since it was applied.</summary>
+    public IReadOnlyList<TweakResult> HealDrifted(IProgress<string>? progress = null) =>
+        Heal(DriftedTweaks(), progress);
+
     /// <summary>The status a row should show, folding in the last apply/revert error.</summary>
     public TweakState StateOf(ITweak t)
     {

@@ -616,6 +616,7 @@ public sealed class SafetyPageViewModel : PageViewModel
         OpenDataCommand = new RelayCommand(() => { Paths.EnsureDataDirs(); _main.Ui.Open(Paths.DataDir); });
         RevertAllCommand = new RelayCommand(() => _ = RevertAllAsync(), () => !Busy);
         RecoverDegradedCommand = new RelayCommand(RecoverDegraded, () => Degraded && !Busy);
+        HealDriftedCommand = new RelayCommand(() => _ = HealDriftedAsync(), () => !Busy && HasDrift);
     }
 
     /// <summary>True when journal.json couldn't be read at startup and is under protection.</summary>
@@ -631,6 +632,15 @@ public sealed class SafetyPageViewModel : PageViewModel
     public string BrokenCopy { get => _brokenCopy; private set => Set(ref _brokenCopy, value); }
 
     public RelayCommand RecoverDegradedCommand { get; }
+
+    private int _driftCount;
+    private string _driftText = "";
+
+    /// <summary>How many applied tweaks a driver update or Windows Update has undone.</summary>
+    public int DriftCount { get => _driftCount; private set { if (Set(ref _driftCount, value)) OnPropertyChanged(nameof(HasDrift)); } }
+    public bool HasDrift => _driftCount > 0;
+    public string DriftText { get => _driftText; private set => Set(ref _driftText, value); }
+    public RelayCommand HealDriftedCommand { get; }
 
     public bool TurnOnProtection { get => _turnOnProtection; set => Set(ref _turnOnProtection, value); }
 
@@ -653,6 +663,17 @@ public sealed class SafetyPageViewModel : PageViewModel
         var e = _main.Engine;
         if (e is null) return Task.CompletedTask;
 
+        var driftedNow = e.DriftedTweaks();
+        DriftCount = driftedNow.Count;
+        DriftText = driftedNow.Count == 0
+            ? ""
+            : driftedNow.Count + " tweak(s) the app applied no longer match what it set: " +
+              string.Join(", ", driftedNow.Take(4).Select(t => t.Info.Title)) +
+              (driftedNow.Count > 4 ? ", and " + (driftedNow.Count - 4) + " more" : "") +
+              ". A driver update, Windows Update or another tuning tool usually does this. Re-applying keeps the original " +
+              "before-state in the journal, so every revert still works.";
+        HealDriftedCommand.Refresh();
+
         Degraded = e.Journal.IsDegraded;
         if (Degraded)
         {
@@ -674,6 +695,46 @@ public sealed class SafetyPageViewModel : PageViewModel
                           (e.SessionBackup is null ? "" : " This session's backups: " + e.SessionBackup.Folder);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>Re-applies every drifted tweak. The original before-states stay in the journal.</summary>
+    private async Task HealDriftedAsync()
+    {
+        var e = _main.Engine;
+        if (e is null) return;
+        var drifted = e.DriftedTweaks();
+        if (drifted.Count == 0) { DriftCount = 0; return; }
+        if (!_main.Ui.Confirm("Re-apply drifted tweaks",
+                drifted.Count + " tweak(s) the app applied no longer match what it set. This usually means a driver update, " +
+                "Windows Update or another tuning tool put them back.\n\n" +
+                "Re-applying keeps the original before-state in the journal, so Revert selected and Revert everything still work.\n\n" +
+                "Some of these need a restart to take effect. Continue?"))
+            return;
+
+        Busy = true;
+        HealDriftedCommand.Refresh();
+        Message = "Re-applying " + drifted.Count + " drifted tweak(s)...";
+        try
+        {
+            var progress = new Progress<string>(s => Message = s);
+            var results = await Task.Run(() => e.HealDrifted(progress));
+            int ok = results.Count(r => r.Ok);
+            var failed = results.Where(r => !r.Ok).ToList();
+            Message = $"Re-applied {ok} of {results.Count}." +
+                      (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "");
+            if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
+            await _main.RefreshAllAsync();
+        }
+        catch (Exception ex)
+        {
+            Message = "Re-apply failed: " + ex.Message;
+            Log.Error("HealDrifted failed: " + ex);
+        }
+        finally
+        {
+            Busy = false;
+            HealDriftedCommand.Refresh();
+        }
     }
 
     private static string FindBrokenCopy()

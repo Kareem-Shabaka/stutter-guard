@@ -1,11 +1,13 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Xml;
+using DpcTweaker.Core;
 using DpcTweaker.Core.Catalog;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Reports;
 using DpcTweaker.Core.Interrupts;
+using DpcTweaker.Core.Model;
 using DpcTweaker.Core.Native;
 using DpcTweaker.Core.Tweaks;
 using Microsoft.Win32;
@@ -1474,5 +1476,115 @@ Console.WriteLine("Wave 5: the timer agent binary (exit codes 0 / 3 / 4)");
         Check("the failure codes are distinct and non-zero", ok.Code == 0);
     }
 }
+// ================================================================ Wave 6
+
+Console.WriteLine("Wave 6: drift detection and 1-click heal");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-drift-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "Test CPU", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(),
+            Security = new SecurityInfo(0, false, false),
+            Software = new SoftwareInfo(),
+        };
+        var engine = new TweakEngine(profile, j);
+        var tweak = new FakeDriftTweak(j, "t.drift", @"HKLM\SOFTWARE\Test|Tuned");
+
+        Check("a tweak that was never applied is not drifted", TweakEngine.FindDrifted(new[] { tweak }).Count == 0);
+        Check("its status is Not applied", tweak.Detect().Status == TweakStatus.NotApplied);
+
+        // ---- first apply: this is the "before" baseline that must survive a heal ----
+        var first = engine.Heal(new[] { tweak }, null);
+        Check("apply succeeds", first.Count == 1 && first[0].Ok, first[0].Error ?? "");
+        Check("the tweak now reads as applied", tweak.Detect().Status == TweakStatus.Applied);
+        Check("exactly one baseline entry was recorded", j.OriginalsFor("t.drift").Count == 1, j.OriginalsFor("t.drift").Count.ToString());
+        Check("the baseline holds the original value", j.OriginalsFor("t.drift").Single().Data == "0");
+        Check("the tweak is marked applied in the journal", j.IsApplied("t.drift"));
+
+        // ---- a driver update / DDU / Windows Update wipes the key ----
+        tweak.Matches = false;
+        Check("the wiped tweak is detected as drifted", tweak.Detect().Status == TweakStatus.Drifted);
+        Check("FindDrifted reports it", TweakEngine.FindDrifted(new[] { tweak }).Count == 1);
+        var drifted = engine.DriftedTweaks();   // the engine's own tweaks, not the fake
+        Check("DriftedCount is a live count, not a cached flag", engine.DriftedCount == drifted.Count);
+
+        // ---- heal ----
+        var healed = engine.Heal(TweakEngine.FindDrifted(new[] { tweak }), null);
+        Check("heal succeeds", healed.Count == 1 && healed[0].Ok, healed[0].Error ?? "");
+        Check("the tweak reads as applied again", tweak.Detect().Status == TweakStatus.Applied);
+        Check("heal re-ran the apply", tweak.ApplyCount == 2, tweak.ApplyCount.ToString());
+        Check("heal did NOT duplicate the baseline entry", j.OriginalsFor("t.drift").Count == 1, j.OriginalsFor("t.drift").Count.ToString());
+        Check("the original before-state survived the heal", j.OriginalsFor("t.drift").Single().Data == "0");
+
+        // ---- a second wipe + heal must still not duplicate ----
+        tweak.Matches = false;
+        engine.Heal(TweakEngine.FindDrifted(new[] { tweak }), null);
+        Check("a second heal still keeps one baseline", j.OriginalsFor("t.drift").Count == 1, j.OriginalsFor("t.drift").Count.ToString());
+        Check("a second heal re-applied again", tweak.ApplyCount == 3, tweak.ApplyCount.ToString());
+
+        // ---- the journal on disk agrees ----
+        var reloaded = new Journal(Path.Combine(dir, "journal.json"));
+        Check("the single baseline persisted to disk", reloaded.OriginalsFor("t.drift").Count == 1);
+        Check("no journal transaction was left open", reloaded.IsApplied("t.drift"));
+
+        // ---- a heal of a tweak whose Apply fails must not record a phantom baseline ----
+        var broken = new FakeDriftTweak(j, "t.broken", @"HKLM\SOFTWARE\Test|Broken") { FailOnApply = true };
+        j.MarkApplied("t.broken");
+        var bad = engine.Heal(new[] { broken }, null);
+        Check("a failing heal reports the error", bad.Count == 1 && !bad[0].Ok);
+        Check("a failing heal leaves no phantom baseline", j.OriginalsFor("t.broken").Count == 0, j.OriginalsFor("t.broken").Count.ToString());
+
+        // ---- HealDrifted on a clean engine is a no-op ----
+        var noop = engine.HealDrifted();
+        Check("HealDrifted with nothing drifted does nothing", noop.Count == 0, noop.Count.ToString());
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
+/// <summary>
+/// A tweak that answers from a field instead of the system, so drift and healing can be exercised
+/// without touching the real registry. Apply records a before-state exactly like RegWrite.Set does.
+/// </summary>
+internal sealed class FakeDriftTweak : TweakBase
+{
+    private readonly string _key;
+
+    public FakeDriftTweak(Journal journal, string id, string key)
+        : base(new TweakInfo { Id = id, Module = "Test", Title = "Fake " + id, NeedsReboot = false }, journal)
+    {
+        _key = key;
+    }
+
+    /// <summary>The live state: false means "someone put it back".</summary>
+    public bool Matches { get; set; }
+
+    public int ApplyCount { get; private set; }
+    public bool FailOnApply { get; init; }
+
+    protected override Probe Read() => new(Matches, Matches ? "tuned" : "stock", "tuned");
+
+    public override void Apply(TweakContext ctx)
+    {
+        ApplyCount++;
+        // Same order as RegWrite.Set: record first, then change. The second call must not add a
+        // second entry, which is what keeps the original baseline after a heal.
+        ctx.Journal.RecordOriginal(Info.Id, "reg", _key, true, "DWord", "0");
+        if (FailOnApply) throw new InvalidOperationException("simulated failure");
+        Matches = true;
+    }
+}

@@ -490,6 +490,17 @@
                                Text="Every change is recorded with its previous value before it's made. Revert one tweak from its row, or everything from here. Backups and an undo script that works without the app (even in Safe Mode) are kept in the data folder." />
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12"
+                            Visibility="{Binding HasDrift, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE72C;  Some applied tweaks were undone" FontWeight="SemiBold" Margin="0,0,0,6"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                            <TextBlock Text="{Binding DriftText}" TextWrapping="Wrap" />
+                            <Button Content="Re-apply drifted tweaks" Command="{Binding HealDriftedCommand}"
+                                    HorizontalAlignment="Left" Padding="14,6" Margin="0,10,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12"
                             Visibility="{Binding Degraded, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="&#xE7BA;  The journal couldn't be read" FontWeight="SemiBold" Margin="0,0,0,6"
