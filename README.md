@@ -3,21 +3,33 @@
 [![License: GPL-3.0 (Non-Commercial)](https://img.shields.io/badge/License-GPL--3.0%20(Non--Commercial)-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-0.7.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Version](https://img.shields.io/badge/Version-0.7.1-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%99%A5-ea4aaa.svg)](https://github.com/sponsors/Kareem-Shabaka)
 
-**Stutter Guard** is a measured, fully reversible DPC latency and micro-stutter optimization tool for Windows 10 and 11.
+**Stutter Guard** is a measured, fully reversible DPC latency, driver regression advisory, and micro-stutter optimization tool for Windows 10 and 11.
 
 Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen 9 9950X3D + Radeon RX 9070 XT: worst LatencyMon interrupt-to-process drop from **733 µs → 11.6 µs**). Zero snake oil. Zero black-box registry scripts. Every tweak in the application documents **what it does**, **why it works**, **what it costs**, **failure modes**, and **the empirical evidence**.
 
 ---
 
+## 🚨 What's New in v0.7.1: Driver Latency Advisory Engine & Catalog
+
+Hardware and driver combinations on modern gaming PCs are virtually infinite. Even with optimized CPU core isolation, a single mechanically bugged kernel driver can monopolize the system queue and trigger catastrophic DPC latency spikes (ranging from 2,000 µs to over 8,000 µs).
+
+**Stutter Guard v0.7.1 introduces an embedded Driver Latency Advisory Engine:**
+- **77 Verified Driver Regression Profiles:** Embedded database cataloging known DPC/ISR storms across GPU, Network, Audio, Storage, and System hardware classes.
+- **Deterministic Version Parsing & Vendor Normalization:** Automatically resolves complex vendor version conventions (e.g., converting Windows 4-part NVIDIA display driver strings `32.0.15.3118` → `531.18`, Realtek branch identifiers, and Intel Ethernet releases).
+- **Dynamic Action Resolution:** Evaluates live hardware against the catalog and explicitly prescribes whether to **Update to a newer release**, **Roll back to a confirmed stable baseline**, or **Reconfigure/Remove** problematic audio processing objects (APOs) and polling helpers.
+- **Live UI & Scan Report Visibility:** Problematic drivers are immediately surfaced on the **Recommendations** screen with measured latency penalties (~µs), root-cause failure mechanisms, and direct vendor download links, alongside a dedicated `DRIVER ADVISORIES` section in exportable scan reports.
+
+---
+
 ## Table of Contents
-- [Why Stutter Guard? (The Micro-Stutter Problem)](#why-stutter-guard-the-micro-stutter-problem)
+- [Why Stutter Guard? (The Micro-Stutter Problem & The ECU Analogy)](#why-stutter-guard-the-micro-stutter-problem--the-ecu-analogy)
 - [Key Modules & Capabilities](#key-modules--capabilities)
 - [Comprehensive Step-by-Step Usage Guide](#comprehensive-step-by-step-usage-guide)
   - [Phase 1: Pre-Flight Baseline Measurement](#phase-1-pre-flight-baseline-measurement)
-  - [Phase 2: Hardware Inspection & Core Benchmark](#phase-2-hardware-inspection--core-benchmark)
+  - [Phase 2: Hardware Inspection, Driver Audit & Core Benchmark](#phase-2-hardware-inspection-driver-audit--core-benchmark)
   - [Phase 3: Hardware-Aware Interrupt Affinity & MSI Mode](#phase-3-hardware-aware-interrupt-affinity--msi-mode)
   - [Phase 4: Network Adapter PHY Optimization](#phase-4-network-adapter-phy-optimization)
   - [Phase 5: Power Plan & Native Timer Resolution](#phase-5-power-plan--native-timer-resolution)
@@ -36,16 +48,37 @@ Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen
 
 ---
 
-## Why Stutter Guard? (The Micro-Stutter Problem)
+## Why Stutter Guard? (The Micro-Stutter Problem & The ECU Analogy)
 
-Even on flagship gaming rigs (RTX 4090 / RX 7900 XTX / 7800X3D / 9950X3D / Core i9), frame drops and 1% low micro-stutters happen regardless of raw GPU horsepower or clock speeds. The root causes are kernel-level **Deferred Procedure Calls (DPCs) and Interrupt Service Routines (ISRs)**:
+Even on flagship gaming rigs (RTX 4090 / RX 7900 XTX / 7800X3D / 9950X3D / Core i9), frame drops and 1% low micro-stutters occur regardless of raw GPU horsepower or clock speeds. 
 
-1. **Interrupt Congestion on Game Cores:** By default, Windows dumps driver interrupts (GPU drivers, high-polling rate USB mice, Wi-Fi, audio controllers, and NVMe drives) onto the exact same physical CPU cores executing your game's render and physics threads. When a high-polling mouse or network packet triggers an interrupt, the game thread stalls for hundreds of microseconds.
-2. **PHY Network Sleep Cycles:** Modern Ethernet and Wi-Fi drivers enable aggressive Energy Efficient Ethernet (EEE / 802.3az) and link power gating out of the box. The second network traffic pauses, the PHY chip drops into deep sleep, introducing 500 µs to 2,000 µs latency spikes when incoming multiplayer packets hit the interface.
-3. **Timer Resolution Drift:** Modern Windows 11 suspends timer resolution requests from background processes, resulting in erratic 15.6 ms timer jitter that wrecks frame pacing.
-4. **The "Snake Oil" Problem:** The internet is flooded with dangerous registry `.bat` files and "debloat utilities" that delete critical Windows services, break multiplayer anti-cheat engines (Ricochet, Vanguard, Easy Anti-Cheat), cause PCIe WHEA crashes, provide zero empirical benchmarks, and offer no way to undo changes.
+### The Car ECU Tune vs. Dyno Analogy
 
-**Stutter Guard fixes this through engineering precision:** dynamic hardware topology analysis, measured latency ranking, non-invasive kernel driver tuning, automated transactional backups, and complete, one-click reversibility.
+Consider a turbocharged car running a restrictive factory economy ECU map:
+- **The Dyno (Cinebench & 3DMark Time Spy):** On a steady-state dyno pull, the car reaches its rated peak horsepower under wide-open throttle. But on the road, that same car exhibits noticeable turbo lag on throttle tip-in and sputters at redline due to conservative factory fuel trim and emissions throttling. Synthetic benchmarks only test continuous compute capacity; they never expose transient preemption stalls.
+- **The Factory Map (Stock Windows):** Out of the box, Windows is configured for fleet power conservation: link-state power gating (PCIe ASPM), USB selective suspend, network PHY sleep states, and balanced CPU C-states. Furthermore, the Windows interrupt arbiter scatters hardware IRQs across all logical cores indiscriminately. When a high-polling mouse movement, network packet burst, or GPU state change fires an interrupt, Windows routinely dumps that interrupt onto the exact core executing the game's render thread. That single frame takes 35 ms instead of 5 ms to draw, producing an unmistakable micro-stutter.
+- **The Performance Tune (Stutter Guard):** Applying a calibrated ECU tune eliminates boost lag, ensures immediate throttle response, and stabilizes redline execution, trading deep idle efficiency for immediate transient responsiveness. Stutter Guard applies that exact architectural calibration to Windows: isolating gaming cores completely, locking timer resolution at 0.5 ms, capping C-states at C1, and eliminating peripheral sleep delays.
+- **Mechanical Faults vs. Tuning:** An ECU tune cannot fix a cracked spark plug or blown gasket. If a system runs a mechanically bugged kernel driver (such as a Wi-Fi driver monopolizing DIRQL for 3.5 ms during background beacon scans), that faulty component must be diagnosed and replaced first. Stutter Guard handles both: isolating faulty drivers via its catalog, and then applying the scheduling tune.
+
+```
++-----------------------------------------------------------------------------------+
+|                            STUTTER GUARD ARCHITECTURE                             |
++-----------------------------------------------------------------------------------+
+|  DIAGNOSTIC ENGINE (Fault Isolation)   -->  Detects & fixes mechanically broken   |
+|  - 77-Driver DPC/ISR Catalog                drivers (prescribes Update / Rollback)|
+|  - Real-time Hardware ID Matching                                                 |
+|  - Vendor Version Normalization                                                   |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|  SCHEDULING ENGINE (The ECU Flash)     -->  Quarantines game cores, eliminates    |
+|  - Hardware IRQ Affinity Routing            interrupt contention, and locks       |
+|  - SMT Stolen-Time Core Benchmarking        real-time frame pacing                |
+|  - PHY / ASPM / C-State Power Tuning                                              |
+|  - Native 0.5 ms Global Timer Sync                                                |
++-----------------------------------------------------------------------------------+
+```
 
 ---
 
@@ -53,42 +86,44 @@ Even on flagship gaming rigs (RTX 4090 / RX 7900 XTX / 7800X3D / 9950X3D / Core 
 
 | Module | Core Functionality |
 | :--- | :--- |
-| **Home (System Scan)** | Read-only hardware and OS topology inspection: Windows build and UBR, CPU core grouping (CCDs / 3D V-Cache / Intel P & E cores / SMT mapping), chassis form-factor detection, GPU drivers and driver files, Virtualization-Based Security (VBS), system timer resolution, active WHEA hardware errors, and integrated progressive **Core Benchmark**. Scan reports export cleanly to text. |
+| **Driver Advisory Engine** *(New in v0.7.1)* | Real-time audit against 77 catalogued driver regressions. Automatically normalizes vendor versions (NVIDIA display drivers, Realtek, Intel) and prescribes concrete remediation: **Update**, **Roll back**, or **Reconfigure/Remove**. |
+| **Home (System Scan)** | Read-only hardware and OS topology inspection: Windows build and UBR, CPU core grouping (CCDs / 3D V-Cache / Intel P & E cores / SMT mapping), chassis form-factor detection, GPU drivers and driver files, Virtualization-Based Security (VBS), system timer resolution, active WHEA hardware errors, driver advisories summary, and integrated progressive **Core Benchmark**. Scan reports export cleanly to text. |
 | **Interrupts & Affinity** | Hardware-aware IRQ affinity engine. Automatically preserves gaming cores completely interrupt-free (CPU 0/1; the 3D V-Cache CCD on AMD X3D; top-ranked CCDs or P-cores on Intel). Ranks secondary cores with an integrated progressive Core Benchmark (timer wake-up latency, speed, interrupt load, SMT stolen time) and assigns devices strategically: GPU, primary mouse USB controller, default audio, wired/wireless NIC RSS queues (on 2 adjacent cores), and remaining USB controllers. Supports safe MSI mode conversions. |
 | **Network** | Eliminates latency-inducing PHY power-saving modes on physical wired network adapters directly from driver properties: Energy Efficient Ethernet (EEE / 802.3az), Green Ethernet, Gigabit Lite, Power Saving Mode, Realtek ASPM/CLKREQ, Selective Suspend, Flow Control, and Interrupt Moderation. Automatically restarts the NIC without requiring a full Windows reboot. |
 | **Power Plan** | Applies a customized "Stutter Guard - Ultimate" power plan (light C-states, EPP 0, minimum processor state 100%, 5000 ms PPM check intervals, disabled USB/PCIe/NVMe/AHCI power gating), or a tuned Balanced profile for heterogeneous architectures that require core parking. |
-| **GPU** | Driver-level AMD registry tuning (power gating, deep sleep, idle power optimizations, and memory clock DPM controls). Inspects the installed driver binary and automatically filters out keys not referenced by your specific driver version. Includes an optional toggle for Multi-Plane Overlay (MPO). Dynamic UI displays GPU tuning options when compatible hardware is present. |
+| **GPU** | Driver-level AMD registry tuning (power gating, deep sleep, idle power optimizations, and memory clock DPM controls). Inspects the installed driver binary and automatically filters out keys not referenced by the specific installed driver version. Includes an optional toggle for Multi-Plane Overlay (MPO). Dynamic UI displays GPU tuning options when compatible hardware is present. |
 | **Boot Tasks** | Configures lightweight persistence via Windows Task Scheduler: automated device power-saving cleanup on system boot and an ultra-light (40 KB) native 0.5 ms timer resolution agent running at logon. Recognizes and preserves existing user tasks. |
 | **Services** | Granular control over 439 catalogued Windows services with full descriptions and impact warnings. Features tested presets: *Windows Default*, *Gaming Safe*, *Gaming Aggressive*, *Laptop*, and *Workstation / VM Host*. Presets only ever lower startup types; critical OS services, anti-cheat engines (Ricochet, Vanguard, EAC, BattlEye), and Xbox Game Pass services remain strictly protected. |
 | **Tasks** | Audits 241 catalogued Windows scheduled tasks, detailing triggers, actions, and idle maintenance bursts (the common cause of latency spikes ~10 minutes into a session). Disables tasks cleanly without deletion. |
-| **Recommendations** | Practical recommendations and guidance: Process Lasso core separation guidelines with an automatic "Save Starter Rules" exporter tailored to your CPU topology, WinUtil configurations, GPU cleaner workflows, LatencyMon audit methodologies, and a read-only BIOS checklist. |
+| **Recommendations** | Actionable recommendations: live Driver Hazard Advisories with measured latency impact and vendor fix links, Process Lasso core separation guidelines with an automatic "Save Starter Rules" exporter tailored to detected CPU topology, WinUtil configurations, GPU cleaner workflows, LatencyMon audit methodologies, and a read-only BIOS checklist. |
 | **Safety & Reversibility** | Automatic system restore points prior to batch application, complete per-tweak registry `.reg` and `.pow` file backups, continuous JSON journaling (`C:\ProgramData\Stutter Guard\journal.json`), per-tweak Revert controls, and a standalone `undo-all.ps1` script executable even in Windows Safe Mode. |
 
 ---
 
 ## Comprehensive Step-by-Step Usage Guide
 
-Follow this workflow in order. You cannot optimize what you do not measure.
+Follow this workflow in order. Optimization requires objective measurement.
 
 ### Phase 1: Pre-Flight Baseline Measurement
 
-Before touching any settings, establish an objective, repeatable baseline:
+Before applying any modifications, establish an objective, repeatable baseline:
 
 1. Download and install [LatencyMon](https://www.resplendence.com/latencymon).
 2. Close background monitoring utilities that poll hardware registers (HWiNFO, MSI Afterburner / RivaTuner, Process Explorer, RGB software).
-3. Start LatencyMon and leave the system completely idle (hands off keyboard and mouse) for **10 to 15 minutes**.
+3. Start LatencyMon and leave the system completely idle (untouched without user input) for **10 to 15 minutes**.
 4. Note three numbers:
    - **Highest measured interrupt-to-process latency** (in µs).
    - **Highest reported DPC routine execution time** and its driver file (e.g., `nvlddmkm.sys`, `amdkmdag.sys`, `ndis.sys`, `Wdf01000.sys`).
    - The busiest CPU under the **CPUs** tab.
-5. In Stutter Guard, navigate to the **Home** tab and click **Save scan report** to preserve a baseline record of your hardware topology and default driver registry states.
+5. In Stutter Guard, navigate to the **Home** tab and click **Save scan report** to preserve a baseline record of hardware topology, driver advisories, and default driver registry states.
 
 ---
 
-### Phase 2: Hardware Inspection & Core Benchmark
+### Phase 2: Hardware Inspection, Driver Audit & Core Benchmark
 
-1. On the **Home** tab, inspect your detected hardware profile:
+1. On the **Home** tab, inspect the detected hardware profile:
    - **CPU Topology:** Stutter Guard automatically detects CCD boundaries, 3D V-Cache groups, Intel P-cores vs. E-cores, and SMT sibling threads.
+   - **Driver Advisories:** Review the driver audit summary. If any installed driver matches known DPC regressions in the catalog, navigate to the **Recommendations** screen to view the recommended action (**Update**, **Roll back**, or **Reconfigure**) before applying system tweaks.
    - **VBS & Timer:** Verifies whether Virtualization-Based Security (HVCI) is running and displays the active global timer resolution.
 2. In the **Core Benchmark** card, click **Run core benchmark**:
    - Executes a progressive 2-minute latency and speed assessment across every physical CPU core.
@@ -148,9 +183,9 @@ Navigate to the **Power** and **Boot tasks** screens:
 Navigate to the **Services** and **Tasks** screens:
 
 1. **Services:**
-   - Select the preset that matches your machine:
+   - Select the preset that matches the target machine:
      - **Gaming Safe (Default):** Shuts down telemetry, diagnostic tracking, error reporting, and background indexing loops. Windows core services, anti-cheat drivers (Ricochet, Vanguard, EAC, BattlEye), and Xbox Game Pass dependencies remain strictly protected.
-     - **Gaming Aggressive:** Disables print spooling (if you don't own a printer), Bluetooth (if no BT devices exist), and secondary search indexing.
+     - **Gaming Aggressive:** Disables print spooling (if no printer exists), Bluetooth (if no BT devices exist), and secondary search indexing.
      - **Laptop / Workstation:** Keeps virtualization (SVM/VT-x) and mobile sensors enabled.
 2. **Tasks:**
    - Disables idle maintenance triggers that wake up ~10 minutes into a session (the common cause of sudden mid-game frame spikes). Tasks are disabled cleanly—never deleted.
@@ -164,7 +199,7 @@ Navigate to the **Services** and **Tasks** screens:
 2. Launch Stutter Guard and navigate to **Interrupts**:
    - Click **Check interrupts**: Runs a 30-second silent audio stream and network burst, querying Windows kernel performance counters to verify device interrupts and DPCs are hitting their assigned CPU cores.
 3. Launch **LatencyMon** and run a 10 to 15-minute hands-off idle run:
-   - Compare your interrupt-to-process latency, highest DPC routine duration, and per-CPU load against your Phase 1 baseline.
+   - Compare measured interrupt-to-process latency, highest DPC routine duration, and per-CPU load against the Phase 1 baseline.
 
 ---
 
@@ -190,7 +225,7 @@ C:\ProgramData\Stutter Guard\
   1. Boot Windows into **Safe Mode** or open a **Windows Recovery Command Prompt**.
   2. Navigate to `C:\ProgramData\Stutter Guard\`.
   3. Right-click `undo-all.ps1` and select **Run with PowerShell** (or run `powershell -ExecutionPolicy Bypass -File "C:\ProgramData\Stutter Guard\undo-all.ps1"`).
-  4. Restart your PC. All original Windows defaults are restored immediately.
+  4. Restart the PC. All original Windows defaults are restored immediately.
 
 ---
 
@@ -199,8 +234,8 @@ C:\ProgramData\Stutter Guard\
 Unlike commercial tools or dubious "debloaters", Stutter Guard has **zero background network calls**. It never phones home automatically.
 
 On the **Home** tab, two manual buttons allow submitting diagnostics directly to developer channels on Discord:
-- **Submit hardware report:** Uploads your hardware scan report (CPU topology, GPU drivers, timer resolution) and benchmark logs. Helps expand hardware affinity heuristics for rare or newly released chipsets.
-- **Send feedback:** Prompts for your direct feedback, suggestions, or bug description, and sends it along with the diagnostic log.
+- **Submit hardware report:** Uploads the hardware scan report (CPU topology, GPU drivers, timer resolution) and benchmark logs. Helps expand hardware affinity heuristics for rare or newly released chipsets.
+- **Send feedback:** Prompts for direct user feedback, suggestions, or bug description, and sends it along with the diagnostic log.
 
 Both actions require explicit confirmation and display the exact payload before transmission.
 
@@ -226,7 +261,7 @@ Stutter Guard includes an exhaustive hardware matrix verified by automated integ
 #### Will Stutter Guard trigger multiplayer anti-cheat bans?
 **No.** Stutter Guard does not inject code, hook system APIs, modify game memory, or replace system binaries. It only modifies official, documented Windows registry parameters and driver properties provided by Microsoft and hardware vendors. Anti-cheat services (Riot Vanguard, Call of Duty Ricochet, Easy Anti-Cheat, BattlEye) remain permanently locked and untouched.
 
-#### Can these tweaks damage my hardware or cause overheating?
+#### Can these tweaks damage hardware or cause overheating?
 **No.** Stutter Guard does not overclock, undervolt, alter CPU/GPU core multipliers, or modify fan profiles. Setting light C-states (C1 only) increases idle power consumption by approximately 15–20 W on desktop systems, which is explicitly noted in the UI.
 
 #### Does Stutter Guard work on Windows 10 as well as Windows 11?
@@ -236,7 +271,7 @@ Stutter Guard includes an exhaustive hardware matrix verified by automated integ
 
 ## Download & Running (Pre-Compiled Binary)
 
-If you just want to run the tool without compiling from source:
+To run the tool without compiling from source:
 
 1. Download **`StutterGuard.exe`** from the **[Stutter Guard Releases](https://github.com/Kareem-Shabaka/stutter-guard/releases)** page.
 2. Right-click `StutterGuard.exe` and select **Run as administrator**.
@@ -261,7 +296,7 @@ cd stutter-guard
 build.cmd
 ```
 
-`build.cmd` executes the entire 200+ unit test suite, restores dependencies, and publishes a self-contained single-file executable to:
+`build.cmd` executes the entire 215 unit test suite, restores dependencies, and publishes a self-contained single-file executable to:
 ```
 publish\StutterGuard.exe
 ```
@@ -286,7 +321,7 @@ stutter-guard/
 │   │   ├── timerres.c
 │   │   └── DpcTimerRes.exe
 │   ├── DpcTweaker.Core/             # Hardware detection (SetupAPI/cfgmgr32), affinity planner,
-│   │   ├── Catalog/                 #   embedded services.json and tasks.json catalogs,
+│   │   ├── Catalog/                 #   embedded bad_drivers.json, services.json, tasks.json catalogs,
 │   │   ├── Detection/               #   CPU topology parsers, journal engine, and backup sets
 │   │   ├── Infra/
 │   │   ├── Interrupts/
@@ -297,7 +332,8 @@ stutter-guard/
 │   ├── DpcTweaker.UI/               # Pure MVVM view models (INotifyPropertyChanged, RelayCommand)
 │   └── DpcTweaker.App/              # WPF desktop application (Fluent Dark/Light UI, boot agent)
 ├── tests/
-│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix covering all CPU architectures
+│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix covering all CPU architectures (215 tests)
+├── tools/                           # Automated bad driver catalog generation & verification toolchain
 ├── build.cmd                        # Automated build & publish script
 ├── LICENSE                          # GPLv3 with Non-Commercial Rider
 └── README.md
@@ -311,7 +347,7 @@ Copyright (C) 2026 Kareem Shabaka. All Rights Reserved.
 
 Stutter Guard is licensed under the **GNU General Public License v3 (GPLv3)** subject to an express **Non-Commercial / No-Monetization Addendum (Rider)**:
 
-- **Free for Personal & Community Use:** You are 100% free to run, inspect, compile, modify, and distribute this software for personal, academic, educational, and gaming purposes.
+- **Free for Personal & Community Use:** Users are 100% free to run, inspect, compile, modify, and distribute this software for personal, academic, educational, and gaming purposes.
 - **Copyleft Reciprocity:** Any modified versions or forks distributed must share their complete source code under the exact same license terms.
 - **Strictly No Monetization:** Selling, charging fees for copies, paywalling, or commercially monetizing the software, its compiled binaries, or any derivative works or forks (including listing on commercial app stores such as the Microsoft Store or Steam) is strictly prohibited without prior written authorization from the copyright holder.
 
@@ -323,7 +359,7 @@ See the complete legal text in [LICENSE](LICENSE).
 
 Stutter Guard is developed independently and distributed **100% free of charge**. No paywalls, no stripped feature tiers, no advertisements, and no forced background telemetry.
 
-If Stutter Guard eliminated your micro-stutters, fixed your frame pacing, or smoothed out your audio latency, back the project on GitHub Sponsors:
+If Stutter Guard eliminated micro-stutters, fixed frame pacing, or smoothed out audio latency, back the project on GitHub Sponsors:
 
 👉 **[Sponsor Kareem Shabaka on GitHub](https://github.com/sponsors/Kareem-Shabaka)**
 
