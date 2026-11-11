@@ -165,6 +165,15 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     public RelayCommand OpenStartupAppsCommand { get; }
     public RelayCommand OpenWinUtilCommand { get; }
 
+    /// <summary>Starts a run with a fresh token and disposes whatever the previous run left behind.</summary>
+    private CancellationTokenSource BeginRun()
+    {
+        var previous = _cts;
+        _cts = new CancellationTokenSource();
+        try { previous?.Dispose(); } catch { }
+        return _cts;
+    }
+
     private void Report(string text, double fraction) => _main.Ui.Post(() =>
     {
         ProgressText = text;
@@ -180,13 +189,13 @@ public sealed class InterruptOptionsViewModel : ObservableObject
                 "Close games, browsers and monitoring apps, then leave the PC alone until it finishes (the first 30 seconds measure the idle load).\n\nStart now?"))
             return;
 
-        _cts = new CancellationTokenSource();
+        var cts = BeginRun();
         Running = true;
         _main.SetGlobalBusy(true);
         Message = "";
         try
         {
-            var result = await Task.Run(() => CoreBenchmark.Run(engine.Profile.Cpu, engine.Profile.CpuSets, Samples, IdleSeconds, Report, _cts.Token));
+            var result = await Task.Run(() => CoreBenchmark.Run(engine.Profile.Cpu, engine.Profile.CpuSets, Samples, IdleSeconds, Report, cts.Token));
             engine.SetBench(result);
             _main.ReloadPages();
             _main.Interrupts.Message = "Benchmark saved. The plan and the rows below now use it: check the CPUs, then Apply selected and restart.";
@@ -219,7 +228,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     {
         var engine = _main.Engine;
         if (engine is null) return;
-        _cts = new CancellationTokenSource();
+        var cts = BeginRun();
         Running = true;
         _main.SetGlobalBusy(true);
         Message = "";
@@ -227,7 +236,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         {
             var r = await Task.Run(() => InterruptCheck.Run(engine.Plan, engine.Profile.Cpu.LogicalCount, DownloadDuringCheck, 8, 20,
                 a => engine.Journal.AppliedAt("irq." + a.Device.InstanceId) is DateTime t && t > Core.Infra.BootTime.LastBoot,
-                Report, _cts.Token));
+                Report, cts.Token, engine.Profile.Cpu));
             _main.LastCheck = r;
             engine.LastCheck = r;
             ShowCheck(r);

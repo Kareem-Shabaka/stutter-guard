@@ -103,7 +103,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 | **Network** | Eliminates latency-inducing PHY power-saving modes on physical wired network adapters directly from driver properties: Energy Efficient Ethernet (EEE / 802.3az), Green Ethernet, Gigabit Lite, Power Saving Mode, Realtek ASPM/CLKREQ, Selective Suspend, Flow Control, and Interrupt Moderation. Automatically restarts the NIC without requiring a full Windows reboot. |
 | **Power Plan** | Applies a customized "Stutter Guard - Ultimate" power plan (light C-states, EPP 0, minimum processor state 100%, 5000 ms PPM check intervals, disabled USB/PCIe/NVMe/AHCI power gating), or a tuned Balanced profile for heterogeneous architectures that require core parking. |
 | **GPU** | Driver-level AMD registry tuning (power gating, deep sleep, idle power optimizations, and memory clock DPM controls). Inspects the installed driver binary and automatically filters out keys not referenced by the specific installed driver version. Includes an optional toggle for Multi-Plane Overlay (MPO). Dynamic UI displays GPU tuning options when compatible hardware is present. |
-| **Boot Tasks** | Configures lightweight persistence via Windows Task Scheduler: automated device power-saving cleanup on system boot and an ultra-light (40 KB) native 0.5 ms timer resolution agent running at logon. Recognizes and preserves existing user tasks. |
+| **Boot Tasks** | Configures lightweight persistence via Windows Task Scheduler: automated device power-saving cleanup on system boot and a 6 KB 0.5 ms timer resolution agent running at logon. Recognizes and preserves existing user tasks. |
 | **Services** | Granular control over 439 catalogued Windows services with full descriptions and impact warnings. Features tested presets: *Windows Default*, *Gaming Safe*, *Gaming Aggressive*, *Laptop*, and *Workstation / VM Host*. Presets only ever lower startup types; critical OS services, anti-cheat engines (Ricochet, Vanguard, EAC, BattlEye), and Xbox Game Pass services remain strictly protected. |
 | **Tasks** | Audits 241 catalogued Windows scheduled tasks, detailing triggers, actions, and idle maintenance bursts (the common cause of latency spikes ~10 minutes into a session). Disables tasks cleanly without deletion. |
 | **Recommendations** | Actionable recommendations: live Driver Hazard Advisories with measured latency impact and vendor fix links, Process Lasso core separation guidelines with an automatic "Save Starter Rules" exporter tailored to detected CPU topology, WinUtil configurations, GPU cleaner workflows, LatencyMon audit methodologies, and a read-only BIOS checklist. |
@@ -184,7 +184,7 @@ Navigate to the **Power** and **Boot tasks** screens:
    - **Laptops / Parking-Dependent CPUs:** Select **Balanced (Devices Only)** to preserve core parking and mobile battery profiles while stripping peripheral sleep delays.
 2. **Boot Tasks:**
    - **Device Power Saving Cleanup (SYSTEM Boot Task):** Automatically unchecks *"Allow the computer to turn off this device to save power"* across all USB hubs and controllers on system startup.
-   - **Native 0.5 ms Timer Agent (Logon Task):** Deploys the ultra-lightweight (40 KB) native Win32 `DpcTimerRes.exe` helper to keep the Windows system timer locked at 0.5 ms resolution.
+   - **0.5 ms Timer Agent (Logon Task):** Deploys the 6 KB `DpcTimerRes.exe` helper to keep the Windows system timer locked at 0.5 ms resolution. It verifies the resolution Windows actually granted and exits with a distinct code (3 refused, 4 granted too coarse) instead of holding a request the kernel ignored. Ships as a managed build so it can be rebuilt with the in-box `csc.exe`; `timerres.c` remains the reference native implementation for anyone with MinGW-w64.
 3. Click **Apply selected**.
 
 ---
@@ -328,7 +328,7 @@ stutter-guard/
 │   └── workflows/
 │       └── build-and-release.yml    # CI/CD automated build, self-test, and release pipeline
 ├── src/
-│   ├── DpcTimerRes/                 # Standalone native C Win32 0.5 ms timer resolution agent
+│   ├── DpcTimerRes/                 # Standalone 0.5 ms timer resolution agent (timerres.cs / .c)
 │   │   ├── timerres.c
 │   │   └── DpcTimerRes.exe
 │   ├── DpcTweaker.Core/             # Hardware detection (SetupAPI/cfgmgr32), affinity planner,
