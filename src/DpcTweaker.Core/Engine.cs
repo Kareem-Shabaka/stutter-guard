@@ -18,6 +18,13 @@ public sealed class TweakEngine
     {
         Profile = profile;
         Journal = journal;
+
+        // Keep undo-all.ps1 in lockstep with journal.json: it is rewritten every time the
+        // journal is flushed, which now happens before each change rather than after it.
+        Journal.SidecarWriter = j => JournalRestorer.WriteUndoScripts(j, _sessionBackup);
+
+        RepairOrphanedEntries();
+
         Options = AppOptions.Load(journal, profile);
         Rebuild();
     }
@@ -41,6 +48,20 @@ public sealed class TweakEngine
     public List<string> LastFinishErrors { get; } = new();
 
     public event Action? CatalogChanged;
+
+    /// <summary>
+    /// Moves journal entries that no tweak owns any more onto the tweak that should own them.
+    /// Without this they can never be reverted one by one and they keep showing up in undo-all.ps1.
+    /// </summary>
+    private void RepairOrphanedEntries()
+    {
+        int moved = Journal.RebindTweak("power.plan", PowerModule.PlanActiveId);
+        if (moved > 0)
+        {
+            try { Journal.Save(); } catch (Exception ex) { Log.Error("Journal save failed: " + ex.Message); }
+            Log.Info($"Journal: moved {moved} orphaned \"power.plan\" entry/entries to {PowerModule.PlanActiveId}.");
+        }
+    }
 
     public void SetOptions(AppOptions options)
     {
@@ -98,29 +119,37 @@ public sealed class TweakEngine
         }
     }
 
+    /// <summary>
+    /// Write-ahead apply: each tweak runs inside a journal transaction, so its before-states are
+    /// on disk (and in undo-all.ps1) before it changes anything. If it throws, the transaction is
+    /// rolled back and the tweak is not marked applied, leaving no phantom records behind.
+    /// </summary>
     public IReadOnlyList<TweakResult> Apply(IEnumerable<ITweak> tweaks)
     {
         var ctx = NewContext();
         var results = new List<TweakResult>();
         foreach (var t in tweaks)
         {
+            var txn = Journal.BeginTransaction(t.Info.Id);
             try
             {
                 t.Apply(ctx);
                 Journal.MarkApplied(t.Info.Id);
+                Journal.CommitTransaction(txn);
                 _lastErrors.Remove(t.Info.Id);
                 results.Add(new TweakResult(t, true, null));
                 Log.Info("Applied " + t.Info.Id);
             }
             catch (Exception ex)
             {
+                bool rolledBack = Journal.RollbackTransaction(txn);
                 _lastErrors[t.Info.Id] = ex.Message;
                 results.Add(new TweakResult(t, false, ex.Message));
-                Log.Error($"Apply {t.Info.Id} failed: {ex.Message}");
+                Log.Error($"Apply {t.Info.Id} failed: {ex.Message}" + (rolledBack ? " (journal entries rolled back)" : ""));
             }
             finally
             {
-                try { Journal.Save(); } catch (Exception ex) { Log.Error("Journal save failed: " + ex.Message); }
+                Journal.Flush();
             }
         }
         RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));
@@ -149,7 +178,7 @@ public sealed class TweakEngine
             }
             finally
             {
-                try { Journal.Save(); } catch { }
+                Journal.Flush();
             }
         }
         RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));

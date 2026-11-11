@@ -3,7 +3,7 @@ using System.Text;
 namespace DpcTweaker.Core.Infra;
 
 /// <summary>
-/// Plain backup files for one session: C:\ProgramData\DPC Latency Tweaker\Backups\yyyyMMdd-HHmmss\
+/// Plain backup files for one session: C:\ProgramData\Stutter Guard\Backups\yyyyMMdd-HHmmss\
 /// .reg exports of every key touched, .pow exports of every plan touched, a README
 /// and an undo.ps1 that restores the set without the app (works in Safe Mode).
 /// </summary>
@@ -12,6 +12,9 @@ public sealed class BackupSet
     private readonly HashSet<string> _exportedKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _exportedPlans = new();
     private readonly object _gate = new();
+
+    /// <summary>Longest file name Windows takes comfortably, and the prefix kept when hashing.</summary>
+    private const int MaxNameLength = 150;
 
     private BackupSet(string folder)
     {
@@ -93,11 +96,33 @@ public sealed class BackupSet
             """);
     }
 
-    private static string SafeName(string s)
+    /// <summary>
+    /// Every PnP key of one device ends with "\Affinity Policy" or "\MessageSignaledInterruptProperties",
+    /// so a plain truncation at the length cap keeps the identical prefix for both and they collide.
+    /// Anything over the cap therefore keeps its first characters plus a stable hash of the full path,
+    /// so two different keys can never share one .reg file.
+    /// </summary>
+    internal static string SafeName(string s)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(s.Length);
         foreach (char c in s) sb.Append(char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_');
         string name = sb.ToString();
-        return name.Length > 150 ? name[..150] : name;
+        if (name.Length <= MaxNameLength) return name;
+
+        string hash = StableHash(s).ToString("x8");
+        int keep = MaxNameLength - hash.Length - 1;
+        return name[..keep] + "-" + hash;
+    }
+
+    /// <summary>FNV-1a over the UTF-16 code units: stable across processes and runs, unlike string.GetHashCode.</summary>
+    private static uint StableHash(string s)
+    {
+        uint h = 2166136261;
+        foreach (char c in s)
+        {
+            h = (h ^ (byte)(c & 0xFF)) * 16777619;
+            h = (h ^ (byte)(c >> 8)) * 16777619;
+        }
+        return h;
     }
 }

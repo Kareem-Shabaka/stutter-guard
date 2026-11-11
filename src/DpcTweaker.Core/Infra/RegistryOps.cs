@@ -18,6 +18,7 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
                 RegistryValueKind.DWord => FormatDword(AsDword()),
                 RegistryValueKind.QWord => AsQword().ToString(CultureInfo.InvariantCulture),
                 RegistryValueKind.Binary => BitConverter.ToString((byte[])Value!).Replace('-', ' '),
+                RegistryValueKind.None => Value is byte[] nb ? BitConverter.ToString(nb).Replace('-', ' ') : "",
                 RegistryValueKind.MultiString => string.Join(" | ", (string[])Value!),
                 _ => "\"" + (Value?.ToString() ?? "") + "\"",
             };
@@ -46,6 +47,8 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
         RegistryValueKind.DWord => AsDword().ToString(CultureInfo.InvariantCulture),
         RegistryValueKind.QWord => AsQword().ToString(CultureInfo.InvariantCulture),
         RegistryValueKind.Binary => Convert.ToHexString((byte[])Value!),
+        // "None" carries raw bytes; there is no .NET type for it, so treat it like Binary.
+        RegistryValueKind.None => Value is byte[] none ? Convert.ToHexString(none) : "",
         RegistryValueKind.MultiString => string.Join("\n", (string[])Value!),
         _ => Value?.ToString() ?? "",
     };
@@ -55,6 +58,7 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
         RegistryValueKind.DWord => unchecked((int)uint.Parse(data, CultureInfo.InvariantCulture)),
         RegistryValueKind.QWord => unchecked((long)ulong.Parse(data, CultureInfo.InvariantCulture)),
         RegistryValueKind.Binary => Convert.FromHexString(data),
+        RegistryValueKind.None => data.Length == 0 ? Array.Empty<byte>() : Convert.FromHexString(data),
         RegistryValueKind.MultiString => data.Split('\n'),
         _ => data,
     };

@@ -104,6 +104,10 @@ public sealed class SystemProfile
         {
             if (Cpu.IsHybrid) return "Intel hybrid (P-cores and E-cores)";
             if (Cpu.IsDualCcdX3D) return "Dual-CCD X3D (V-Cache on one CCD)";
+            // 7800X3D / 9800X3D: one CCD, but its L3 is the stacked one. The name says it even if
+            // the cache layout is reported oddly by a given firmware.
+            if (Cpu.IsSingleCcdVCache || CpuName.Contains("X3D", StringComparison.OrdinalIgnoreCase))
+                return "Single CCD with 3D V-Cache";
             if (Cpu.IsMultiCcd) return $"{Cpu.L3Groups.Count} CCDs / CCXs";
             return "Single CCD / single L3";
         }

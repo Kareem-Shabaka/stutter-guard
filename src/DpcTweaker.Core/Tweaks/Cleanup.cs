@@ -130,13 +130,44 @@ public static class ServiceControl
         Log.Info($"Service {name} start = {StartTypes.Label(t)}");
     }
 
-    /// <summary>Journal data "start|delayed" back to a start type.</summary>
-    public static StartType FromJournal(string? data)
+    /// <summary>
+    /// "start|delayed" as journalled, back to the two registry values. An empty second half means
+    /// DelayedAutostart didn't exist at all, which is different from existing with value 0.
+    /// </summary>
+    public static (uint? Start, uint? Delayed) SplitJournal(string? data)
     {
-        if (string.IsNullOrEmpty(data)) return StartType.Unknown;
+        if (string.IsNullOrEmpty(data)) return (null, null);
         var parts = data.Split('|');
         uint? start = uint.TryParse(parts[0], out uint s) ? s : null;
         uint? delayed = parts.Length > 1 && uint.TryParse(parts[1], out uint d) ? d : null;
+        return (start, delayed);
+    }
+
+    /// <summary>
+    /// sc.exe config writes Start and leaves DelayedAutostart alone, so restoring a service that
+    /// was "Automatic (delayed start)" with a plain "auto" would leave it delayed. On this PC 10 of
+    /// 105 auto services carry DelayedAutostart = 1, so the second value is restored explicitly.
+    /// </summary>
+    public static void RestoreDelayedAutostart(string name, uint? delayed)
+    {
+        string key = @"HKLM\SYSTEM\CurrentControlSet\Services\" + name;
+        if (delayed is null)
+        {
+            RegistryOps.DeleteValue(key, "DelayedAutostart");
+            Log.Info($"Service {name} DelayedAutostart removed (it wasn't set before)");
+        }
+        else
+        {
+            RegistryOps.Write(key, "DelayedAutostart", Microsoft.Win32.RegistryValueKind.DWord,
+                unchecked((int)delayed.Value));
+            Log.Info($"Service {name} DelayedAutostart = {delayed.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
+    /// <summary>Journal data "start|delayed" back to a start type.</summary>
+    public static StartType FromJournal(string? data)
+    {
+        var (start, delayed) = SplitJournal(data);
         return StartTypes.FromRegistry(start, delayed);
     }
 }

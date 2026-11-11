@@ -102,7 +102,7 @@ public sealed class AffinityTweak : TweakBase
     }
 }
 
-/// <summary>Points the network adapter's receive queues (RSS) at the same cores as its interrupts.</summary>
+/// <summary>Points the network adapter's receive queues (RSS) at the same physical cores as its interrupts, SMT included.</summary>
 public sealed class RssTweak : TweakBase
 {
     private readonly Assignment _a;
@@ -115,8 +115,10 @@ public sealed class RssTweak : TweakBase
         Group = AffinityTweak.GroupName,
         Title = $"{a.Device.Name}: receive queues (RSS) on {a.CpuText}",
         What = "Sets the adapter's standard RSS keywords: RSS on, " +
-               (a.Cpus.Length > 1 ? "2 queues on 2 processors" : "1 processor") +
-               $", base processor {a.Cpus[0]}, max processor {a.Cpus[^1]}. Set-NetAdapterRss writes the same keywords. The RSS profile is left at the driver's default.",
+               (a.Cpus.Length > 1 ? $"{a.Cpus.Length} queues on {a.Cpus.Length} cores" : "1 queue on 1 core") +
+               $", processors {(a.Rss?.BaseProcNumber ?? a.Cpus[0])}-{(a.Rss?.MaxProcNumber ?? a.Cpus[^1])}" +
+               (a.Rss is { ThreadsPerCore: > 1 } rp ? $" ({rp.NumProcessors} logical processors over {a.Cpus.Length} SMT core(s))" : "") +
+               ". Set-NetAdapterRss writes the same keywords. The RSS profile is left at the driver's default.",
         Why = "Received packets are processed (DPC) on the RSS cores. Putting those on the same cores as the adapter's interrupts keeps network work off the game's cores. On the desktop: ndis DPCs only on CPUs 20/22, CCD0 untouched. Games use at most 2 queues.",
         Cost = "None for gaming. Very fast multi-stream downloads use fewer cores.",
         CanBreak = "Nothing known. A driver update can reset these keywords.",
@@ -127,13 +129,18 @@ public sealed class RssTweak : TweakBase
     {
         _a = a;
         var d = a.Device;
+        // The planner works the processor span out from the topology. *MaxRssProcessors counts
+        // logical processors, so on SMT it is cores * threads, and *RssMaxProcNumber is the last LP
+        // of the last core. Without that, "base 20, max 22, 2 processors" picks LPs 20 and 21:
+        // the two threads of a single core.
+        var rss = a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1);
         _items = new List<(string, string)>();
         if (d.RssCapable) _items.Add(("*RSS", "1"));
-        string n = a.Cpus.Length.ToString(CultureInfo.InvariantCulture);
-        if (d.RssQueueOptions.Contains(n)) _items.Add(("*NumRssQueues", n));
-        _items.Add(("*RssBaseProcNumber", a.Cpus[0].ToString(CultureInfo.InvariantCulture)));
-        _items.Add(("*MaxRssProcessors", n));
-        _items.Add(("*RssMaxProcNumber", a.Cpus[^1].ToString(CultureInfo.InvariantCulture)));
+        string queues = a.Cpus.Length.ToString(CultureInfo.InvariantCulture);
+        if (d.RssQueueOptions.Contains(queues)) _items.Add(("*NumRssQueues", queues));
+        _items.Add(("*RssBaseProcNumber", rss.BaseProcNumber.ToString(CultureInfo.InvariantCulture)));
+        _items.Add(("*MaxRssProcessors", rss.NumProcessors.ToString(CultureInfo.InvariantCulture)));
+        _items.Add(("*RssMaxProcNumber", rss.MaxProcNumber.ToString(CultureInfo.InvariantCulture)));
     }
 
     protected override Probe Read()

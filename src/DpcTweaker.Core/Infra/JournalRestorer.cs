@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Native;
 using DpcTweaker.Core.Tweaks;
 using Microsoft.Win32;
@@ -20,7 +21,7 @@ public static class JournalRestorer
         }
         if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
         journal.ClearTweak(tweakId);
-        journal.Save();
+        journal.Flush();
         Log.Info("Reverted " + tweakId);
     }
 
@@ -36,8 +37,16 @@ public static class JournalRestorer
         }
         if (errors.Count == 0)
         {
-            journal.ClearAll();
-            journal.Save();
+            // A journal that failed to load has no idea what is still changed. Clearing it
+            // (and the undo script built from it) would destroy the only record that is left.
+            if (journal.ClearAll())
+            {
+                journal.Flush();
+            }
+            else
+            {
+                errors.Add("The journal couldn't be read when the app started, so nothing was cleared and undo-all.ps1 was left as it was. Restore from a backup set (Backups\\), then use Recover or delete journal.json by hand.");
+            }
         }
         Log.Info($"Revert all: {ok} restored, {errors.Count} failed");
         return (ok, errors);
@@ -74,11 +83,16 @@ public static class JournalRestorer
                 break;
             case "svc":
             {
-                var t = ServiceControl.FromJournal(e.Data);
-                if (t is DpcTweaker.Core.Detection.StartType.Auto or DpcTweaker.Core.Detection.StartType.AutoDelayed
-                    or DpcTweaker.Core.Detection.StartType.Manual or DpcTweaker.Core.Detection.StartType.Disabled
+                var (start, delayed) = ServiceControl.SplitJournal(e.Data);
+                var t = StartTypes.FromRegistry(start, delayed);
+                if (t is StartType.Auto or StartType.AutoDelayed
+                    or StartType.Manual or StartType.Disabled
                     && RegistryOps.KeyExists(@"HKLM\SYSTEM\CurrentControlSet\Services\" + e.Target))
+                {
                     ServiceControl.SetStart(e.Target, t);
+                    // sc.exe writes Start only: put the second half of the pair back as well.
+                    ServiceControl.RestoreDelayedAutostart(e.Target, delayed);
+                }
                 break;
             }
             case "task-enabled":
@@ -127,7 +141,7 @@ public static class JournalRestorer
         if (PowerApi.GetActive() == scheme) PowerApi.SetActive(scheme);
     }
 
-    // ------------------------------------------------------------------ undo.ps1
+    // ------------------------------------------------------------------ undo-all.ps1
 
     /// <summary>A PowerShell script that undoes everything in the journal, without the app.</summary>
     public static string BuildUndoScript(Journal journal)
@@ -138,7 +152,7 @@ public static class JournalRestorer
         sb.AppendLine("$ErrorActionPreference = 'Continue'");
         sb.AppendLine("$p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())");
         sb.AppendLine("if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Start-Process powershell.exe -Verb RunAs -ArgumentList \"-NoProfile -ExecutionPolicy Bypass -File `\"$PSCommandPath`\"\"; exit }");
-        sb.AppendLine("function RegSet($path, $name, $type, $value) { if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }; New-ItemProperty -LiteralPath $path -Name $name -PropertyType $type -Value $value -Force | Out-Null; Write-Host \"restored $name\" }");
+        sb.AppendLine("function RegSet($path, $name, $type, $value) { if (-not (Test-Path -LiteralPath $path)) { New-Item -LiteralPath $path -Force | Out-Null }; New-ItemProperty -LiteralPath $path -Name $name -PropertyType $type -Value $value -Force | Out-Null; Write-Host \"restored $name\" }");
         sb.AppendLine("function RegDel($path, $name) { Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction SilentlyContinue; Write-Host \"removed $name\" }");
         sb.AppendLine();
 
@@ -183,10 +197,19 @@ public static class JournalRestorer
                     break;
                 case "svc":
                 {
-                    var t = ServiceControl.FromJournal(e.Data);
-                    if (t is DpcTweaker.Core.Detection.StartType.Auto or DpcTweaker.Core.Detection.StartType.AutoDelayed
-                        or DpcTweaker.Core.Detection.StartType.Manual or DpcTweaker.Core.Detection.StartType.Disabled)
-                        sb.AppendLine($"sc.exe config {PowerShellBridge.Quote(e.Target)} start= {DpcTweaker.Core.Detection.StartTypes.ScWord(t)}");
+                    var (start, delayed) = ServiceControl.SplitJournal(e.Data);
+                    var t = StartTypes.FromRegistry(start, delayed);
+                    if (t is StartType.Auto or StartType.AutoDelayed
+                        or StartType.Manual or StartType.Disabled)
+                    {
+                        sb.AppendLine($"sc.exe config {PowerShellBridge.Quote(e.Target)} start= {StartTypes.ScWord(t)}");
+                        // sc.exe doesn't touch DelayedAutostart, so restore that value separately:
+                        // a service that was "auto, delayed" would otherwise come back plain auto.
+                        string svcKey = PowerShellBridge.Quote("Registry::" +
+                            RegistryOps.LongForm(@"HKLM\SYSTEM\CurrentControlSet\Services\" + e.Target));
+                        if (delayed is null) sb.AppendLine($"RegDel {svcKey} 'DelayedAutostart'");
+                        else sb.AppendLine($"RegSet {svcKey} 'DelayedAutostart' 'DWord' {unchecked((int)delayed.Value)}");
+                    }
                     break;
                 }
                 case "task-enabled":
@@ -204,10 +227,19 @@ public static class JournalRestorer
     {
         try
         {
+            // The undo script is the only way back when the app can't run. If the journal
+            // failed to load, what we have in memory is empty, and rewriting the script
+            // from it would replace a good restore path with a no-op.
+            if (journal.IsDegraded && journal.EntryCount == 0 && IsNonEmptyFile(Paths.UndoAllScript))
+            {
+                Log.Warn("undo-all.ps1 left untouched: the journal couldn't be read at startup, so regenerating it would lose the restore script.");
+                return;
+            }
+
             string script = BuildUndoScript(journal);
-            File.WriteAllText(Paths.UndoAllScript, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            WriteAtomic(Paths.UndoAllScript, script);
             if (backup is not null)
-                File.WriteAllText(Path.Combine(backup.Folder, "undo.ps1"), script, new UTF8Encoding(true));
+                WriteAtomic(Path.Combine(backup.Folder, "undo.ps1"), script);
         }
         catch (Exception ex)
         {
@@ -215,11 +247,26 @@ public static class JournalRestorer
         }
     }
 
+    private static bool IsNonEmptyFile(string path)
+    {
+        try { return File.Exists(path) && new FileInfo(path).Length > 0; }
+        catch { return false; }
+    }
+
+    /// <summary>Temp file, then swap: a crash mid-write leaves the previous script in place.</summary>
+    private static void WriteAtomic(string path, string text)
+    {
+        string tmp = path + ".tmp";
+        File.WriteAllText(tmp, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        File.Move(tmp, path, overwrite: true);
+    }
+
     private static string PsType(string valueKind) => valueKind switch
     {
         nameof(RegistryValueKind.DWord) => "DWord",
         nameof(RegistryValueKind.QWord) => "QWord",
         nameof(RegistryValueKind.Binary) => "Binary",
+        nameof(RegistryValueKind.None) => "Binary",
         nameof(RegistryValueKind.MultiString) => "MultiString",
         nameof(RegistryValueKind.ExpandString) => "ExpandString",
         _ => "String",
@@ -229,10 +276,13 @@ public static class JournalRestorer
     {
         nameof(RegistryValueKind.DWord) => unchecked((int)uint.Parse(data, CultureInfo.InvariantCulture)).ToString(CultureInfo.InvariantCulture),
         nameof(RegistryValueKind.QWord) => unchecked((long)ulong.Parse(data, CultureInfo.InvariantCulture)).ToString(CultureInfo.InvariantCulture),
-        nameof(RegistryValueKind.Binary) => data.Length == 0
-            ? "([byte[]]@())"
-            : "([byte[]](" + string.Join(",", Convert.FromHexString(data).Select(b => "0x" + b.ToString("X2"))) + "))",
+        nameof(RegistryValueKind.Binary) => BinaryLiteral(data),
+        nameof(RegistryValueKind.None) => BinaryLiteral(data),
         nameof(RegistryValueKind.MultiString) => "@(" + string.Join(",", data.Split('\n').Select(PowerShellBridge.Quote)) + ")",
         _ => PowerShellBridge.Quote(data),
     };
+
+    private static string BinaryLiteral(string data) => data.Length == 0
+        ? "([byte[]]@())"
+        : "([byte[]](" + string.Join(",", Convert.FromHexString(data).Select(b => "0x" + b.ToString("X2"))) + "))";
 }

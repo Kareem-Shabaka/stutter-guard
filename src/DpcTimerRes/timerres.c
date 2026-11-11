@@ -9,6 +9,11 @@
     DpcTimerRes.exe 5070       -> 0.507 ms
     DpcTimerRes.exe --query    -> prints min / max / current resolution and exits
 
+  Exit codes: 0 held the requested resolution
+              2 ntdll!NtSetTimerResolution not found
+              3 NtSetTimerResolution refused the request
+              4 granted, but coarser than requested + 10 us (GlobalTimerResolutionRequests off?)
+
   Needs GlobalTimerResolutionRequests = 1 (Windows 11 / Server 2022+) for the request
   to apply system-wide; otherwise Windows 10 2004+ applies it to this process only.
 
@@ -83,8 +88,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmdLine, int nShow)
         spi(GetCurrentProcess(), DPC_PROCESS_POWER_THROTTLING, &st, sizeof(st));
     }
 
+    /* The granted resolution is the only proof the request took effect. Read it back and fail
+       with a distinct code instead of sitting forever on a request Windows quietly ignored. */
     ULONG actual = 0;
-    if (setRes(wanted, TRUE, &actual) != 0) return 3;
+    LONG status = setRes(wanted, TRUE, &actual);
+    if (status != 0) return 3;                 /* NTSTATUS failure: the request was refused */
+
+    /* Windows rounds to its own quantum and may grant something coarser. 100 x 100 ns = 10 us
+       of slack. A zero means the kernel didn't report it; don't invent a failure from that. */
+    if (actual != 0 && actual > wanted + 100) return 4;
 
     for (;;) Sleep(INFINITE);
     return 0;
