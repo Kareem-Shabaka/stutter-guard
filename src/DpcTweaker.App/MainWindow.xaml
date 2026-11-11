@@ -384,6 +384,29 @@
                         <ItemsControl ItemsSource="{Binding Lines}" />
                     </Border>
 
+                    <!-- Drift: a driver update or Windows update put applied tweaks back. -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12"
+                            Visibility="{Binding HasDrift, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock Text="{Binding DriftHeadline}" FontWeight="SemiBold" FontSize="15"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding DriftDetail}" TextWrapping="Wrap" />
+                            <Expander Header="Which tweaks no longer match" Margin="0,8,0,0">
+                                <ItemsControl ItemsSource="{Binding DriftLines}" Margin="4,6,0,0" />
+                            </Expander>
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Content="Re-Apply Now" Command="{Binding HealDriftedCommand}" Padding="16,6" FontWeight="SemiBold" Margin="0,0,8,6" />
+                                <Button Content="See on Safety page" Command="{Binding OpenSafetyCommand}" Padding="14,6" Margin="0,0,8,6" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding DriftMessage}" TextWrapping="Wrap" Style="{StaticResource Secondary}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Border>
+
                     <Border Style="{StaticResource Card}" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="Worth knowing first" FontWeight="SemiBold" Margin="0,0,0,6" />

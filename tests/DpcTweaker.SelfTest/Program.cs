@@ -1554,6 +1554,154 @@ Console.WriteLine("Wave 6: drift detection and 1-click heal");
         try { Directory.Delete(dir, true); } catch { }
     }
 }
+// ================================================================ DriftWatcher
+
+Console.WriteLine("DriftWatcher: driver fingerprints and cause attribution");
+{
+    // Attribute() logs, and Log writes to Paths.LogsDir: redirect before the first call so a test
+    // run cannot append lines to the machine's real log file.
+    string driftDir = Path.Combine(Path.GetTempPath(), "dpc-dwlog-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(driftDir);
+    string driftSavedDir = Paths.DataDir;
+    Paths.DataDir = driftDir;
+    try
+    {
+    // PciDevice reads its version/date live from the driver key, so fingerprints are composed
+    // from explicit triples here. The profile still provides the friendly names for the report.
+    PciDevice Dev2(string id, string name) => new()
+    {
+        InstanceId = id, Name = name, DriverKey = @"{4d36e968-e325-11ce-bfc1-08002be10318}\0000", Started = true,
+    };
+    string GpuId = @"PCI\VEN_1002&DEV_7550\1";
+    string NicId = @"PCI\VEN_10EC&DEV_8126\2";
+
+    SystemProfile Prof(params PciDevice[] devs) => new()
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "x", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        Devices = devs,
+    };
+
+    var gpu = Dev2(GpuId, "AMD Radeon RX 9070 XT");
+    var nic = Dev2(NicId, "Realtek Gaming 5GbE");
+    var before = Prof(gpu, nic);
+
+    string fpBefore = DriftWatcher.Compose(new[]
+    {
+        (GpuId, (string?)"32.0.32015.12012", (string?)"28-10-2026"),
+        (NicId, (string?)"10.79.50.1003", (string?)"03-10-2025"),
+    });
+
+    Check("the fingerprint names each device and its driver", fpBefore.Contains("VEN_1002") && fpBefore.Contains("32.0.32015.12012"), fpBefore);
+    Check("the fingerprint is stable across calls", DriftWatcher.Compose(new[]
+    {
+        (GpuId, (string?)"32.0.32015.12012", (string?)"28-10-2026"),
+        (NicId, (string?)"10.79.50.1003", (string?)"03-10-2025"),
+    }) == fpBefore);
+    Check("a device with no driver identity is left out of the fingerprint",
+        DriftWatcher.Compose(new[] { ("A", (string?)null, (string?)null) }).Length == 0);
+    Check("an unchanged system yields no changed devices",
+        DriftWatcher.ChangedDevices(fpBefore, fpBefore, before).Count == 0);
+
+    // No drift at all: nothing is reported, whatever the drivers did.
+    var none = DriftWatcher.Attribute(Array.Empty<ITweak>(), fpBefore, fpBefore, before);
+    Check("no drifted tweaks yields a clean report", !none.HasDrift && none.Cause == DriftCause.None);
+    Check("a clean report has no headline", none.Headline.Length == 0);
+
+    // Drift + a changed driver version: this is the real "driver update" case.
+    var afterUpdate = Prof(gpu, nic);
+    string fpAfterUpdate = DriftWatcher.Compose(new[]
+    {
+        (GpuId, (string?)"32.0.33000.1000", (string?)"05-12-2026"),   // Adrenalin update
+        (NicId, (string?)"10.79.50.1003", (string?)"03-10-2025"),
+    });
+    var fakes = new[] { new FakeDriftTweak(new Journal(Path.Combine(Path.GetTempPath(), "x-" + Guid.NewGuid().ToString("N") + ".json")), "irq.gpu", "k1"),
+                        new FakeDriftTweak(new Journal(Path.Combine(Path.GetTempPath(), "y-" + Guid.NewGuid().ToString("N") + ".json")), "msi.gpu", "k2") };
+    var report = DriftWatcher.Attribute(fakes, fpBefore, fpAfterUpdate, afterUpdate);
+    Check("drift after a driver change is attributed to the driver update", report.Cause == DriftCause.DriverUpdate, report.Cause.ToString());
+    Check("the headline matches the requested wording",
+        report.Headline == "Driver Update Detected: 2 Tweaks Drifted", report.Headline);
+    Check("the changed device is named", report.Detail.Contains("AMD Radeon RX 9070 XT"), report.Detail);
+    Check("the report says a driver install wipes the keys", report.Detail.Contains("Interrupt Management"), report.Detail);
+    Check("the report promises revert still works", report.Detail.Contains("revert still works"), report.Detail);
+    Check("the drifted tweaks are carried through", report.Drifted.Count == 2 && report.IsDriverUpdate);
+
+    Check("a single drifted tweak reads naturally", DriftWatcher.Attribute(new[] { fakes[0] }, fpBefore, fpAfterUpdate, afterUpdate).Headline
+        == "Driver Update Detected: 1 Tweak Drifted");
+
+    // Drift with no driver change must NOT claim a driver update.
+    var sameDrivers = Prof(gpu, nic);
+    var external = DriftWatcher.Attribute(fakes, fpBefore, fpBefore, sameDrivers);
+    Check("drift without a driver change is not blamed on a driver",
+        external.Cause == DriftCause.ExternalChange, external.Cause.ToString());
+    Check("its headline is honest about the uncertainty",
+        external.Headline == "2 Tweaks No Longer Match", external.Headline);
+    Check("its detail mentions Windows Update or another tool",
+        external.Detail.Contains("Windows update") && external.Detail.Contains("another tuning tool"), external.Detail);
+
+    // No fingerprint recorded (journal from an older build): drift is real, cause unknown.
+    var unknown = DriftWatcher.Attribute(fakes, null, fpAfterUpdate, afterUpdate);
+    Check("a missing fingerprint never manufactures a driver update", unknown.Cause == DriftCause.ExternalChange);
+
+    // Devices that appear or disappear.
+    string usbId = @"PCI\VEN_1022&DEV_43FC\3";
+    var added = Prof(gpu, nic, Dev2(usbId, "USB eXtensible Host Controller"));
+    string fpAdded = DriftWatcher.Compose(new[]
+    {
+        (GpuId, (string?)"32.0.32015.12012", (string?)"28-10-2026"),
+        (NicId, (string?)"10.79.50.1003", (string?)"03-10-2025"),
+        (usbId, (string?)"1.0", (string?)"01-01-2026"),
+    });
+    var addedChanged = DriftWatcher.ChangedDevices(fpBefore, fpAdded, added);
+    Check("a newly installed device is reported as new",
+        addedChanged.Count == 1 && addedChanged[0].Contains("(new)"), string.Join(",", addedChanged));
+    Check("the new device is named, not its instance id",
+        addedChanged[0].Contains("USB eXtensible Host Controller"), addedChanged[0]);
+    var removedChanged = DriftWatcher.ChangedDevices(fpAdded, fpBefore, added);
+    Check("a removed device is reported as removed",
+        removedChanged.Count == 1 && removedChanged[0].Contains("(removed)"), string.Join(",", removedChanged));
+
+    // Remember() writes the fingerprint the next scan compares against, and a heal refreshes it.
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-dw-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var journal = new Journal(Path.Combine(dir, "journal.json"));
+        var engine = new TweakEngine(Prof(gpu, nic), journal);
+        DriftWatcher.Remember(engine);
+        string? stored = journal.GetState(DriftWatcher.StateKey);
+        // The test profile's devices read their versions from the real registry, so this checks the
+        // mechanism (a fingerprint was recorded and round-trips), not specific version numbers.
+        Check("Remember stores a fingerprint in the journal", stored is not null, stored ?? "null");
+        Check("a stored fingerprint makes the next scan see no driver change",
+            DriftWatcher.ChangedDevices(stored, DriftWatcher.Capture(engine.Profile), engine.Profile).Count == 0);
+
+        var reread = new Journal(Path.Combine(dir, "journal.json"));
+        Check("the fingerprint survives a reload", reread.GetState(DriftWatcher.StateKey) == stored);
+
+        // A real heal re-applies and re-fingerprints.
+        var tweak = new FakeDriftTweak(journal, "t.dw", @"HKLM\X|Y");
+        engine.Heal(new[] { tweak }, null);
+        Check("an apply records a fingerprint even without an explicit Remember",
+            journal.GetState(DriftWatcher.StateKey) is not null);
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+    }
+    finally
+    {
+        Paths.DataDir = driftSavedDir;
+        try { Directory.Delete(driftDir, true); } catch { }
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>

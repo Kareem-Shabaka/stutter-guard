@@ -74,6 +74,84 @@ public sealed class HomePageViewModel : PageViewModel
         SubmitReportCommand = new RelayCommand(() => _ = SubmitReportAsync());
         SendFeedbackCommand = new RelayCommand(() => _ = SendFeedbackAsync());
         ReportBugCommand = SendFeedbackCommand;
+        HealDriftedCommand = new RelayCommand(() => _ = HealDriftedAsync(), () => HasDrift && !Busy);
+        OpenSafetyCommand = new RelayCommand(() => _main.SelectedPage = _main.Safety);
+    }
+
+    private DriftReport _drift = DriftReport.Clean;
+    private string _driftMessage = "";
+
+    /// <summary>Drift report from the last scan (startup, rescan, or after a heal).</summary>
+    public DriftReport Drift
+    {
+        get => _drift;
+        private set
+        {
+            if (!Set(ref _drift, value)) return;
+            OnPropertyChanged(nameof(HasDrift));
+            OnPropertyChanged(nameof(DriftHeadline));
+            OnPropertyChanged(nameof(DriftDetail));
+            HealDriftedCommand.Refresh();
+        }
+    }
+
+    public bool HasDrift => _drift.HasDrift;
+    public string DriftHeadline => _drift.Headline;
+    public string DriftDetail => _drift.Detail;
+    public ObservableCollection<InfoLine> DriftLines { get; } = new();
+
+    public string DriftMessage { get => _driftMessage; private set => Set(ref _driftMessage, value); }
+
+    public RelayCommand HealDriftedCommand { get; }
+    public RelayCommand OpenSafetyCommand { get; }
+
+    /// <summary>Re-scans for drift. Read-only; cheap enough to run on startup and on rescan.</summary>
+    public void RefreshDrift()
+    {
+        var engine = _main.Engine;
+        if (engine is null) return;
+        var report = engine.ScanDrift();
+        DriftLines.Clear();
+        foreach (var t in report.Drifted.Take(40))
+            DriftLines.Add(new InfoLine(t.Info.Module, t.Info.Title));
+        Drift = report;
+        _main.OnDriftScanned(report.Count);
+    }
+
+    private async Task HealDriftedAsync()
+    {
+        var engine = _main.Engine;
+        if (engine is null || !HasDrift) return;
+        var drifted = _drift.Drifted.ToList();
+        if (!_main.Ui.Confirm("Re-apply drifted tweaks",
+                (DriftHeadline.Length > 0 ? DriftHeadline + "\n\n" : "") + DriftDetail +
+                "\n\nSome of these need a restart to take effect. Re-apply now?"))
+            return;
+
+        Busy = true;
+        DriftMessage = "Re-applying " + drifted.Count + " tweak(s)...";
+        try
+        {
+            var progress = new Progress<string>(s => DriftMessage = s);
+            var results = await Task.Run(() => engine.Heal(drifted, progress));
+            int ok = results.Count(r => r.Ok);
+            var failed = results.Where(r => !r.Ok).ToList();
+            DriftMessage = $"Re-applied {ok} of {results.Count}." +
+                           (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "");
+            if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
+            await _main.RefreshAllAsync();
+            RefreshDrift();
+        }
+        catch (Exception ex)
+        {
+            DriftMessage = "Re-apply failed: " + ex.Message;
+            Log.Error("Home HealDrifted failed: " + ex);
+        }
+        finally
+        {
+            Busy = false;
+            HealDriftedCommand.Refresh();
+        }
     }
 
     public ObservableCollection<InfoLine> Lines { get; } = new();
@@ -141,6 +219,7 @@ public sealed class HomePageViewModel : PageViewModel
         foreach (var w in p.Warnings) Warnings.Add(w);
         OnPropertyChanged(nameof(HasWarnings));
         LoadBench();
+        RefreshDrift();
     }
 
     public void LoadBench()
