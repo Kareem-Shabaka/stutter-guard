@@ -68,7 +68,10 @@ public static class ScanReport
             if (d.Kind is not (PciKind.Never or PciKind.Storage) || d.Attached.HasDevices || d.Attached.Monitors + d.Attached.AudioEndpoints > 0)
                 sb.AppendLine($"      attached: {d.Attached.Describe()}, {d.Attached.AudioEndpoints} audio endpoint(s), {d.Attached.Total} child node(s)" +
                               $"{(d.Attached.Names.Count > 0 ? " [" + string.Join(", ", d.Attached.Names) + "]" : "")}");
-            if (d.Bus is not null) sb.AppendLine($"      location: bus {d.Bus}, device {d.Address >> 16}, function {d.Address & 0xFFFF}");
+            if (d.Bus is not null)
+                sb.AppendLine(d.Address is uint addr
+                    ? $"      location: bus {d.Bus}, device {addr >> 16}, function {addr & 0xFFFF}"
+                    : $"      location: bus {d.Bus}, device/function unknown");
             if (d.Kind is PciKind.Ethernet or PciKind.Wifi)
                 sb.AppendLine($"      network: {(d.Connected == true ? "connected" : d.Connected == false ? "not connected" : "state unknown")}, RSS {(d.RssCapable ? "yes, queues " + string.Join("/", d.RssQueueOptions) : "no")}");
         }

@@ -71,6 +71,11 @@ public static class DriverAuditor
         List<DriverAdvisory> advisories,
         HashSet<string> seenKeys)
     {
+        // Several catalog entries can describe the same driver (a Pascal entry and a broader Pascal
+        // one, say). Taking the first match made the reported advisory depend on file order and let
+        // a Critical entry be shadowed by a High one, so the most severe match wins instead.
+        BadDriverEntry? buggedMatch = null;
+        bool bugged = false;
         BadDriverEntry? matchedClean = null;
 
         foreach (var entry in catalog)
@@ -78,25 +83,11 @@ public static class DriverAuditor
             if (!IsHardwareMatch(entry, hwid, drvFile, service))
                 continue;
 
-            bool bugged = IsVersionBugged(drvVer, entry);
-            if (bugged)
+            if (IsVersionBugged(drvVer, entry))
             {
-                string dedupKey = $"BUGGED:{entry.DriverFile}:{hwid}:{drvVer}";
-                if (seenKeys.Add(dedupKey))
-                {
-                    var (action, actionText) = DetermineAction(drvVer, entry, true);
-                    advisories.Add(new DriverAdvisory
-                    {
-                        Entry = entry,
-                        DeviceName = deviceName,
-                        HardwareId = hwid,
-                        InstalledVersion = string.IsNullOrWhiteSpace(drvVer) ? "(unknown)" : drvVer,
-                        DriverFile = string.IsNullOrWhiteSpace(drvFile) ? entry.DriverFile : drvFile,
-                        Action = action,
-                        ActionText = actionText,
-                        IsBugged = true
-                    });
-                }
+                bugged = true;
+                if (buggedMatch is null || SeverityRank(entry.Severity) > SeverityRank(buggedMatch.Severity))
+                    buggedMatch = entry;
             }
             else if (matchedClean is null)
             {
@@ -104,8 +95,28 @@ public static class DriverAuditor
             }
         }
 
+        if (bugged && buggedMatch is not null)
+        {
+            string dedupKey = $"BUGGED:{buggedMatch.DriverFile}:{hwid}:{drvVer}";
+            if (seenKeys.Add(dedupKey))
+            {
+                var (action, actionText) = DetermineAction(drvVer, buggedMatch, true);
+                advisories.Add(new DriverAdvisory
+                {
+                    Entry = buggedMatch,
+                    DeviceName = deviceName,
+                    HardwareId = hwid,
+                    InstalledVersion = string.IsNullOrWhiteSpace(drvVer) ? "(unknown)" : drvVer,
+                    DriverFile = string.IsNullOrWhiteSpace(drvFile) ? buggedMatch.DriverFile : drvFile,
+                    Action = action,
+                    ActionText = actionText,
+                    IsBugged = true
+                });
+            }
+        }
+
         // If no bugged match occurred, but the device belongs to a catalogued driver family, record clean advisory
-        if (matchedClean is not null && !advisories.Any(a => string.Equals(a.HardwareId, hwid, StringComparison.OrdinalIgnoreCase) && a.IsBugged))
+        if (!bugged && matchedClean is not null && !advisories.Any(a => string.Equals(a.HardwareId, hwid, StringComparison.OrdinalIgnoreCase) && a.IsBugged))
         {
             string dedupKey = $"CLEAN:{matchedClean.DriverFile}:{hwid}:{drvVer}";
             if (seenKeys.Add(dedupKey))
@@ -186,6 +197,39 @@ public static class DriverAuditor
         return false;
     }
 
+    internal static int SeverityRank(string? severity) => severity switch
+    {
+        "Critical" => 3,
+        "High" => 2,
+        "Medium" => 1,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// True when <paramref name="wanted"/> matches the tail (or the head) of
+    /// <paramref name="installed"/> <em>as whole version components</em>. A trailing vendor suffix
+    /// ("23.11.1 (WHQL)") is ignored, but "3118" no longer counts as ending in "18".
+    /// </summary>
+    internal static bool MatchesVersionComponents(string installed, string wanted)
+    {
+        static List<int> Parts(string s) =>
+            Regex.Split(s, @"[^\d]+").Where(x => x.Length > 0)
+                 .Select(x => int.TryParse(x, out int n) ? n : -1).ToList();
+
+        var a = Parts(installed ?? "");
+        var b = Parts(wanted ?? "");
+        if (b.Count == 0 || a.Count == 0 || b.Count > a.Count) return false;
+
+        bool suffix = true;
+        for (int i = 0; i < b.Count; i++)
+            if (a[a.Count - b.Count + i] != b[i]) { suffix = false; break; }
+        if (suffix) return true;
+
+        for (int i = 0; i < b.Count; i++)
+            if (a[i] != b[i]) return false;
+        return true;
+    }
+
     public static bool IsVersionBugged(string installedVer, BadDriverEntry entry)
     {
         if (string.IsNullOrWhiteSpace(installedVer)) return false;
@@ -198,8 +242,10 @@ public static class DriverAuditor
             if (string.Equals(normInstalled, normBugged, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            if (installedVer.EndsWith(b, StringComparison.OrdinalIgnoreCase) ||
-                installedVer.StartsWith(b, StringComparison.OrdinalIgnoreCase))
+            // Compare whole version components, not raw substrings: "31.0.15.3118".EndsWith("1.18")
+            // looked like a match even though 3118 is not 18. A vendor string with a suffix such as
+            // "23.11.1 (WHQL)" still matches, because the components line up.
+            if (MatchesVersionComponents(installedVer, b))
                 return true;
         }
 
@@ -211,14 +257,18 @@ public static class DriverAuditor
         if (string.IsNullOrWhiteSpace(ver)) return "";
         string v = ver.Trim();
 
-        // Handle NVIDIA driver: 32.0.15.3118 or 31.0.15.3598 -> 531.18 or 535.98
-        bool isNvidia = (driverFile is not null && driverFile.Contains("nv", StringComparison.OrdinalIgnoreCase)) ||
-                        v.StartsWith("30.") || v.StartsWith("31.") || v.StartsWith("32.");
+        // Handle NVIDIA driver: 32.0.15.3118 or 31.0.15.3598 -> 531.18 or 535.98.
+        // The third component is always "14" or "15" for NVIDIA. A bare "30./31./32." prefix is
+        // NOT enough: Intel Arc drivers are 32.0.101.x and AMD uses 32.0.21025.x, so the old test
+        // mangled both vendors' versions into nonsense ("32.0.101.5186" became "151.86").
+        var parts = v.Split('.');
+        bool nvidiaShape = parts.Length == 4 && (parts[2] == "14" || parts[2] == "15") && parts[3].Length >= 4;
+        // "stornvme.sys" also contains "nv", so match the file name from the start.
+        bool nvidiaFile = driverFile is not null && driverFile.StartsWith("nv", StringComparison.OrdinalIgnoreCase);
 
-        if (isNvidia)
+        if (nvidiaShape || (nvidiaFile && parts.Length == 4 && parts[3].Length >= 4))
         {
-            var parts = v.Split('.');
-            if (parts.Length == 4 && parts[2].Length >= 2 && parts[2].StartsWith("1") && parts[3].Length >= 4)
+            if (parts[2].Length >= 2 && parts[2].StartsWith("1") && parts[3].Length >= 4)
             {
                 string major = parts[2][1..] + parts[3][..2];
                 string minor = parts[3][2..];

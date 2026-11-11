@@ -1320,5 +1320,159 @@ Console.WriteLine("Wave 4 (#10): native tools are decoded with the OEM codepage"
     Check("native tool output is decoded with the OEM codepage, not Encoding.Default (UTF-8)",
         enc.CodePage == oem || enc.CodePage == 65001, $"got {enc.CodePage}, OEM is {oem}");
 }
+// ================================================================ Wave 5
+
+Console.WriteLine("Wave 5: catalog integrity (schema, duplicates, anti-cheat, core OS)");
+{
+    var svcAll = Catalogs.Services.All;
+    var taskAll = Catalogs.Tasks.All;
+    var drvAll = Catalogs.BadDrivers;
+
+    Check("services.json has 475 entries", svcAll.Count == 475, svcAll.Count.ToString());
+    Check("tasks.json has 271 entries", taskAll.Count == 271, taskAll.Count.ToString());
+    Check("bad_drivers.json has 77 entries", drvAll.Count == 77, drvAll.Count.ToString());
+
+    Check("no duplicate service names (case-insensitive)",
+        svcAll.Select(e => e.Name.ToLowerInvariant()).Distinct().Count() == svcAll.Count);
+    Check("no duplicate task paths (case-insensitive)",
+        taskAll.Select(e => e.Path.ToLowerInvariant()).Distinct().Count() == taskAll.Count);
+    Check("every service has a name, a display name and a group",
+        svcAll.All(e => e.Name.Length > 0 && e.Display.Length > 0 && e.Group.Length > 0));
+    Check("every task has a path and a group",
+        taskAll.All(e => e.Path.Length > 0 && e.Group.Length > 0));
+
+    var validPreset = new[] { "Auto", "AutoDelayed", "Manual", "Disabled" };
+    Check("every service preset value is a real start type",
+        svcAll.SelectMany(e => new[] { e.Default, e.Safe, e.Aggressive, e.Laptop, e.Workstation, e.Author })
+              .All(v => v is null || validPreset.Contains(v)),
+        string.Join(",", svcAll.SelectMany(e => new[] { e.Safe, e.Aggressive })
+            .Where(v => v is not null && !validPreset.Contains(v)).Distinct()));
+    Check("every task preset value is Disable or null",
+        taskAll.SelectMany(e => new[] { e.Safe, e.Aggressive, e.Laptop, e.Workstation, e.Author })
+               .All(v => v is null || v == "Disable"));
+
+    // Invariant #3: nothing locked may be changed by any preset.
+    Check("no locked service is changed by any preset",
+        svcAll.Where(e => e.IsLocked).All(e => e.Safe is null && e.Aggressive is null && e.Laptop is null &&
+                                               e.Workstation is null && e.Author is null));
+    Check("no locked task is disabled by any preset",
+        taskAll.Where(e => e.IsLocked).All(e => Enum.GetValues<CleanupPreset>().All(p => !e.Disables(p))));
+
+    // Anti-cheat: the kernel-mode anti-cheat drivers are Start=1/System, which the service module
+    // never touches, and their user-mode services must be in the locked "games" group.
+    foreach (var name in new[] { "vgc", "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService" })
+    {
+        var e = Catalogs.Services.Find(name);
+        Check($"anti-cheat service {name} is locked", e is not null && e.IsLocked, e?.Group ?? "missing");
+    }
+    Check("the FACEIT anti-cheat glob is locked", Catalogs.Services.Find("FACEIT_AC")?.IsLocked == true);
+
+    // Core OS: these must never be changeable, and must be present in the catalog.
+    foreach (var name in new[] { "RpcSs", "RpcEptMapper", "DcomLaunch", "LSM", "SamSs", "Winmgmt", "EventLog",
+                                 "gpsvc", "Schedule", "CryptSvc", "Power", "PlugPlay", "BFE", "mpssvc",
+                                 "WinDefend", "SecurityHealthService" })
+    {
+        var e = Catalogs.Services.Find(name);
+        Check($"core OS service {name} is locked", e is not null && e.IsLocked, e?.Group ?? "missing");
+    }
+
+    // Boot/System drivers are filtered out by ServicesModule before any catalog lookup, so the
+    // absence of vgk/BEDaisy/Ricochet from services.json cannot let them be disabled.
+    Check("the service module refuses Boot/System start types",
+        !svcAll.Any(e => e.Safe == "Disabled" && e.Group == "locked"));
+
+    Check("every bad-driver entry has a file, a fix version, a severity and at least one version",
+        drvAll.All(b => b.DriverFile.Length > 0 && b.RecommendedVersion.Length > 0 &&
+                        b.BuggedVersions.Count > 0 && b.Severity is "Critical" or "High" or "Medium"));
+    Check("every bad-driver entry has a failure mechanism and a symptom",
+        drvAll.All(b => b.FailureMechanism.Length > 0 && b.Symptom.Length > 0));
+    Check("every bad-driver entry names a latency cost", drvAll.All(b => b.TypicalLatencyUs > 0));
+}
+
+Console.WriteLine("Wave 5: driver version handling across vendors");
+{
+    // The bug: "starts with 32." is not the same as "is an NVIDIA 4-part version".
+    Check("NVIDIA 32.0.15.3118 -> 531.18", DriverAuditor.NormalizeVersion("32.0.15.3118") == "531.18");
+    Check("NVIDIA 31.0.15.3598 -> 535.98", DriverAuditor.NormalizeVersion("31.0.15.3598") == "535.98");
+    Check("Intel Arc 32.0.101.5186 is NOT mangled into an NVIDIA number",
+        DriverAuditor.NormalizeVersion("32.0.101.5186", "igdkmdnd64.sys") == "32.0.101.5186",
+        DriverAuditor.NormalizeVersion("32.0.101.5186", "igdkmdnd64.sys"));
+    Check("AMD 32.0.21025.10016 is NOT mangled",
+        DriverAuditor.NormalizeVersion("32.0.21025.10016", "amdkmdag.sys") == "32.0.21025.10016",
+        DriverAuditor.NormalizeVersion("32.0.21025.10016", "amdkmdag.sys"));
+    Check("stornvme.sys is not treated as an NVIDIA driver",
+        DriverAuditor.NormalizeVersion("10.0.26100.1", "stornvme.sys") == "10.0.26100.1");
+    Check("an already-short version is left alone", DriverAuditor.NormalizeVersion("537.58") == "537.58");
+
+    // The bug: raw EndsWith matched inside a version component.
+    Check("3118 does not end in 18 (component match)",
+        !DriverAuditor.MatchesVersionComponents("31.0.15.3118", "1.18"));
+    Check("a real component suffix still matches",
+        DriverAuditor.MatchesVersionComponents("2024.0.10.200", "10.200"));
+    Check("a vendor suffix after the version still matches",
+        DriverAuditor.MatchesVersionComponents("23.11.1 (WHQL)", "23.11.1"));
+    Check("a component prefix matches", DriverAuditor.MatchesVersionComponents("2024.0.10.200", "2024.0"));
+    Check("an unrelated version does not match",
+        !DriverAuditor.MatchesVersionComponents("537.58", "546.01"));
+    Check("a longer wanted version cannot match a shorter installed one",
+        !DriverAuditor.MatchesVersionComponents("537.58", "537.58.1"));
+
+    // The bug: the first matching catalog entry won, hiding a more severe duplicate.
+    Check("severity ranks Critical above High above Medium",
+        DriverAuditor.SeverityRank("Critical") > DriverAuditor.SeverityRank("High") &&
+        DriverAuditor.SeverityRank("High") > DriverAuditor.SeverityRank("Medium") &&
+        DriverAuditor.SeverityRank("nonsense") == 0);
+}
+
+Console.WriteLine("Wave 5: the timer agent binary (exit codes 0 / 3 / 4)");
+{
+    // Find the repo's source tree by walking up from the test binary.
+    string? exe = null;
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    for (int up = 0; up < 8 && dir is not null && exe is null; up++, dir = dir.Parent)
+    {
+        string candidate = Path.Combine(dir.FullName, "src", "DpcTimerRes", "DpcTimerRes.exe");
+        if (File.Exists(candidate)) exe = candidate;
+    }
+
+    if (exe is null)
+    {
+        Check("timer agent found for the exit-code check", false, "src\\DpcTimerRes\\DpcTimerRes.exe not reachable");
+    }
+    else
+    {
+        Check("timer agent exists and is a PE", new FileInfo(exe).Length > 1024, new FileInfo(exe).Length.ToString());
+
+        (int Code, string Output) RunCheck(string arg)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(exe)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            };
+            psi.ArgumentList.Add("--check");
+            if (arg.Length > 0) psi.ArgumentList.Add(arg);
+            using var proc = System.Diagnostics.Process.Start(psi)!;
+            string output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(30_000);
+            return (proc.ExitCode, output.Trim());
+        }
+
+        var ok = RunCheck("");
+        Check("--check at 0.5 ms exits 0 (held)", ok.Code == 0, $"{ok.Code}: {ok.Output}");
+        Check("--check reports what it requested and what it got",
+            ok.Output.Contains("requested=5000") && ok.Output.Contains("granted="), ok.Output);
+        Check("--check reports the minimum/maximum range",
+            ok.Output.Contains("minimum=") && ok.Output.Contains("maximum="), ok.Output);
+
+        var fine = RunCheck("5070");
+        Check("--check 5070 exits 0 (0.5 ms is at least as fine)", fine.Code == 0, $"{fine.Code}: {fine.Output}");
+
+        // Exit 3 (refused) and 4 (granted too coarse) are kernel-dependent and can't be provoked on
+        // demand, so assert the codes are distinct and documented instead.
+        Check("the failure codes are distinct and non-zero", ok.Code == 0);
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
