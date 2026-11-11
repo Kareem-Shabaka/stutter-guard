@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DpcTweaker.Core.Detection;
+using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Infra;
 
 namespace DpcTweaker.Core.Tweaks;
@@ -50,6 +51,13 @@ public sealed class AppOptions
 
     /// <summary>Interrupts: keep devices on cores they're already pinned to when those follow the rules.</summary>
     public bool KeepValidPins { get; set; } = true;
+
+    /// <summary>
+    /// On an Intel hybrid CPU, where the non-game devices go. Defaults to full P-core isolation,
+    /// which is the strongest choice for the game but can override a benchmark that measured
+    /// P-cores as better. Ignored on non-hybrid CPUs.
+    /// </summary>
+    public HybridDevicePolicy HybridDevices { get; set; } = HybridDevicePolicy.EcoresForNetAudio;
 
     public bool UserChosen { get; set; }
 

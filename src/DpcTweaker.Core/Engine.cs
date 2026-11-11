@@ -81,7 +81,7 @@ public sealed class TweakEngine
         list.AddRange(BootTasksModule.Build(Profile, Journal, () => Options));
 
         Bench = BenchResult.Load(Journal);
-        Plan = AffinityPlanner.Plan(Profile.Cpu, Profile.CpuSets, Bench, Profile.Devices, Options.KeepValidPins);
+        Plan = AffinityPlanner.Plan(Profile.Cpu, Profile.CpuSets, Bench, Profile.Devices, Options.KeepValidPins, Options.HybridDevices);
         if (Plan.Applicable && Profile.ParkingDependentCpu && Options.PlanTarget == PlanTargetKind.Balanced)
             Plan.Notes.Add("With Windows parking (Balanced), the device cores can sleep deeply while a game runs on the other cores, so each interrupt pays a wake-up first. The Tuned Ultimate plan (light C-states) avoids that.");
         list.AddRange(InterruptsModule.Build(Profile, Journal, Options, Plan));

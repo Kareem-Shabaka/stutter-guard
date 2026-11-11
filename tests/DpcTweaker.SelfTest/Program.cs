@@ -2412,6 +2412,163 @@ Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");
         Check("12. zero devices produces an empty but valid plan", empty.Applicable && empty.Assignments.Count == 0);
     }
 }
+// ================================================================ Wave 9: Alder Lake P/E placement policy
+
+Console.WriteLine("Wave 9: 12700K / 12600K hybrid placement policy (the reported case)");
+{
+    // Alder Lake fixtures. P-cores have HT, E-cores do not, small unified L3.
+    static CpuTopology AlderLake(int pCores, int eCores)
+    {
+        var cores = Enumerable.Range(0, pCores).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)1))
+            .Concat(Enumerable.Range(pCores * 2, eCores).Select(c => (new[] { c }, (byte)0)));
+        int lps = pCores * 2 + eCores;
+        ulong mask = lps >= 64 ? ulong.MaxValue : (1UL << lps) - 1;
+        return Topo(cores, new[] { (mask, 25u << 20) });
+    }
+
+    static List<PciDevice> AlderLakeDevices()
+    {
+        var devs = new List<PciDevice>
+        {
+            Dev(@"PCI\VEN_10DE&DEV_2504\1", "NVIDIA GeForce RTX 3070", 0x03, 0x00, 0x00, new Attached { Monitors = 1 }),
+            Dev(@"PCI\VEN_8086&DEV_7AE0\2", "Intel USB 3.20 eXtensible Host Controller", 0x0C, 0x03, 0x30,
+                new Attached { Mice = 1, Keyboards = 1, UsbDevices = 3 }),
+            Dev(@"PCI\VEN_8086&DEV_7AD0\3", "Intel High Definition Audio", 0x04, 0x03, 0x00,
+                new Attached { AudioEndpoints = 1, HasDefaultAudio = true }),
+            new() { InstanceId = @"PCI\VEN_8086&DEV_1533\4", Name = "Intel I210 Gigabit Network Connection",
+                    BaseClass = 0x02, SubClass = 0x00, ProgIf = 0x00, Started = true, InterruptSupport = 6,
+                    Connected = true, RssCapable = true, RssQueueOptions = new() { "1", "2", "4" } },
+        };
+        PciScanner.Classify(devs, Array.Empty<GpuInfo>());
+        return devs;
+    }
+
+    static bool OnP(int lp, int pThreads) => lp < pThreads;
+    static string Where(AffinityPlan p) =>
+        string.Join("; ", p.Assignments.Select(a => $"{a.Role}={string.Join(",", a.Cpus)}{(a.Cpus.All(c => OnP(c, 16)) ? "(P)" : a.Cpus.All(c => !OnP(c, 16)) ? "(E)" : "(mix)")}"));
+
+    // ---- 12700K: 8P/16T + 4E/4T = 12C/20T -------------------------------------------
+    {
+        var t = AlderLake(8, 4);
+        Check("12700K: 12 cores / 20 threads, hybrid, SMT on",
+            t.CoreCount == 12 && t.LogicalCount == 20 && t.IsHybrid && t.SmtEnabled,
+            $"{t.CoreCount}/{t.LogicalCount}");
+        var devs = AlderLakeDevices();
+        var sets = Sets(t, cpu => cpu >= 16 ? 10 : cpu / 2 is 2 or 3 ? 250 : 200);
+
+        // --- mode 1: default, E-cores for audio/network ---
+        var eco = AffinityPlanner.Plan(t, sets, null, devs, hybridPolicy: HybridDevicePolicy.EcoresForNetAudio);
+        var gpu = eco.Assignments.Single(a => a.Role == DeviceRole.Gpu);
+        var input = eco.Assignments.Single(a => a.Role == DeviceRole.Input);
+        var net = eco.Assignments.Single(a => a.Role == DeviceRole.Network);
+        var audio = eco.Assignments.Single(a => a.Role == DeviceRole.Audio);
+        Check("12700K/E-cores: GPU on a P-core", gpu.Cpus.All(c => OnP(c, 16)), Where(eco));
+        Check("12700K/E-cores: mouse controller on a P-core", input.Cpus.All(c => OnP(c, 16)), Where(eco));
+        Check("12700K/E-cores: NIC on E-cores", net.Cpus.All(c => !OnP(c, 16)), Where(eco));
+        Check("12700K/E-cores: audio on E-cores", audio.Cpus.All(c => !OnP(c, 16)), Where(eco));
+        Check("12700K/E-cores: only CPU 0/1 and the two top-ranked P-cores are reserved",
+            string.Join(",", eco.ReservedCpus) == "0,1,4,5,6,7", string.Join(",", eco.ReservedCpus));
+        Check("12700K/E-cores: the explanation names the E-core reason",
+            net.Reason.Contains("Placed on E-core(s)") && net.Reason.Contains("keep P-cores free for game threads") &&
+            net.Reason.Contains("Hybrid CPU placement"), net.Reason);
+        Check("12700K/E-cores: the P-core devices say so plainly",
+            gpu.Reason.Contains("Placed on P-core"), gpu.Reason);
+
+        // --- mode 2: P-cores when available ---
+        var pfirst = AffinityPlanner.Plan(t, sets, null, devs, hybridPolicy: HybridDevicePolicy.PcoresWhenAvailable);
+        var net2 = pfirst.Assignments.Single(a => a.Role == DeviceRole.Network);
+        var audio2 = pfirst.Assignments.Single(a => a.Role == DeviceRole.Audio);
+        Check("12700K/P-first: NIC takes a spare P-core", net2.Cpus.All(c => OnP(c, 16)), Where(pfirst));
+        Check("12700K/P-first: audio takes a spare P-core", audio2.Cpus.All(c => OnP(c, 16)), Where(pfirst));
+        Check("12700K/P-first: CPU 0/1 and 4 P-cores stay reserved for the game",
+            pfirst.ReservedCpus.Count >= 6, string.Join(",", pfirst.ReservedCpus));
+        Check("12700K/P-first: nothing lands on an E-core while P-cores are free",
+            pfirst.Assignments.All(a => a.Cpus.All(c => OnP(c, 16))), Where(pfirst));
+        Check("12700K/P-first: P-core placements are labelled",
+            net2.Reason.Contains("Placed on P-core"), net2.Reason);
+
+        // --- mode 3: benchmark decides (P-cores measurably steadier) ---
+        var bench = new BenchResult { When = DateTime.Now, SamplesPerCore = 5000 };
+        foreach (var c in t.Cpus.Where(c => !c.IsSecondThread))
+            bench.Cores.Add(new CoreScore
+            {
+                Cpu = c.Index,
+                SpeedMs = c.Index < 16 ? 10.0 : 14.0,                           // P-cores faster
+                WakeMedianUs = c.Index < 16 ? 5.0 : 30.0,                       // P-cores steadier
+                WakeP99Us = c.Index < 16 ? 40 : 200,
+                SchedulingClass = c.Index < 16 ? 200 : 10,
+            });
+        var byBench = AffinityPlanner.Plan(t, sets, bench, devs, hybridPolicy: HybridDevicePolicy.BenchmarkDecides);
+        var net3 = byBench.Assignments.Single(a => a.Role == DeviceRole.Network);
+        Check("12700K/benchmark-decides: the NIC follows the measured order to P-cores",
+            net3.Cpus.All(c => OnP(c, 16)), Where(byBench));
+        Check("12700K/benchmark-decides: E-cores are not forced on anything",
+            byBench.Assignments.All(a => a.Cpus.All(c => OnP(c, 16))), Where(byBench));
+        Check("12700K/benchmark-decides: no E-core note is produced",
+            byBench.Assignments.All(a => !a.Reason.Contains("Placed on E-core")), Where(byBench));
+
+        // And with the opposite benchmark, E-cores win on merit.
+        var benchE = new BenchResult { When = DateTime.Now, SamplesPerCore = 5000 };
+        foreach (var c in t.Cpus.Where(c => !c.IsSecondThread))
+            benchE.Cores.Add(new CoreScore
+            {
+                Cpu = c.Index,
+                SpeedMs = c.Index < 16 ? 14.0 : 10.0,                           // E-cores faster
+                WakeMedianUs = c.Index < 16 ? 30.0 : 5.0,                       // E-cores steadier
+                WakeP99Us = c.Index < 16 ? 200 : 40,
+                SchedulingClass = c.Index < 16 ? 10 : 200,
+            });
+        var byBenchE = AffinityPlanner.Plan(t, sets, benchE, devs, hybridPolicy: HybridDevicePolicy.BenchmarkDecides);
+        var gpuE = byBenchE.Assignments.Single(a => a.Role == DeviceRole.Gpu);
+        var net4 = byBenchE.Assignments.Single(a => a.Role == DeviceRole.Network);
+        // Pure measurement: the top device takes the best-measured core, which is an E-core here.
+        Check("12700K/benchmark-decides: with steadier E-cores the GPU takes one on merit",
+            gpuE.Cpus.All(c => !OnP(c, 16)), Where(byBenchE));
+        // Only 4 E-cores exist; the three higher-priority roles consume them, so the NIC spills to P.
+        Check("12700K/benchmark-decides: the NIC spills to a P-core once the 4 E-cores are used",
+            net4.Cpus.All(c => OnP(c, 16)), Where(byBenchE));
+        Check("12700K/benchmark-decides: the E-core note still explains the E-core placements",
+            gpuE.Reason.Contains("Placed on E-core(s)") && gpuE.Reason.Contains("Hybrid CPU placement"), gpuE.Reason);
+        Check("12700K/benchmark-decides: an exhausted E-cluster does not force E-cores on the NIC",
+            net4.Reason.Contains("Placed on P-core"), net4.Reason);
+    }
+
+    // ---- 12600K: 6P/12T + 4E/4T = 10C/16T -------------------------------------------
+    {
+        var t = AlderLake(6, 4);
+        Check("12600K: 10 cores / 16 threads, hybrid", t.CoreCount == 10 && t.LogicalCount == 16 && t.IsHybrid,
+            $"{t.CoreCount}/{t.LogicalCount}");
+        var devs = AlderLakeDevices();
+        var sets = Sets(t, cpu => cpu >= 12 ? 10 : cpu / 2 is 2 or 3 ? 250 : 200);
+
+        var eco = AffinityPlanner.Plan(t, sets, null, devs, hybridPolicy: HybridDevicePolicy.EcoresForNetAudio);
+        Check("12600K/E-cores: GPU on a P-core", eco.Assignments.Single(a => a.Role == DeviceRole.Gpu).Cpus.All(c => c < 12),
+            string.Join("; ", eco.Assignments.Select(a => $"{a.Role}={string.Join(",", a.Cpus)}")));
+        Check("12600K/E-cores: NIC on E-cores", eco.Assignments.Single(a => a.Role == DeviceRole.Network).Cpus.All(c => c >= 12));
+        Check("12600K/E-cores: 3 free P-cores remain after CPU 0/1 and the top two", eco.Candidates.Count(c => c.PerformanceCore) == 3,
+            string.Join(",", eco.Candidates.Where(c => c.PerformanceCore).Select(c => c.Cpu)));
+
+        // Six P-cores total: 0/1 + top 2 reserved leaves 2, and 4 device roles compete.
+        var pfirst = AffinityPlanner.Plan(t, sets, null, devs, hybridPolicy: HybridDevicePolicy.PcoresWhenAvailable);
+        Check("12600K/P-first: the 3 free P-cores go to the most important devices",
+            pfirst.Assignments.Take(3).All(a => a.Cpus.All(c => c < 12)),
+            string.Join("; ", pfirst.Assignments.Select(a => $"{a.Role}={string.Join(",", a.Cpus)}")));
+        Check("12600K/P-first: only the fourth device spills onto E-cores",
+            pfirst.Assignments.Skip(3).All(a => a.Cpus.All(c => c >= 12)),
+            string.Join("; ", pfirst.Assignments.Select(a => $"{a.Role}={string.Join(",", a.Cpus)}")));
+        Check("12600K/P-first: no exception, every device placed", pfirst.Assignments.Count == 4);
+    }
+
+    // ---- the option is persisted and defaults sensibly --------------------------------
+    {
+        var def = new AppOptions();
+        Check("the hybrid policy defaults to E-cores for audio/network",
+            def.HybridDevices == HybridDevicePolicy.EcoresForNetAudio, def.HybridDevices.ToString());
+        var swapped = def.With(o => o.HybridDevices = HybridDevicePolicy.BenchmarkDecides);
+        Check("the policy survives the With() copy", swapped.HybridDevices == HybridDevicePolicy.BenchmarkDecides);
+        Check("the other options are untouched by the swap", swapped.KeepValidPins == def.KeepValidPins && swapped.Msi == def.Msi);
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>
