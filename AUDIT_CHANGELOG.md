@@ -205,6 +205,72 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 ```
 ---
 
+## Wave 10 — Three architectural hardware traps + 28-CPU simulation suite
+
+### Trap A — false 3D V-Cache detection on Zen 5 Strix Point (fixed)
+
+`VCacheGroup` only asked `big >= small * 3/2`. A **Ryzen AI 9 HX 370** has 4 Zen 5 cores with
+**16 MB** L3 and 8 Zen 5c cores with **8 MB** — `16 >= 12`, so it was labelled a dual-CCD X3D part
+and the app reserved its "V-Cache CCD" for the game.
+
+Now a group only counts as V-Cache at **≥ 64 MB** (`CpuTopology.cs:58`), which every real X3D part
+clears (96 MB single, 96/32 dual, 128 MB) and no non-X3D chip does. The chip is described honestly
+instead: `HasAsymmetricL3` (`:66`) and a `CpuKind` that names both groups rather than claiming
+"3D V-Cache" (`SystemProfile.cs:112`). Game threads still go to the larger-cache group — that
+behaviour was already correct and is unchanged.
+
+### Trap B — Intel LP-E island cores with no L3 (fixed)
+
+Meteor Lake's 2 and Lunar Lake's 4 Low-Power Island E-cores sit on the SoC tile outside the ring bus
+and report `L3Id == -1`. Nothing looked at that, so a NIC or mouse controller could be pinned there
+and pay a cache-missing memory round trip on every interrupt.
+
+`AffinityPlanner` now keeps L3-less cores out of the candidate pool whenever L3-backed cores exist
+(`AffinityPlanner.cs:185`) and says so in the plan notes.
+
+**A bug in my own first attempt**, caught by the new Lunar Lake fixture: the pre-existing
+starvation fallback (`free.Count < 2`) rebuilt the free list from *all* cores, silently undoing the
+exclusion on a 4-P-core Lunar Lake — every device landed on LP-E. The fallback now relaxes the
+*reservation* first while keeping the L3 rule, and only drops the rule when no L3-backed core is
+left at all (`AffinityPlanner.cs:193`).
+
+### Trap C — non-contiguous P/E numbering (verified, no change needed)
+
+Arrow Lake interleaves P and E cores in LP order (P 0–1, E 2–17, P 18–23) with no HT. The planner
+already grouped by `CoreId` and ordered by first thread, so it was correct — but untested. It is now
+covered by a fixture and three assertions: hybrid + `SmtEnabled == false`, P-cores identified
+wherever they sit, and GPU/mouse still landing on P-cores.
+
+### The 28-architecture matrix
+
+Table-driven, each entry built from a synthetic `SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX` buffer and
+run through `AffinityPlanner.Plan` with a 14-device inventory:
+
+| Group | Architectures |
+|---|---|
+| AMD 3D V-Cache | 9950X3D/7950X3D, 9900X3D/7900X3D, 9800X3D/7800X3D/5800X3D, 7600X3D/5600X3D, 9950X3D SMT-off |
+| AMD standard / APU | 9950X/7950X/5950X, 9900X/7900X/5900X, 9700X/7700X/5800X, 9600X/7600X/5600X, 3900X/3950X quad-CCX, Ryzen AI 9 HX 370 |
+| Intel hybrid w/ HT | i9-14900K/13900K, i7-14700K, i7-13700K/i9-12900K, i7-12700K, i5-14600K/13600K, i5-12600K/13400F |
+| Arrow / Meteor / Lunar | Ultra 9 285K, 285K interleaved, Ultra 7 265K, Ultra 5 245K, Ultra 7 155H (+2 LP-E), Ultra 7 258V (+4 LP-E) |
+| Homogeneous & boundaries | i9-10900K/10700K, i3-12100F/3300X, i5-9400F/9600K, Athlon 3000G, Threadripper 7970X (LP 63), Threadripper 7980X (2 groups) |
+
+Universal invariants asserted on every applicable topology:
+- CPU 0 **and its SMT sibling** are never assigned to any device.
+- Every `AssignmentSetOverride` mask is non-zero, serialises to 8 bytes little-endian, round-trips
+  through `AsMask`, and references only LPs `< LogicalCount`.
+- Every `RssFor` span satisfies `0 <= Base <= Max < LogicalCount`.
+- `InterruptCheck.CpusFor` never leaves `LogicalCount`.
+- No exception from any topology × device-role × `HybridDevicePolicy` combination.
+
+### Verification
+
+``````
+dotnet build -c Release   →  0 Warning(s), 0 Error(s)
+--selftest                →  828 passed, 0 failed
+dotnet publish -c Release →  publish\StutterGuard.exe refreshed
+``````
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -216,7 +282,8 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 | After Wave 6 | 393 |
 | After DriftWatcher (cda74dc) | 450 |
 | After Wave 8 | 570 |
-| After Wave 9 (hybrid policy) | **600** |
+| After Wave 9 (hybrid policy) | 600 |
+| After Wave 10 (28-CPU matrix) | **828** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 

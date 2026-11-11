@@ -178,13 +178,32 @@ public static class AffinityPlanner
         }
 
         var notes = new List<string>();
-        var free = cores.Where(c => !reserved.Contains(c.Id)).ToList();
+        // Intel LP-E island cores (Meteor / Lunar Lake) have no L3 of their own: they sit on the SoC
+        // tile outside the ring bus. A device pinned there pays a cache-missing memory round trip on
+        // every interrupt. They stay out of the candidate pool whenever L3-backed cores exist; they
+        // only come back as a last resort, through the starvation fallback below.
+        bool l3Backed = cores.Any(c => c.L3 >= 0);
+        var l3Less = cores.Where(c => c.L3 < 0).ToList();
+        var free = cores.Where(c => !reserved.Contains(c.Id) && !(l3Backed && c.L3 < 0)).ToList();
+        if (l3Backed && l3Less.Count > 0)
+            notes.Add($"{l3Less.Count} low-power E-core(s) without their own L3 (CPUs {CpuTopology.FormatCpus(l3Less.SelectMany(c => c.Threads))}) " +
+                      "are left out of the plan: they sit off the ring bus, so a device pinned there pays a cache miss on every interrupt.");
         if (free.Count < 2 && reserved.Count > 1)
         {
+            // Relax the reservation first, but keep the L3 rule: a 4-P-core Lunar Lake has only one
+            // spare P-core, and dropping the rule there would put every device on the LP-E island.
             reserved = new HashSet<int> { core0.Id };
-            free = cores.Where(c => c.Id != core0.Id).ToList();
+            free = cores.Where(c => c.Id != core0.Id && !(l3Backed && c.L3 < 0)).ToList();
             reason = "Only CPU 0/1: this CPU has too few cores to keep game cores free as well.";
             notes.Add("Few cores: only CPU 0 and its sibling are kept free of devices.");
+
+            if (free.Count == 0 && l3Backed && l3Less.Count > 0)
+            {
+                // Genuinely nothing else left: the L3-less cores are the only option.
+                free = cores.Where(c => c.Id != core0.Id).ToList();
+                notes.RemoveAll(n => n.Contains("without their own L3"));
+                notes.Add("No L3-backed core is free, so the L3-less E-cores are used as well.");
+            }
         }
 
         // Rank the free cores, best first.

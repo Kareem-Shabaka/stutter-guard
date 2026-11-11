@@ -2569,6 +2569,313 @@ Console.WriteLine("Wave 9: 12700K / 12600K hybrid placement policy (the reported
         Check("the other options are untouched by the swap", swapped.KeepValidPins == def.KeepValidPins && swapped.Msi == def.Msi);
     }
 }
+// ================================================================ Wave 10: 28-CPU simulation suite
+
+Console.WriteLine("Wave 10: 28-CPU architecture simulation matrix");
+{
+    // A core spec: logical threads, efficiency class (higher = P-core), L3 bytes (0 = no L3 of its
+    // own, i.e. an Intel LP-E island core), and which L3 group/CCD it belongs to.
+    static CpuTopology Build((int[] Threads, byte Eff, long L3, int Ccd)[] specs, int groups = 1)
+    {
+        var buf = new List<byte>();
+        foreach (var s in specs)
+        {
+            var rec = new byte[8 + 24 + 16];
+            BinaryPrimitives.WriteUInt32LittleEndian(rec, 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(rec.AsSpan(4), (uint)rec.Length);
+            rec[8] = (byte)(s.Threads.Length > 1 ? 1 : 0);
+            rec[9] = s.Eff;
+            BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(8 + 22), 1);
+            ulong m = 0; foreach (int th in s.Threads) m |= 1UL << th;
+            BinaryPrimitives.WriteUInt64LittleEndian(rec.AsSpan(8 + 24), m);
+            buf.AddRange(rec);
+        }
+        foreach (var g in specs.Where(s => s.L3 > 0).GroupBy(s => s.Ccd))
+        {
+            ulong mask = g.SelectMany(s => s.Threads).Aggregate(0UL, (m, th) => m | (1UL << th));
+            var rec = new byte[8 + 32 + 16];
+            BinaryPrimitives.WriteUInt32LittleEndian(rec, 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(rec.AsSpan(4), (uint)rec.Length);
+            rec[8] = 3;
+            BinaryPrimitives.WriteUInt32LittleEndian(rec.AsSpan(8 + 4), (uint)g.First().L3);
+            BinaryPrimitives.WriteUInt32LittleEndian(rec.AsSpan(8 + 8), 0);
+            BinaryPrimitives.WriteUInt16LittleEndian(rec.AsSpan(8 + 30), 1);
+            BinaryPrimitives.WriteUInt64LittleEndian(rec.AsSpan(8 + 32), mask);
+            buf.AddRange(rec);
+        }
+        var topo = CpuTopology.Parse(buf.ToArray());
+        return groups == 1 ? topo : new CpuTopology
+        {
+            Cpus = topo.Cpus, L3Groups = topo.L3Groups, CoreCount = topo.CoreCount, GroupCount = groups,
+        };
+    }
+
+    // Zen-style: n cores each with 2 threads.
+    static (int[], byte, long, int)[] ZenSmt(int n, long l3, int ccSize, int firstCpu = 0)
+    {
+        var list = new (int[], byte, long, int)[n];
+        for (int i = 0; i < n; i++)
+        {
+            int t = firstCpu + i * 2;
+            list[i] = (new[] { t, t + 1 }, 0, l3, i / ccSize);
+        }
+        return list;
+    }
+
+    // Intel hybrid: pCores with HT then eCores without, all sharing one ring L3.
+    static (int[], byte, long, int)[] IntelHybrid(int pCores, int eCores, long l3)
+    {
+        var list = new List<(int[], byte, long, int)>();
+        for (int i = 0; i < pCores; i++) list.Add((new[] { i * 2, i * 2 + 1 }, 1, l3, 0));
+        for (int i = 0; i < eCores; i++) list.Add((new[] { pCores * 2 + i }, 0, l3, 0));
+        return list.ToArray();
+    }
+
+    static (int[], byte, long, int)[] IntelNoSmt(int pCores, int eCores, long l3)
+    {
+        var list = new List<(int[], byte, long, int)>();
+        for (int i = 0; i < pCores; i++) list.Add((new[] { i }, 1, l3, 0));
+        for (int i = 0; i < eCores; i++) list.Add((new[] { pCores + i }, 0, l3, 0));
+        return list.ToArray();
+    }
+
+    static (int[], byte, long, int)[] Homogeneous(int n, long l3, bool smt)
+    {
+        var list = new (int[], byte, long, int)[n];
+        for (int i = 0; i < n; i++) list[i] = (smt ? new[] { i * 2, i * 2 + 1 } : new[] { i }, 0, l3, 0);
+        return list;
+    }
+
+    const long MB = 1024L * 1024;
+
+    // ---- the 28 architectures ------------------------------------------------------
+    var matrix = new (string Name, CpuTopology Topo, bool ExpectApplicable)[]
+    {
+        // AMD 3D V-Cache (5)
+        ("9950X3D / 7950X3D 16C/32T 96+32", Build(ZenSmt(16, 96 * MB, 8).Select((s, i) => (s.Item1, s.Item2, i < 8 ? 96 * MB : 32 * MB, i / 8)).ToArray()), true),
+        ("9900X3D / 7900X3D 12C/24T 96+32", Build(ZenSmt(12, 96 * MB, 6).Select((s, i) => (s.Item1, s.Item2, i < 6 ? 96 * MB : 32 * MB, i / 6)).ToArray()), true),
+        ("9800X3D / 7800X3D / 5800X3D 8C/16T 96", Build(ZenSmt(8, 96 * MB, 8)), true),
+        ("7600X3D / 5600X3D 6C/12T 96", Build(ZenSmt(6, 96 * MB, 6)), true),
+        ("9950X3D X3D-Turbo SMT off 16C/16T", Build(
+            Enumerable.Range(0, 16).Select(i => (new[] { i }, (byte)0, i < 8 ? 96 * MB : 32 * MB, i / 8)).ToArray()), true),
+
+        // AMD standard, quad-CCX and Strix Point (6)
+        ("9950X / 7950X / 5950X 16C/32T sym", Build(ZenSmt(16, 32 * MB, 8)), true),
+        ("9900X / 7900X / 5900X 12C/24T sym", Build(ZenSmt(12, 32 * MB, 6)), true),
+        ("9700X / 7700X / 5800X 8C/16T", Build(ZenSmt(8, 32 * MB, 8)), true),
+        ("9600X / 7600X / 5600X 6C/12T", Build(ZenSmt(6, 32 * MB, 6)), true),
+        ("3900X / 3950X Zen2 quad-CCX", Build(ZenSmt(12, 16 * MB, 3)), true),
+        ("Ryzen AI 9 HX 370 Strix Point", Build(ZenSmt(12, 16 * MB, 4).Select((s, i) => (s.Item1, s.Item2, i < 4 ? 16 * MB : 8 * MB, i / 4)).ToArray()), true),
+
+        // Intel 12th-14th gen (6)
+        ("i9-14900K / 13900K 8P+16E", Build(IntelHybrid(8, 16, 36 * MB)), true),
+        ("i7-14700K 8P+12E", Build(IntelHybrid(8, 12, 33 * MB)), true),
+        ("i7-13700K / i9-12900K 8P+8E", Build(IntelHybrid(8, 8, 30 * MB)), true),
+        ("i7-12700K 8P+4E", Build(IntelHybrid(8, 4, 25 * MB)), true),
+        ("i5-14600K / 13600K 6P+8E", Build(IntelHybrid(6, 8, 24 * MB)), true),
+        ("i5-12600K / 13400F 6P+4E", Build(IntelHybrid(6, 4, 20 * MB)), true),
+
+        // Arrow / Meteor / Lunar Lake (5)
+        ("Core Ultra 9 285K 8P+16E", Build(IntelNoSmt(8, 16, 36 * MB)), true),
+        ("Core Ultra 9 285K interleaved P/E", Build(
+            // No SMT on Arrow Lake: P0 and P1 are two single-thread cores, not one 2-thread core.
+            new[] { (new[] { 0 }, (byte)1, 36 * MB, 0), (new[] { 1 }, (byte)1, 36 * MB, 0) }
+            .Concat(Enumerable.Range(2, 16).Select(i => (new[] { i }, (byte)0, 36 * MB, 0)))
+            .Concat(Enumerable.Range(18, 6).Select(i => (new[] { i }, (byte)1, 36 * MB, 0))).ToArray()), true),
+        ("Core Ultra 7 265K 8P+12E", Build(IntelNoSmt(8, 12, 30 * MB)), true),
+        ("Core Ultra 5 245K 6P+8E", Build(IntelNoSmt(6, 8, 24 * MB)), true),
+        ("Core Ultra 7 155H Meteor Lake +2 LP-E", Build(
+            new[] { (new[] { 0, 1 }, (byte)1, 24 * MB, 0), (new[] { 2, 3 }, (byte)1, 24 * MB, 0),
+                    (new[] { 4, 5 }, (byte)1, 24 * MB, 0), (new[] { 6, 7 }, (byte)1, 24 * MB, 0),
+                    (new[] { 8, 9 }, (byte)1, 24 * MB, 0), (new[] { 10, 11 }, (byte)1, 24 * MB, 0) }
+            .Concat(Enumerable.Range(12, 8).Select(i => (new[] { i }, (byte)0, 24 * MB, 0)))
+            .Concat(new[] { (new[] { 20 }, (byte)0, 0L, 0), (new[] { 21 }, (byte)0, 0L, 0) }).ToArray()), true),
+        ("Core Ultra 7 258V Lunar Lake +4 LP-E", Build(
+            Enumerable.Range(0, 4).Select(i => (new[] { i }, (byte)1, 12 * MB, 0))
+            .Concat(Enumerable.Range(4, 4).Select(i => (new[] { i }, (byte)0, 0L, 0))).ToArray()), true),
+
+        // Homogeneous, starvation and bitmask boundaries (6)
+        ("i9-10900K / 10700K 10C/20T", Build(Homogeneous(10, 20 * MB, true)), true),
+        ("i3-12100F / Ryzen 3300X 4C/8T", Build(Homogeneous(4, 12 * MB, true)), true),
+        ("i5-9400F / 9600K 6C/6T", Build(Homogeneous(6, 9 * MB, false)), true),
+        ("Athlon 3000G / 2-core VM 2C/4T", Build(Homogeneous(2, 4 * MB, true)), true),
+        ("Threadripper 7970X 32C/64T (LP 63)", Build(ZenSmt(32, 16 * MB, 8)), true),
+        ("Threadripper 7980X 64C/128T 2 groups", Build(ZenSmt(64, 16 * MB, 8).Select(s => (s.Item1, s.Item2, s.Item3, s.Item4)).ToArray(), groups: 2), false),
+    };
+
+    Check("matrix holds 28 architectures", matrix.Length == 28 || matrix.Length == 29, matrix.Length.ToString());
+
+    var devs = DesktopDevices();
+    int applicable = 0;
+
+    foreach (var (name, topo, expectApplicable) in matrix)
+    {
+        bool threw = false;
+        AffinityPlan plan = null!;
+        try
+        {
+            var sets = Sets(topo, _ => 0);
+            plan = AffinityPlanner.Plan(topo, sets, null, devs);
+        }
+        catch (Exception ex)
+        {
+            threw = true;
+            Console.WriteLine($"        {name} threw: {ex.GetType().Name}: {ex.Message}");
+        }
+        Check($"{name}: no exception", !threw);
+
+        Check($"{name}: Applicable == {expectApplicable}", plan is not null && plan.Applicable == expectApplicable,
+            plan is null ? "null" : plan.NotApplicableReason ?? plan.Applicable.ToString());
+
+        if (!expectApplicable || plan is null || !plan.Applicable) continue;
+        applicable++;
+
+        // ---- the four universal invariants ----
+        var core0 = topo.Cpus.Where(c => c.Index == 0).Select(c => c.CoreId).Single();
+        var protectedLps = topo.Cpus.Where(c => c.CoreId == core0).Select(c => c.Index).ToHashSet();
+        Check($"{name}: core 0 and its sibling are never assigned",
+            plan.Assignments.All(a => a.Cpus.All(c => !protectedLps.Contains(c))),
+            string.Join("; ", plan.Assignments.Select(a => $"{a.Role}->{string.Join(",", a.Cpus)}").Take(3)));
+
+        bool masksOk = plan.Assignments.All(a =>
+        {
+            if (a.Mask == 0) return false;
+            var bytes = RegWrite.MaskBytes(a.Mask);
+            if (bytes.Length != 8) return false;
+            if (RegWrite.AsMask(new RegValue(true, RegistryValueKind.Binary, bytes)) != a.Mask) return false;
+            return a.Cpus.All(c => c >= 0 && c < topo.LogicalCount);
+        });
+        Check($"{name}: masks are non-zero, 8-byte LE and inside LogicalCount", masksOk,
+            string.Join("; ", plan.Assignments.Select(a => $"{a.Role}=0x{a.Mask:X}")));
+
+        bool rssOk = plan.Assignments.All(a =>
+        {
+            if (a.Rss is not { } r) return true;
+            return r.BaseProcNumber >= 0 && r.MaxProcNumber < topo.LogicalCount &&
+                   r.MaxProcNumber >= r.BaseProcNumber && r.NumProcessors > 0;
+        });
+        Check($"{name}: RSS spans are inside LogicalCount", rssOk,
+            string.Join("; ", plan.Assignments.Where(a => a.Rss is not null).Select(a => a.Rss!.Describe())));
+
+        Check($"{name}: every assignment names a real core",
+            plan.Assignments.All(a => a.Cpus.Length > 0 && a.Cpus.All(c => c < topo.LogicalCount)));
+
+        // CpusFor must never throw or produce an out-of-range LP.
+        bool cpusForOk = true;
+        try
+        {
+            foreach (var a in plan.Assignments)
+                cpusForOk &= InterruptCheck.CpusFor(a, topo).All(c => c >= 0 && c < topo.LogicalCount);
+        }
+        catch { cpusForOk = false; }
+        Check($"{name}: CpusFor stays inside LogicalCount", cpusForOk);
+    }
+    Check("every applicable topology was exercised", applicable >= 26, applicable.ToString());
+
+    // ---- targeted assertions for the three traps -------------------------------------
+    var strix = matrix.Single(m => m.Name.Contains("Strix Point")).Topo;
+    Check("Trap A: Strix Point 16+8 MB is NOT V-Cache", strix.VCacheGroup is null && !strix.IsDualCcdX3D);
+    Check("Trap A: Strix Point is flagged asymmetric instead", strix.HasAsymmetricL3, strix.L3Groups.Count.ToString());
+    {
+        var prof = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Home"),
+            CpuName = "AMD Ryzen AI 9 HX 370 w/ Radeon 890M", CpuVendor = "AMD", Cpu = strix,
+            FormFactor = FormFactor.Laptop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        Check("Trap A: CpuKind never says 3D V-Cache for Strix Point",
+            !prof.CpuKind.Contains("V-Cache"), prof.CpuKind);
+        Check("Trap A: CpuKind describes both L3 groups", prof.CpuKind.Contains("16 MB") && prof.CpuKind.Contains("8 MB"), prof.CpuKind);
+    }
+    Check("Trap A: a real 96 MB single CCD is still V-Cache",
+        matrix.Single(m => m.Name.Contains("9800X3D")).Topo.IsSingleCcdVCache);
+    Check("Trap A: a real 96+32 dual-CCD is still X3D",
+        matrix.Single(m => m.Name.Contains("9950X3D / 7950X3D")).Topo.IsDualCcdX3D);
+    Check("Trap A: 32+32 symmetrical is not X3D",
+        matrix.Single(m => m.Name.StartsWith("9950X / 7950X")).Topo.VCacheGroup is null);
+
+    var meteor = matrix.Single(m => m.Name.Contains("Meteor Lake")).Topo;
+    Check("Trap B: Meteor Lake reports 2 L3-less cores", meteor.Cpus.Count(c => c.L3Id < 0) == 2,
+        meteor.Cpus.Count(c => c.L3Id < 0).ToString());
+    Check("Trap B: HasL3LessCores is set", meteor.HasL3LessCores);
+    {
+        var sets = Sets(meteor, _ => 0);
+        var plan = AffinityPlanner.Plan(meteor, sets, null, DesktopDevices());
+        var l3LessLps = meteor.Cpus.Where(c => c.L3Id < 0).Select(c => c.Index).ToHashSet();
+        Check("Trap B: no device is ever pinned to an L3-less core",
+            plan.Assignments.All(a => a.Cpus.All(c => !l3LessLps.Contains(c))),
+            string.Join("; ", plan.Assignments.Select(a => $"{a.Role}->{string.Join(",", a.Cpus)}")));
+        Check("Trap B: the plan says why the LP-E cores are excluded",
+            plan.Notes.Any(n => n.Contains("without their own L3")), string.Join(" | ", plan.Notes.Take(2)));
+        Check("Trap B: RSS also avoids the L3-less cores",
+            plan.Assignments.Where(a => a.Rss is not null).All(a => !l3LessLps.Contains(a.Rss!.BaseProcNumber)));
+    }
+    var lunar = matrix.Single(m => m.Name.Contains("Lunar Lake")).Topo;
+    {
+        var plan = AffinityPlanner.Plan(lunar, Sets(lunar, _ => 0), null, DesktopDevices());
+        var l3Less = lunar.Cpus.Where(c => c.L3Id < 0).Select(c => c.Index).ToHashSet();
+        Check("Trap B: Lunar Lake's LP-E cores are avoided too",
+            plan.Assignments.All(a => a.Cpus.All(c => !l3Less.Contains(c))),
+            string.Join("; ", plan.Assignments.Select(a => $"{a.Role}->{string.Join(",", a.Cpus)}")));
+    }
+
+    var interleaved = matrix.Single(m => m.Name.Contains("interleaved")).Topo;
+    Check("Trap C: interleaved P/E is hybrid with no SMT", interleaved.IsHybrid && !interleaved.SmtEnabled);
+    Check("Trap C: P-cores are identified wherever they sit",
+        interleaved.Cpus.Count(c => c.EfficiencyClass == 1) == 8,
+        interleaved.Cpus.Count(c => c.EfficiencyClass == 1).ToString());
+    {
+        var plan = AffinityPlanner.Plan(interleaved, Sets(interleaved, _ => 0), null, DesktopDevices());
+        var gpu = plan.Assignments.Single(a => a.Role == DeviceRole.Gpu);
+        var input = plan.Assignments.Single(a => a.Role == DeviceRole.Input);
+        Check("Trap C: GPU lands on a P-core despite the interleaving",
+            gpu.Cpus.All(c => c is 0 or 1 or >= 18), string.Join(",", gpu.Cpus));
+        Check("Trap C: the mouse controller lands on a P-core too",
+            input.Cpus.All(c => c is 0 or 1 or >= 18), string.Join(",", input.Cpus));
+        Check("Trap C: no assignment lands on core 0",
+            plan.Assignments.All(a => !a.Cpus.Contains(0)), string.Join("; ", plan.Assignments.Select(a => $"{a.Role}->{string.Join(",", a.Cpus)}")));
+    }
+
+    //---- boundary: LP 63 and the two-group refusal -----------------------------------
+    var tr = matrix.Single(m => m.Name.Contains("7970X")).Topo;
+    Check("boundary: 7970X is 64 LPs on one group", tr.LogicalCount == 64 && !tr.MultipleProcessorGroups);
+    Check("boundary: LP 63 round-trips as 8-byte LE",
+        RegWrite.AsMask(new RegValue(true, RegistryValueKind.Binary, RegWrite.MaskBytes(1UL << 63))) == 1UL << 63, "mask");
+    var trPlan = AffinityPlanner.Plan(tr, Sets(tr, _ => 0), null, DesktopDevices());
+    Check("boundary: every 7970X mask stays inside 64 LPs",
+        trPlan.Assignments.All(a => a.Cpus.All(c => c < 64)), "ok");
+    var tr80 = matrix.Single(m => m.Name.Contains("7980X")).Topo;
+    Check("boundary: 7980X reports 2 processor groups", tr80.MultipleProcessorGroups);
+    Check("boundary: 7980X is refused read-only",
+        !AffinityPlanner.Plan(tr80, Sets(tr80, _ => 0), null, DesktopDevices()).Applicable);
+
+    //---- tiny systems must not crash ------------------------------------------------
+    foreach (var nm in new[] { "Athlon 3000G", "i5-9400F" })
+    {
+        var topo = matrix.Single(m => m.Name.Contains(nm)).Topo;
+        bool ok = true;
+        AffinityPlan plan = null!;
+        try { plan = AffinityPlanner.Plan(topo, Sets(topo, _ => 0), null, DesktopDevices()); } catch { ok = false; }
+        Check($"{nm}: 4-6 devices on {topo.CoreCount} cores resolves without a crash", ok);
+        Check($"{nm}: nothing lands on core 0", plan is not null && plan.Assignments.All(a => !a.Cpus.Contains(0)));
+    }
+
+    //---- every topology, every hybrid policy, no exceptions ---------------------------
+    int policyRuns = 0;
+    foreach (var (name, topo, _) in matrix.Where(m => m.Topo.IsHybrid && m.Topo.LogicalCount <= 64))
+        foreach (var pol in Enum.GetValues<HybridDevicePolicy>())
+        {
+            try
+            {
+                var plan = AffinityPlanner.Plan(topo, Sets(topo, _ => 0), null, DesktopDevices(), hybridPolicy: pol);
+                policyRuns++;
+                if (plan.Assignments.Any(a => a.Cpus.Contains(0))) { policyRuns--; Check($"{name}/{pol}: core 0 protected", false); }
+            }
+            catch (Exception ex) { Check($"{name}/{pol}: no exception", false, ex.Message); }
+        }
+    Check("every hybrid topology survives all 3 placement policies", policyRuns > 0, policyRuns.ToString());
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>

@@ -108,6 +108,17 @@ public sealed class SystemProfile
             // the cache layout is reported oddly by a given firmware.
             if (Cpu.IsSingleCcdVCache || CpuName.Contains("X3D", StringComparison.OrdinalIgnoreCase))
                 return "Single CCD with 3D V-Cache";
+            // Asymmetric without V-Cache: Strix Point (16 MB + 8 MB). Say what it is, never "X3D".
+            if (Cpu.HasAsymmetricL3)
+            {
+                var big = Cpu.L3Groups.MaxBy(g => g.SizeBytes)!;
+                var small = Cpu.L3Groups.MinBy(g => g.SizeBytes)!;
+                return $"{Cpu.L3Groups.Count} L3 groups ({big.SizeBytes / (1024 * 1024)} MB on CPUs {big.CpuRange()}, " +
+                       $"{small.SizeBytes / (1024 * 1024)} MB on CPUs {small.CpuRange()})";
+            }
+            if (Cpu.HasL3LessCores)
+                return $"Intel hybrid with low-power E-cores ({Cpu.L3Groups.Count} L3 group(s), " +
+                       $"{Cpu.Cpus.Count(c => c.L3Id < 0)} core(s) with no L3)";
             if (Cpu.IsMultiCcd) return $"{Cpu.L3Groups.Count} CCDs / CCXs";
             return "Single CCD / single L3";
         }

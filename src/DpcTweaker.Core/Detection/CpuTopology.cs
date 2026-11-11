@@ -32,7 +32,16 @@ public sealed class CpuTopology
     public bool IsMultiCcd => L3Groups.Count >= 2;
     public bool MultipleProcessorGroups => GroupCount > 1;
 
-    /// <summary>The L3 group with clearly more cache (an X3D V-Cache CCD), if the groups differ.</summary>
+    /// <summary>
+    /// The L3 group with clearly more cache (an X3D V-Cache CCD), if the groups differ.
+    /// <para>
+    /// The ratio test alone is not enough. A genuine 3D V-Cache CCD stacks 64 MB on a 32 MB die,
+    /// giving 96 MB (or 96 + 32 = 128 MB on the dual-CCD parts). An asymmetric non-X3D chip does
+    /// not: Strix Point's Ryzen AI 9 HX 370 has 4 Zen 5 cores with 16 MB and 8 Zen 5c cores with
+    /// 8 MB, which satisfies 16 >= 8 * 1.5 while having nothing to do with V-Cache. Requiring a
+    /// 64 MB floor keeps the label honest while still letting the planner prefer the bigger group.
+    /// </para>
+    /// </summary>
     public CacheGroup? VCacheGroup
     {
         get
@@ -40,11 +49,26 @@ public sealed class CpuTopology
             if (IsHybrid || L3Groups.Count < 2) return null;
             var big = L3Groups.MaxBy(g => g.SizeBytes)!;
             var small = L3Groups.MinBy(g => g.SizeBytes)!;
+            if (big.SizeBytes < VCacheMinimumBytes) return null;
             return big.SizeBytes >= small.SizeBytes * 3 / 2 ? big : null;
         }
     }
 
+    /// <summary>96 MB and 128 MB X3D parts clear this; 16 MB / 32 MB CCDs do not.</summary>
+    private const long VCacheMinimumBytes = 64L * 1024 * 1024;
+
     public bool IsDualCcdX3D => VCacheGroup is not null;
+
+    /// <summary>
+    /// A multi-L3 chip whose groups differ in size without being V-Cache (Strix Point 16 MB + 8 MB).
+    /// The planner still keeps game threads on the bigger group; nothing is labelled X3D.
+    /// </summary>
+    public bool HasAsymmetricL3 =>
+        !IsHybrid && L3Groups.Count >= 2 && VCacheGroup is null &&
+        L3Groups.Select(g => g.SizeBytes).Distinct().Count() > 1;
+
+    /// <summary>Cores with no L3 of their own (Intel LP-E island cores on Meteor / Lunar Lake).</summary>
+    public bool HasL3LessCores => Cpus.Any(c => c.L3Id < 0);
 
     /// <summary>
     /// A single-CCD part whose one L3 is far bigger than a normal CCD's (7800X3D / 9800X3D: 96 MB
