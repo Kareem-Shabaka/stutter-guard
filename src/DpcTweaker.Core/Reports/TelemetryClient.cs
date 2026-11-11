@@ -72,7 +72,7 @@ public static class TelemetryClient
             if (!string.IsNullOrWhiteSpace(userContact))
                 summary.AppendLine($"• **Contact:** {userContact.Trim()}");
             summary.AppendLine($"• **Hardware:** {p.CpuName} | {gpus}");
-            summary.AppendLine($"• **OS:** {p.Windows.Display} (v0.7.0)");
+            summary.AppendLine($"• **OS:** {p.Windows.Display} (v{BuildInfo.Version})");
 
             using var form = new MultipartFormDataContent();
             form.Add(new StringContent(summary.ToString()), "content");

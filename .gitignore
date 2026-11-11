@@ -21,3 +21,10 @@ TestResults/
 # OS metadata
 [Tt]humbs.db
 .DS_Store
+# Transient / atomic-write leftovers and test scratch
+*.tmp
+*.bak
+*.broken-*
+stutterguard-test-*
+dpctweaker-task-*
+nul

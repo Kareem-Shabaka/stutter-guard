@@ -1,6 +1,7 @@
 @echo off
 setlocal
-set "PY=C:\Users\Compumarts\AppData\Local\Programs\Python\Python312\python.exe"
+rem Point PYTHON_EXE at your interpreter, or leave it unset to use python from PATH.
+if not defined PYTHON_EXE set "PY=python"
 if exist "%PY%" goto RUN
 python --version >nul 2>&1
 if %errorlevel% equ 0 set "PY=python" & goto RUN

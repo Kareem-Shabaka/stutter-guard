@@ -11,12 +11,8 @@
     <RootNamespace>DpcTweaker.App</RootNamespace>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.7.0</Version>
-    <Product>Stutter Guard</Product>
     <Description>Measured, reversible DPC latency and stutter tuning for Windows.</Description>
     <Authors>Kareem Shabaka</Authors>
-    <Company>Kareem Shabaka</Company>
-    <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under GPL-3.0 with Non-Commercial Rider.</Copyright>
     <!-- Fluent theme (ThemeMode) is marked experimental in some .NET versions. -->
     <NoWarn>$(NoWarn);WPF0001;CA1416</NoWarn>
     <!-- One self-contained .exe -->
