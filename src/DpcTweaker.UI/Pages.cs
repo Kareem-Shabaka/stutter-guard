@@ -394,7 +394,7 @@ public sealed class ModulePageViewModel : PageViewModel
             Message = $"Applied {ok} of {results.Count}." +
                       (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "") +
                       (engine.LastFinishErrors.Count > 0 ? " " + string.Join(" ", engine.LastFinishErrors) : "");
-            if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot) || engine.LastFinishErrors.Count > 0) _main.RestartNeeded = true;
+            if (engine.LastFinishErrors.Count > 0) _main.ForceRestartNeeded();
         }
         finally
         {
@@ -428,7 +428,7 @@ public sealed class ModulePageViewModel : PageViewModel
             var failed = results.Where(r => !r.Ok).ToList();
             Message = $"Reverted {ok} of {results.Count}." +
                       (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "");
-            if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.RestartNeeded = true;
+            if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
         }
         finally
         {
@@ -604,6 +604,9 @@ public sealed class SafetyPageViewModel : PageViewModel
     private readonly MainViewModel _main;
     private bool _turnOnProtection = true;
     private string _journalText = "";
+    private bool _degraded;
+    private string _degradedText = "";
+    private string _brokenCopy = "";
 
     public SafetyPageViewModel(MainViewModel main) : base("Safety", "")
     {
@@ -612,7 +615,22 @@ public sealed class SafetyPageViewModel : PageViewModel
         OpenBackupsCommand = new RelayCommand(() => { Paths.EnsureDataDirs(); _main.Ui.Open(Paths.BackupsDir); });
         OpenDataCommand = new RelayCommand(() => { Paths.EnsureDataDirs(); _main.Ui.Open(Paths.DataDir); });
         RevertAllCommand = new RelayCommand(() => _ = RevertAllAsync(), () => !Busy);
+        RecoverDegradedCommand = new RelayCommand(RecoverDegraded, () => Degraded && !Busy);
     }
+
+    /// <summary>True when journal.json couldn't be read at startup and is under protection.</summary>
+    public bool Degraded
+    {
+        get => _degraded;
+        private set { if (Set(ref _degraded, value)) RecoverDegradedCommand.Refresh(); }
+    }
+
+    public string DegradedText { get => _degradedText; private set => Set(ref _degradedText, value); }
+
+    /// <summary>The .broken-* copy the app kept instead of overwriting the unreadable journal.</summary>
+    public string BrokenCopy { get => _brokenCopy; private set => Set(ref _brokenCopy, value); }
+
+    public RelayCommand RecoverDegradedCommand { get; }
 
     public bool TurnOnProtection { get => _turnOnProtection; set => Set(ref _turnOnProtection, value); }
 
@@ -633,10 +651,74 @@ public sealed class SafetyPageViewModel : PageViewModel
     public override Task RefreshAsync()
     {
         var e = _main.Engine;
-        if (e is not null)
+        if (e is null) return Task.CompletedTask;
+
+        Degraded = e.Journal.IsDegraded;
+        if (Degraded)
+        {
+            BrokenCopy = FindBrokenCopy();
+            DegradedText =
+                "journal.json couldn't be read when the app started, so it is under protection: it will not be " +
+                "overwritten, and undo-all.ps1 is left exactly as it was, because between them they are the only " +
+                "record of what this PC had before." +
+                (BrokenCopy.Length > 0 ? "\n\nThe unreadable file was kept as:\n" + BrokenCopy : "") +
+                "\n\nPut that file back by hand to recover the recorded before-states, or press \"Start a fresh journal\" " +
+                "to accept losing them. Nothing is deleted either way: undo-all.ps1 is archived before it is rewritten.";
+            JournalText = "Journal locked (degraded). No new tweak can be applied until this is resolved.";
+        }
+        else
+        {
+            BrokenCopy = "";
+            DegradedText = "";
             JournalText = $"{e.Journal.AppliedCount} tweak(s) applied by the app, {e.Journal.EntryCount} recorded previous value(s)." +
                           (e.SessionBackup is null ? "" : " This session's backups: " + e.SessionBackup.Folder);
+        }
         return Task.CompletedTask;
+    }
+
+    private static string FindBrokenCopy()
+    {
+        try
+        {
+            var files = Directory.GetFiles(Paths.DataDir, "journal.json*.broken-*");
+            if (files.Length == 0) return "";
+            return files.OrderByDescending(f => File.GetLastWriteTime(f)).First();
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// Accepts the lost journal. The current undo-all.ps1 is archived first: after recovery it gets
+    /// regenerated from the empty journal, and that script may still be the best copy around.
+    /// </summary>
+    private void RecoverDegraded()
+    {
+        var e = _main.Engine;
+        if (e is null) return;
+        if (!_main.Ui.Confirm("Start a fresh journal",
+                "The recorded before-states in journal.json can no longer be read.\n\n" +
+                "Starting fresh means this PC's earlier values can't be reverted from the journal any more. " +
+                "The unreadable file" + (BrokenCopy.Length > 0 ? " (" + BrokenCopy + ")" : "") +
+                " stays on disk, and undo-all.ps1 is archived before it is rewritten.\n\nContinue?"))
+            return;
+
+        try
+        {
+            if (File.Exists(Paths.UndoAllScript))
+            {
+                string archive = Path.Combine(Paths.DataDir,
+                    "undo-all.ps1.before-recovery-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".ps1");
+                File.Copy(Paths.UndoAllScript, archive, overwrite: true);
+                Message = "Kept the old undo script as " + archive + ".";
+            }
+        }
+        catch (Exception ex) { Log.Warn("Couldn't archive undo-all.ps1: " + ex.Message); }
+
+        e.Journal.RecoverDegraded();
+        e.Journal.Flush();
+        Degraded = false;
+        Message = "Journal recovered. Changes can be applied again.";
+        _ = _main.RefreshAllAsync();
     }
 
     private async Task CreateRestorePointAsync()
@@ -644,8 +726,12 @@ public sealed class SafetyPageViewModel : PageViewModel
         Busy = true;
         RestorePointCommand.Refresh();
         Message = "Creating a restore point (up to a minute)...";
-        var (ok, msg) = await Task.Run(() => RestorePoint.Create("Stutter Guard", TurnOnProtection));
-        Message = ok ? "Restore point created." : "Restore point failed: " + msg;
+        var point = await Task.Run(() => RestorePoint.Create("Stutter Guard", TurnOnProtection, _main.Engine?.Journal));
+        bool ok = point.Ok;
+        string msg = point.Message;
+        Message = ok
+            ? "Restore point created." + (point.TurnedProtectionOn ? " System Protection was off; it was turned on and recorded, so Revert everything can put it back." : "")
+            : "Restore point failed: " + msg;
         if (ok) _main.RestorePointDone = true;
         Busy = false;
         RestorePointCommand.Refresh();
@@ -664,7 +750,7 @@ public sealed class SafetyPageViewModel : PageViewModel
         Message = errors.Count == 0
             ? $"Done: {restored} value(s) restored. Restart Windows to finish."
             : $"{restored} restored, {errors.Count} failed: {string.Join("; ", errors)}. The journal was kept; undo-all.ps1 can retry.";
-        _main.RestartNeeded = true;
+        if (restored > 0) _main.ForceRestartNeeded();   // nothing restored means nothing to restart for
         Busy = false;
         await _main.RefreshAllAsync();
         await RefreshAsync();

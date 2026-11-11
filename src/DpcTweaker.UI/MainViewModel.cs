@@ -14,6 +14,8 @@ public sealed class MainViewModel : ObservableObject
     private string _loadingText = "Scanning this PC...";
     private string _statusText = "";
     private bool _restartNeeded;
+    /// <summary>Set when something other than a row state needs a restart (a failed adapter restart).</summary>
+    private bool _restartForced;
     private bool _globalBusy;
     private int _refreshing;
 
@@ -125,6 +127,11 @@ public sealed class MainViewModel : ObservableObject
 
     public void SetGlobalBusy(bool busy) => GlobalBusy = busy;
 
+    /// <summary>A restart is warranted for a reason a row status can't express (a failed adapter restart).</summary>
+    public void ForceRestartNeeded() { _restartForced = true; RestartNeeded = true; }
+
+    /// <summary>Called when a new apply/revert cycle starts, so an old reason doesn't outlive it.</summary>
+    public void ClearForcedRestart() => _restartForced = false;
     public async Task InitializeAsync()
     {
         Loading = true;
@@ -227,7 +234,8 @@ public sealed class MainViewModel : ObservableObject
         int applied = rows.Count(r => r.Status == TweakStatus.Applied);
         int pending = rows.Count(r => r.Status == TweakStatus.PendingReboot);
         int drifted = rows.Count(r => r.Status == TweakStatus.Drifted);
-        if (pending > 0) RestartNeeded = true;
+        // Derived, not sticky: reverting the last pending change clears the banner again.
+        RestartNeeded = pending > 0 || _restartForced;
         StatusText = $"{applied} applied · {pending} pending restart · {drifted} drifted";
     }
 
@@ -237,7 +245,10 @@ public sealed class MainViewModel : ObservableObject
         if (RestorePointDone) return true;
         SetGlobalBusy(true);
         Safety.Message = "Creating a restore point before the first change...";
-        var (ok, msg) = await Task.Run(() => RestorePoint.Create("Stutter Guard", Safety.TurnOnProtection));
+        var point = await Task.Run(() => RestorePoint.Create("Stutter Guard", Safety.TurnOnProtection, Engine?.Journal));
+        bool ok = point.Ok;
+        string msg = point.Message;
+        if (point.TurnedProtectionOn) Safety.Message = "System Protection was off; it was turned on and recorded so Revert everything can put it back.";
         SetGlobalBusy(false);
         if (ok)
         {

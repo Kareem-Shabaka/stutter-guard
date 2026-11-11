@@ -119,12 +119,22 @@ public static class ServiceControl
 {
     public static void SetStart(string name, StartType t)
     {
-        var r = ProcessRunner.Run(ProcessRunner.System32("sc.exe"), new[] { "config", name, "start=", StartTypes.ScWord(t) }, 60_000, Encoding.Default);
+        var r = ProcessRunner.Run(ProcessRunner.System32("sc.exe"), new[] { "config", name, "start=", StartTypes.ScWord(t) }, 60_000, ProcessRunner.ConsoleEncoding);
         if (!r.Ok)
         {
             string msg = r.Combined.Trim();
-            if (msg.Contains("5:") || msg.Contains("Access is denied", StringComparison.OrdinalIgnoreCase))
-                msg = "Windows refused the change (access denied): this service is protected.";
+            // sc.exe returns the Win32 error as its exit code, which is language-independent.
+            // 5 = ERROR_ACCESS_DENIED, 1060 = service does not exist, 87 = bad parameter.
+            const int ERROR_ACCESS_DENIED = 5;
+            const int ERROR_SERVICE_DOES_NOT_EXIST = 1060;
+            msg = r.ExitCode switch
+            {
+                ERROR_ACCESS_DENIED => "Windows refused the change (access denied, sc.exe exit 5): this service is protected.",
+                ERROR_SERVICE_DOES_NOT_EXIST => "The service isn't installed any more (sc.exe exit 1060).",
+                _ when msg.Contains("Access is denied", StringComparison.OrdinalIgnoreCase)
+                    => "Windows refused the change (access denied): this service is protected.",
+                _ => msg,
+            };
             throw new InvalidOperationException(msg);
         }
         Log.Info($"Service {name} start = {StartTypes.Label(t)}");

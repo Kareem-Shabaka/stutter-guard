@@ -98,6 +98,10 @@ public static class JournalRestorer
             case "task-enabled":
                 if (e.Data == "1" && TaskSched.Query(e.Target).Exists) TaskSched.SetEnabled(e.Target, true);
                 break;
+            case "restorepoint":
+                // Target = drive, Data = "1" when the app turned System Protection on for it.
+                if (e.Data == "1") RestorePoint.DisableProtection(e.Target);
+                break;
             default:
                 Log.Warn("Unknown journal entry kind: " + e.Kind);
                 break;
@@ -214,6 +218,13 @@ public static class JournalRestorer
                 }
                 case "task-enabled":
                     if (e.Data == "1") sb.AppendLine($"schtasks /Change /TN {PowerShellBridge.Quote(e.Target)} /ENABLE");
+                    break;
+                case "restorepoint":
+                    if (e.Data == "1")
+                    {
+                        sb.AppendLine($"# System Protection was off on {e.Target} before the app turned it on.");
+                        sb.AppendLine($"Disable-ComputerRestore -Drive {PowerShellBridge.Quote(e.Target + "\\")} -ErrorAction SilentlyContinue");
+                    }
                     break;
             }
         }

@@ -156,11 +156,14 @@ public static class CoreBenchmark
         IntPtr me = GetCurrentThread();
         OptOutOfPowerThrottling(me);
 
-        // Process Lasso (or a "start /affinity") may have limited this app to some CPUs: widen it for the benchmark.
+        // Process Lasso (or a "start /affinity") may have limited this app to some CPUs: widen it for the
+        // benchmark, and put the original mask back afterwards so the user's rule stays in force.
+        UIntPtr? savedAffinity = null;
         if (GetProcessAffinityMask(GetCurrentProcess(), out var procMask, out var sysMask) && procMask != sysMask)
         {
             if (!SetProcessAffinityMask(GetCurrentProcess(), sysMask))
                 throw new InvalidOperationException("This app is limited to some CPUs (a Process Lasso rule or similar), so it can't test every core. Exclude StutterGuard.exe from that rule and run the benchmark again.");
+            savedAffinity = procMask;
             Log.Info($"Benchmark: widened process affinity from 0x{(ulong)procMask:X} to 0x{(ulong)sysMask:X}");
         }
         double totalSteps = idleSeconds + cores.Count * (samples / 1000.0 + 0.4);
@@ -249,6 +252,10 @@ public static class CoreBenchmark
         {
             SetThreadPriority(me, THREAD_PRIORITY_NORMAL);
             CloseHandle(timer);
+            if (savedAffinity is { } restore && !SetProcessAffinityMask(GetCurrentProcess(), restore))
+                Log.Warn($"Couldn't restore the process affinity mask 0x{(ulong)restore:X} after the benchmark.");
+            else if (savedAffinity is { } restored)
+                Log.Info($"Benchmark: restored process affinity to 0x{(ulong)restored:X}");
         }
         progress("Done.", 1);
         Log.Info("Core benchmark: " + string.Join("; ", res.Cores.Select(c => $"{c.Cpu}: {c.SpeedMs} ms, wake p99 {c.WakeP99Us} us")));

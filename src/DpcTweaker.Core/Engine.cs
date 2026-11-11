@@ -58,7 +58,8 @@ public sealed class TweakEngine
         int moved = Journal.RebindTweak("power.plan", PowerModule.PlanActiveId);
         if (moved > 0)
         {
-            try { Journal.Save(); } catch (Exception ex) { Log.Error("Journal save failed: " + ex.Message); }
+            // Flush, not Save: the repaired journal and undo-all.ps1 must not drift apart.
+            Journal.Flush();
             Log.Info($"Journal: moved {moved} orphaned \"power.plan\" entry/entries to {PowerModule.PlanActiveId}.");
         }
     }
@@ -66,7 +67,8 @@ public sealed class TweakEngine
     public void SetOptions(AppOptions options)
     {
         Options = options;
-        Options.Save(Journal);
+        try { Options.Save(Journal); }
+        catch (Exception ex) { Log.Error("Options not saved: " + ex.Message); }
         Rebuild();
     }
 
@@ -99,8 +101,12 @@ public sealed class TweakEngine
     /// <summary>Saves a new benchmark and rebuilds the plan.</summary>
     public void SetBench(BenchResult? bench)
     {
-        if (bench is null) BenchResult.Clear(Journal);
-        else bench.Save(Journal);
+        try
+        {
+            if (bench is null) BenchResult.Clear(Journal);
+            else bench.Save(Journal);
+        }
+        catch (Exception ex) { Log.Error("Benchmark not saved: " + ex.Message); }
         Rebuild();
     }
 
@@ -133,27 +139,33 @@ public sealed class TweakEngine
             var txn = Journal.BeginTransaction(t.Info.Id);
             try
             {
-                t.Apply(ctx);
-                Journal.MarkApplied(t.Info.Id);
-                Journal.CommitTransaction(txn);
-                _lastErrors.Remove(t.Info.Id);
-                results.Add(new TweakResult(t, true, null));
-                Log.Info("Applied " + t.Info.Id);
-            }
-            catch (Exception ex)
-            {
-                bool rolledBack = Journal.RollbackTransaction(txn);
-                _lastErrors[t.Info.Id] = ex.Message;
-                results.Add(new TweakResult(t, false, ex.Message));
-                Log.Error($"Apply {t.Info.Id} failed: {ex.Message}" + (rolledBack ? " (journal entries rolled back)" : ""));
+                try
+                {
+                    // Each RecordOriginal writes journal.json before it touches the system; a failed
+                    // WAL write throws here, so the tweak aborts without changing anything.
+                    t.Apply(ctx);
+                    Journal.MarkApplied(t.Info.Id);
+                    _lastErrors.Remove(t.Info.Id);
+                    results.Add(new TweakResult(t, true, null));
+                    Log.Info("Applied " + t.Info.Id);
+                }
+                catch (Exception ex)
+                {
+                    bool rolledBack = Journal.RollbackTransaction(txn);
+                    _lastErrors[t.Info.Id] = ex.Message;
+                    results.Add(new TweakResult(t, false, ex.Message));
+                    Log.Error($"Apply {t.Info.Id} failed: {ex.Message}" + (rolledBack ? " (journal entries rolled back)" : ""));
+                }
             }
             finally
             {
+                // Close the transaction first, then flush once with the sidecar: journal.json and
+                // undo-all.ps1 are rewritten per tweak instead of per recorded entry.
+                Journal.CommitTransaction(txn);
                 Journal.Flush();
             }
         }
         RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));
-        JournalRestorer.WriteUndoScripts(Journal, _sessionBackup);
         return results;
     }
 
@@ -178,11 +190,11 @@ public sealed class TweakEngine
             }
             finally
             {
-                Journal.Flush();
+                Journal.Flush(includeSidecar: false);
             }
         }
         RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));
-        JournalRestorer.WriteUndoScripts(Journal, _sessionBackup);
+        Journal.Flush();   // one undo-all.ps1 rewrite for the whole revert batch
         return results;
     }
 

@@ -29,8 +29,26 @@ public static class InterruptCheck
     public const string DownloadUrl = "https://speed.cloudflare.com/__down?bytes=200000000";
 
     /// <param name="pendingRestart">True for an assignment applied since the last boot (written, not yet in effect).</param>
+    /// <summary>
+    /// Every logical processor of the physical cores an assignment owns. An assignment stores one
+    /// ("first") thread per core, but the device's DPCs land on any thread of that core, and RSS
+    /// spreads over the whole span: summing only the first threads reports "hardly any network
+    /// interrupts here" while the queues are in fact running on the siblings.
+    /// </summary>
+    public static int[] CpusFor(Assignment a, CpuTopology? topo)
+    {
+        if (topo is null || topo.Cpus.Count == 0) return a.Cpus;
+        var coreIds = a.Cpus
+            .Select(c => topo.Cpus.FirstOrDefault(x => x.Index == c)?.CoreId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToHashSet();
+        if (coreIds.Count == 0) return a.Cpus;
+        return topo.Cpus.Where(c => coreIds.Contains(c.CoreId)).Select(c => c.Index).Distinct().OrderBy(x => x).ToArray();
+    }
+
     public static CheckResult Run(AffinityPlan plan, int logicalCount, bool download, int idleSeconds, int loadSeconds,
-        Func<Assignment, bool> pendingRestart, Action<string, double> progress, CancellationToken ct)
+        Func<Assignment, bool> pendingRestart, Action<string, double> progress, CancellationToken ct, CpuTopology? topo = null)
     {
         int n = Math.Min(64, logicalCount);
         var notes = new List<string>();
@@ -82,9 +100,11 @@ public static class InterruptCheck
             var lines = new List<CheckLine>();
             foreach (var asg in plan.Assignments)
             {
-                double iIdle = asg.Cpus.Where(x => x < idle.Length).Sum(x => idle[x].InterruptsPerSec);
-                double iLoad = asg.Cpus.Where(x => x < load.Length).Sum(x => load[x].InterruptsPerSec);
-                double dpcDelta = asg.Cpus.Where(x => x < load.Length).Sum(x => load[x].DpcsPerSec - idle[x].DpcsPerSec);
+                // All threads of the assigned cores, not just the first ones: see CpusFor.
+                var span = CpusFor(asg, topo);
+                double iIdle = span.Where(x => x < idle.Length).Sum(x => idle[x].InterruptsPerSec);
+                double iLoad = span.Where(x => x < load.Length).Sum(x => load[x].InterruptsPerSec);
+                double dpcDelta = span.Where(x => x < load.Length).Sum(x => load[x].DpcsPerSec - idle[x].DpcsPerSec);
                 var (policy, mask) = AffinityTweak.ReadLive(asg.Device);
                 bool pinned = policy == 4 && mask == asg.Mask;
                 double delta = iLoad - iIdle;
@@ -102,7 +122,8 @@ public static class InterruptCheck
                             : ("Hardly any network interrupts here during the download: the driver may steer its own interrupts elsewhere (see the busiest reserved CPU below).", false),
                         _ => (delta > 50 ? "Active during the check." : "Quiet (expected for a low-traffic device).", true),
                     };
-                lines.Add(new CheckLine(asg.Device.Name, asg.CpuText, AffinityTweak.RoleText(asg.Role), Math.Round(iIdle), Math.Round(iLoad), Math.Round(dpcDelta), verdict, ok));
+                string cpusText = span.Length > asg.Cpus.Length ? asg.CpuText + " (all threads)" : asg.CpuText;
+                lines.Add(new CheckLine(asg.Device.Name, cpusText, AffinityTweak.RoleText(asg.Role), Math.Round(iIdle), Math.Round(iLoad), Math.Round(dpcDelta), verdict, ok));
             }
 
             var reserved = plan.ReservedCpus.Where(x => x < load.Length).ToList();

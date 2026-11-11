@@ -39,9 +39,15 @@ public static class DevicePower
                 } else { $already++ }
             }
         }
+        # One row per device, ever: this runs at every boot, so a plain append would grow without bound.
         if ($bk.Count -gt 0) {
-            if (Test-Path $backup) { $bk | Export-Csv -Path $backup -NoTypeInformation -Encoding UTF8 -Append }
-            else { $bk | Export-Csv -Path $backup -NoTypeInformation -Encoding UTF8 }
+            $have = @{}
+            if (Test-Path $backup) { foreach ($r in @(Import-Csv $backup)) { $have["$($r.Kind)|$($r.Id)"] = $true } }
+            $new = @($bk | Where-Object { -not $have.ContainsKey("$($_.Kind)|$($_.Id)") })
+            if ($new.Count -gt 0) {
+                if (Test-Path $backup) { $new | Export-Csv -Path $backup -NoTypeInformation -Encoding UTF8 -Append }
+                else { $new | Export-Csv -Path $backup -NoTypeInformation -Encoding UTF8 }
+            }
         }
         [pscustomobject]@{ changed = $changed; already = $already; failed = $failed; total = $wmi.Count } | ConvertTo-Json -Compress
         """;
@@ -50,7 +56,7 @@ public static class DevicePower
         $ErrorActionPreference = 'SilentlyContinue'
         $n = 0
         if (Test-Path $backup) {
-            $rows = Import-Csv $backup
+            $rows = @(Import-Csv $backup | Sort-Object Kind, Id -Unique)
             $wmi = @(Get-CimInstance -Namespace root\wmi -ClassName MSPower_DeviceEnable)
             foreach ($r in $rows) {
                 if ($r.Kind -eq 'wmi') {
