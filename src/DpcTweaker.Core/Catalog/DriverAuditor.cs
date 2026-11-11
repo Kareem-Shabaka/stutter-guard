@@ -261,19 +261,18 @@ public static class DriverAuditor
         // The third component is always "14" or "15" for NVIDIA. A bare "30./31./32." prefix is
         // NOT enough: Intel Arc drivers are 32.0.101.x and AMD uses 32.0.21025.x, so the old test
         // mangled both vendors' versions into nonsense ("32.0.101.5186" became "151.86").
+        // Every NVIDIA display driver encodes its marketing version in the third and fourth
+        // components, and the third is always 14 or 15. Nothing else may be translated: a file-name
+        // test is not enough, because nvraid.sys and nvstor.sys also start with "nv" and their
+        // 10.0.19041.1234 storage versions would be mangled into a fabricated 904112.34.
         var parts = v.Split('.');
         bool nvidiaShape = parts.Length == 4 && (parts[2] == "14" || parts[2] == "15") && parts[3].Length >= 4;
-        // "stornvme.sys" also contains "nv", so match the file name from the start.
-        bool nvidiaFile = driverFile is not null && driverFile.StartsWith("nv", StringComparison.OrdinalIgnoreCase);
 
-        if (nvidiaShape || (nvidiaFile && parts.Length == 4 && parts[3].Length >= 4))
+        if (nvidiaShape && parts[3].Length >= 4)
         {
-            if (parts[2].Length >= 2 && parts[2].StartsWith("1") && parts[3].Length >= 4)
-            {
-                string major = parts[2][1..] + parts[3][..2];
-                string minor = parts[3][2..];
-                return $"{major}.{minor}";
-            }
+            string major = parts[2][1..] + parts[3][..2];
+            string minor = parts[3][2..];
+            return $"{major}.{minor}";
         }
 
         return v;

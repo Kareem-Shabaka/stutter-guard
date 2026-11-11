@@ -95,6 +95,50 @@ drift was only ever *reported* per row. Wave 6 makes it actionable engine-wide.
 
 ---
 
+## Wave 8 — 12-Topology Simulation Matrix & DriverAuditor Stress Suite
+
+Two real bugs found by the new tests, plus the harness itself. Test count 450 → 570.
+
+### Bugs found and fixed
+
+| # | Bug | Fix | Where |
+|---|---|---|---|
+| W8.1 | `NormalizeVersion` treated **any** `nv*` driver file as an NVIDIA *display* driver. `nvraid.sys` / `nvstor.sys` are storage drivers, and their `10.0.19041.1234` was mangled into a fabricated `904112.34` — which would then be compared against display-driver advisory versions. | The loose file-name fallback is gone. Translation now requires the third version component to be exactly `14` or `15`, which every real NVIDIA display driver uses and no storage driver does. | `Catalog\DriverAuditor.cs:269` |
+| W8.2 | **22 of the 77 driver-catalog rules can never fire in a real scan.** The auditor is complete (all 77 fire when handed a matching device), but it is driven from `profile.Gpus` + `profile.Devices`, and `PciScanner` emits only `PCI\` nodes. The 22 rules for USB (9), SWC (6), ROOT (3), HDAUDIO (2) and ACPI (2) devices have nothing to match. | **Characterized, not yet fixed.** Locked in with an explicit assertion so it cannot regress silently and cannot be forgotten. Fixing it means teaching the detection pipeline to emit non-PCI device nodes. | `Detection\PciDevices.cs:222`, test `Wave 8 P1: every one of the 77...` |
+
+### Part 1 — DriverAuditor stress suite (new tests)
+
+- **Vendor collision matrix**: NVIDIA `32.0.15.6094 → 560.94`, `31.0.15.3118 → 531.18`, `32.0.14.7212 → 472.12`; Intel Arc `32.0.101.5186`, AMD `32.0.12019.1028` / `31.0.24033.1003`, `stornvme.sys`, `nvraid.sys`, `nvstor.sys` all provably *untranslated*.
+- **Component-boundary traps**: a rule for `1.18` must not match `.3118`; `24.1` must not match `24.10` or `24.11`; `1.1` must not match `11.1`.
+- **Hostile input fuzz**: null / empty / whitespace / non-numeric (`v1.0-beta`) / zero (`0.0.0.0`) / 400-char versions, OEM suffixes (`32.0.15.6094 (WHQL)`), full `\SystemRoot\...DriverStore\...` and `\\?\` paths, empty and null device lists — zero exceptions, and a DriverStore path still matches its base file name.
+- **All 77 catalog rules exercised**: each entry's own hardware pattern and first bugged version are fed through `IsHardwareMatch`, `IsVersionBugged` and the full `Audit()` path. 77/77 matcher-reachable, 77/77 audit-reachable, 55 PCI + 22 non-PCI.
+
+### Part 2 — 12-topology hardware simulation matrix
+
+| # | Topology | Key asserted invariants |
+|---|---|---|
+| 1 | 9950X3D / 7950X3D — 16C/32T, 96 MB CCD0 + 32 MB CCD1 | CCD0 (LPs 0–15) gets **zero** interrupts; everything lands on 16–31; RSS too |
+| 2 | 9900X3D / 7900X3D — 12C/24T asymmetric 6+6 | CCD0 (LPs 0–11) clean; 6 free cores vs 8 device slots → sharing on CCD1 only, GPU never shares |
+| 3 | 9800X3D / 7800X3D — 8C/16T single-CCD V-Cache | `IsSingleCcdVCache`, `CpuKind == "Single CCD with 3D V-Cache"`, CPU 0 + top game cores protected |
+| 4 | 9950X3D SMT **off** — 16C/16T | `SmtEnabled == false`; RSS 1 processor/core, contiguous 2-LP span, no SMT doubling; masks valid 8-byte LE |
+| 5 | i9-14900K — 24C/32T hybrid | 2 threads on P-cores / 1 on E-cores handled by `RssFor` **and** `InterruptCheck.CpusFor`; Balanced parking preserved |
+| 6 | Core Ultra 9 285K Arrow Lake — 24C/24T, no HT | hybrid + no SMT ranks cleanly; unequal L3 does not fake X3D |
+| 7 | 4C/8T and 4C/4T extreme starvation, 6 devices | no exception, nothing on core 0, GPU never shares, graceful sharing |
+| 8 | LP 63 boundary & >64-LP multi-group | `1UL << 63` → `00 00 00 00 00 00 00 80`; bit 31 unsigned-correct; 128-thread read-only |
+| 9 | Dual GPU: Radeon iGPU + discrete RX 9070 XT | discrete takes slot 0; iGPU ranked below |
+| 10 | Crowded USB/PCIe: 2 mouse hubs + shared hub + 2 NVMe + bridge | NVMe/bridges untouched, shared hub escalated to 2 cores, no device pushed into sharing |
+| 11 | Laptop / battery | CurrentActive plan, Laptop preset, no DC forcing, desktop-only settings excluded, timer task off by default |
+| 12 | Hostile device nodes | keyless device, line-based IRQ, bare NIC, code-10 device, 0-mask pin, empty queue options — no throws |
+
+### Verification
+
+```
+dotnet build -c Release   →  0 Warning(s), 0 Error(s)
+--selftest                →  570 passed, 0 failed
+dotnet publish -c Release →  publish\StutterGuard.exe refreshed
+```
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -103,7 +147,9 @@ drift was only ever *reported* per row. Wave 6 makes it actionable engine-wide.
 | After Waves 1–2 | 276 |
 | After Wave 4 | 316 |
 | After Wave 5 | 371 |
-| After Wave 6 | **393** |
+| After Wave 6 | 393 |
+| After DriftWatcher (cda74dc) | 450 |
+| After Wave 8 | **570** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 
