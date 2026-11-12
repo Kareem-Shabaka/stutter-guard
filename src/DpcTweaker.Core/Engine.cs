@@ -77,7 +77,8 @@ public sealed class TweakEngine
         var list = new List<ITweak>();
         list.AddRange(PowerModule.Build(Profile, Journal, () => Options));
         list.AddRange(AmdGpuKeys.Build(Profile, Journal));
-        list.AddRange(GraphicsModule.Build(Profile, Journal));
+        // No graphics-stack tweak here any more: MPO off is a diagnostic workaround, not a tune.
+        // MpoOverride offers to undo any override that is already on the machine.
         list.AddRange(BootTasksModule.Build(Profile, Journal, () => Options));
 
         Bench = BenchResult.Load(Journal);
@@ -265,7 +266,7 @@ public sealed class TweakEngine
                     Journal.MarkApplied(t.Info.Id);
                     _lastErrors.Remove(t.Info.Id);
                     results.Add(new TweakResult(t, true, null));
-                    Log.Info("Re-applied drifted " + t.Info.Id);
+                    Log.Info("Re-applied " + t.Info.Id);
                 }
                 catch (Exception ex)
                 {
@@ -297,6 +298,19 @@ public sealed class TweakEngine
     /// and with the driver fingerprint recorded at the last apply.
     /// </summary>
     public DriftReport ScanDrift() => DriftWatcher.Scan(this);
+
+    /// <summary>
+    /// MPO-disabling overrides present on this machine, from any source. Read-only: the app no longer
+    /// sets MPO off itself, it only offers to undo an override that is already there.
+    /// </summary>
+    public IReadOnlyList<MpoFinding> MpoOverrides() => MpoOverride.Find(Profile);
+
+    /// <summary>
+    /// Deletes whatever MPO overrides were found, inside ordinary journal transactions so the
+    /// previous values are recorded first and Revert puts them back.
+    /// </summary>
+    public IReadOnlyList<TweakResult> RemoveMpoOverrides(IProgress<string>? progress = null) =>
+        Heal(MpoOverride.BuildRemovers(MpoOverrides(), Journal), progress);
 
     /// <summary>The status a row should show, folding in the last apply/revert error.</summary>
     public TweakState StateOf(ITweak t)

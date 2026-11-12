@@ -2876,6 +2876,127 @@ Console.WriteLine("Wave 10: 28-CPU architecture simulation matrix");
         }
     Check("every hybrid topology survives all 3 placement policies", policyRuns > 0, policyRuns.ToString());
 }
+// ================================================================ MPO override detection & removal
+
+Console.WriteLine("MPO: the tweak is gone, the override is offered for removal");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-mpo-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "x", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var engine = new TweakEngine(profile, j);
+
+        // --- the tweak no longer exists in any module ---
+        Check("no tweak applies MPO off any more",
+            !engine.Tweaks.Any(t => t.Info.Id.Contains("mpo", StringComparison.OrdinalIgnoreCase)),
+            string.Join(",", engine.Tweaks.Where(t => t.Info.Id.Contains("mpo", StringComparison.OrdinalIgnoreCase)).Select(t => t.Info.Id)));
+        Check("the old graphics.mpo-off id is gone from the catalog", engine.Tweaks.All(t => t.Info.Id != "graphics.mpo-off"));
+        Check("no tweak writes DisableOverlays",
+            !engine.Tweaks.OfType<RegistryValueTweak>().Any(t => t.Name == MpoOverride.DisableOverlays));
+
+        // --- detection with the registry read injected: no real display stack is touched ---
+        var probes = MpoOverride.ProbesOf(profile);
+        Check("both system-wide probes are checked", probes.Count(x => x.KeyPath == MpoOverride.GraphicsDriversKey) == 2, probes.Count.ToString());
+        Check("per-GPU class keys are probed too", probes.Count >= 2, probes.Count.ToString());
+
+        var present = new Dictionary<(string, string), RegValue>
+        {
+            [(MpoOverride.GraphicsDriversKey, MpoOverride.DisableOverlays)] = new RegValue(true, RegistryValueKind.DWord, 1u),
+            [(MpoOverride.GraphicsDriversKey, MpoOverride.OverlayTestMode)] = new RegValue(true, RegistryValueKind.DWord, 5u),
+        };
+        Func<string, string, RegValue> read = (k, n) => present.TryGetValue((k, n), out var v) ? v : RegValue.Missing;
+
+        var found = MpoOverride.Scan(probes, read);
+        Check("DisableOverlays = 1 is detected", found.Any(f => f.Name == MpoOverride.DisableOverlays), MpoOverride.Describe(found));
+        Check("OverlayTestMode = 5 is detected", found.Any(f => f.Name == MpoOverride.OverlayTestMode), MpoOverride.Describe(found));
+        Check("the source is named in plain words", found.Any(f => f.Source.Contains("overlay switch")), MpoOverride.Describe(found));
+        Check("the description lists each value", MpoOverride.Describe(found).Contains("DisableOverlays = 1"), MpoOverride.Describe(found));
+
+        // OverlayTestMode = 0 is the stock "overlays allowed" value: not an override.
+        var zeroOnly = new Dictionary<(string, string), RegValue>
+        {
+            [(MpoOverride.GraphicsDriversKey, MpoOverride.OverlayTestMode)] = new RegValue(true, RegistryValueKind.DWord, 0u),
+        };
+        var zeroFound = MpoOverride.Scan(probes, (k, n) => zeroOnly.TryGetValue((k, n), out var v) ? v : RegValue.Missing);
+        Check("OverlayTestMode = 0 is not treated as an override", zeroFound.Count == 0, MpoOverride.Describe(zeroFound));
+
+        var empty = MpoOverride.Scan(probes, (k, n) => RegValue.Missing);
+        Check("a clean machine reports nothing", empty.Count == 0);
+
+        // An unreadable key must not throw and must not invent a finding.
+        Check("an unreadable key yields no findings and no exception",
+            MpoOverride.Scan(probes, (k, n) => throw new UnauthorizedAccessException("denied")).Count == 0);
+
+        // --- removal is a real, journaled, revertible registry delete -------------------
+        string testKey = @"HKCU\Software\StutterGuardSelfTestMpo\" + Guid.NewGuid().ToString("N");
+        RegistryOps.Write(testKey, MpoOverride.DisableOverlays, RegistryValueKind.DWord, 1u);
+        Check("the throwaway key starts with the override set", RegistryOps.ReadDword(testKey, MpoOverride.DisableOverlays) == 1u);
+
+        var testProbes = new[] { (KeyPath: testKey, Name: MpoOverride.DisableOverlays, Source: "test") };
+        var testFound = MpoOverride.Scan(testProbes, RegistryOps.Read);
+        Check("the override is found through the real registry read", testFound.Count == 1, MpoOverride.Describe(testFound));
+
+        var removers = MpoOverride.BuildRemovers(testFound, j);
+        Check("one remover per finding", removers.Count == 1);
+        Check("the remover deletes rather than writes", removers[0].RemoveMode);
+        Check("the remover is journaled under a graphics id", removers[0].Info.Id.StartsWith("graphics.mpo-remove."), removers[0].Info.Id);
+        Check("the remover says it needs a restart", removers[0].Info.NeedsReboot);
+
+        var removed = engine.Heal(removers);
+        Check("the removal applies", removed.All(r => r.Ok), string.Join("; ", removed.Select(r => r.Error)));
+        Check("the value is gone", !RegistryOps.Read(testKey, MpoOverride.DisableOverlays).Exists);
+        Check("a second scan finds nothing left", MpoOverride.Scan(testProbes, RegistryOps.Read).Count == 0);
+
+        // Baseline preserved: the deleted value was recorded before deletion.
+        var originals = j.OriginalsFor(removers[0].Info.Id);
+        Check("the previous value was recorded before it was deleted", originals.Count == 1, string.Join(",", originals.Select(o => o.Data)));
+        Check("the recorded baseline is the override we removed", originals.Count == 1 && originals[0].Data == "1",
+            originals.Count == 1 ? originals[0].Data ?? "null" : "none");
+        Check("the journal remembers the tweak was applied", j.IsApplied(removers[0].Info.Id));
+
+        // Revert puts it straight back: the whole point of journaling the delete.
+        var (revOk, revErr) = engine.RevertAll();
+        Check("revert reports no errors", revErr.Count == 0, string.Join("; ", revErr));
+        Check("revert restores the override exactly as it was",
+            RegistryOps.ReadDword(testKey, MpoOverride.DisableOverlays) == 1u,
+            RegistryOps.Read(testKey, MpoOverride.DisableOverlays).Display);
+
+        // --- "Keep it" is remembered, and only for those exact values ------------------
+        var keepFound = MpoOverride.Scan(testProbes, RegistryOps.Read);
+        Check("nothing is dismissed before the user says so", !MpoOverride.IsDismissed(engine, keepFound));
+        MpoOverride.Dismiss(engine, keepFound);
+        Check("Keep it is remembered for these values", MpoOverride.IsDismissed(engine, keepFound));
+        Check("the signature is stable",
+            MpoOverride.Signature(keepFound) == MpoOverride.Signature(MpoOverride.Scan(testProbes, RegistryOps.Read)));
+
+        RegistryOps.Write(testKey, MpoOverride.DisableOverlays, RegistryValueKind.DWord, 2u);
+        var changed = MpoOverride.Scan(testProbes, RegistryOps.Read);
+        Check("a changed override asks again", !MpoOverride.IsDismissed(engine, changed), MpoOverride.Signature(changed));
+        Check("an empty finding set is never dismissed", !MpoOverride.IsDismissed(engine, Array.Empty<MpoFinding>()));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try
+        {
+            using var hkcu = Microsoft.Win32.Registry.CurrentUser;
+            hkcu.DeleteSubKeyTree(@"Software\StutterGuardSelfTestMpo", throwOnMissingSubKey: false);
+        }
+        catch { }
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>

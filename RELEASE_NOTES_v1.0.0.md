@@ -1,4 +1,4 @@
-﻿# Stutter Guard v1.0.0
+# Stutter Guard v1.0.0
 
 **Hardware-aware latency tuning for Windows 10 / 11 (x64) that you can actually undo.**
 
@@ -79,6 +79,11 @@ Threadrippers. Three architectural traps were found and fixed this way:
 - `nvraid.sys` / `nvstor.sys` (storage drivers that start with "nv") no longer get display-driver version translation.
 - Version matching compares whole components, so a rule for `1.18` can no longer match `.3118`.
 - When a device matches several catalog entries, the most severe advisory wins instead of the first one in file order.
+
+### Removed: the MPO tweak
+- **Multi-Plane Overlay off is gone.** It helped a handful of badly broken systems and gave others flashing black screens, broken HDR and broken FreeSync, so the app no longer offers it.
+- **Anyone who still carries the override gets it surfaced.** A leftover `DisableOverlays` or `OverlayTestMode`, from an older Stutter Guard version, a YouTube guide or a vendor tool, shows up as a Home-screen card offering to remove it and restore the Windows default. The old values are journaled first, so Revert puts them straight back.
+- **"Keep it" is remembered,** keyed to the exact values found, so the card does not nag. Changing the override makes it ask again.
 
 ---
 
