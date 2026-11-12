@@ -1,6 +1,6 @@
 # Stutter Guard
 
-[![License: GPL-3.0 (Non-Commercial)](https://img.shields.io/badge/License-GPL--3.0%20(Non--Commercial)-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
 [![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
@@ -113,7 +113,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 - [Building from Source](#building-from-source)
 - [Project Architecture](#project-architecture)
 - [Known Limitations](#known-limitations)
-- [License & Non-Commercial Terms](#license--non-commercial-terms)
+- [License & Commercial Use](#license--commercial-use)
 - [Support & Sponsoring Development](#support--sponsoring-development)
 - [Acknowledgments & Research](#acknowledgments--research)
 
@@ -389,7 +389,7 @@ stutter-guard/
 │   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix: 828 assertions across 28 CPU architectures
 ├── tools/                           # Automated bad driver catalog generation & verification toolchain
 ├── build.cmd                        # Automated build & publish script
-├── LICENSE                          # GPLv3 with Non-Commercial Rider
+├── LICENSE                          # GNU GPL v3 (verbatim); see COPYRIGHT for commercial terms
 └── README.md
 ```
 
@@ -410,17 +410,19 @@ Stutter Guard documents what it does **not** do as carefully as what it does.
 
 ---
 
-## License & Non-Commercial Terms
+## License & Commercial Use
 
 Copyright (C) 2026 Kareem Shabaka. All Rights Reserved.
 
-Stutter Guard is licensed under the **GNU General Public License v3 (GPLv3)** subject to an express **Non-Commercial / No-Monetization Addendum (Rider)**:
+Stutter Guard is **free software** under the [GNU General Public License v3.0 or later](LICENSE).
 
-- **Free for Personal & Community Use:** Users are 100% free to run, inspect, compile, modify, and distribute this software for personal, academic, educational, and gaming purposes.
-- **Copyleft Reciprocity:** Any modified versions or forks distributed must share their complete source code under the exact same license terms.
-- **Strictly No Monetization:** Selling, charging fees for copies, paywalling, or commercially monetizing the software, its compiled binaries, or any derivative works or forks (including listing on commercial app stores such as the Microsoft Store or Steam) is strictly prohibited without prior written authorization from the copyright holder.
+- **Free for everyone:** run it, inspect it, compile it, modify it, fork it, share it. Personal, academic, educational and commercial use are all permitted under the GPL.
+- **Copyleft:** if you distribute Stutter Guard or a work based on it, you must do so under the GPL and make the complete corresponding source available. That is the deal the GPL makes, and it is why the source is here.
+- **Commercial licensing on request:** if the GPL does not fit what you want to do, for example shipping Stutter Guard inside a closed-source product or bundling it in a paid package without publishing your source, a separate commercial licence is available in writing. Get in touch via [GitHub](https://github.com/Kareem-Shabaka).
 
-See the complete legal text in [LICENSE](LICENSE).
+There is nothing to buy for normal use. The project is funded by [sponsorship](#support--sponsoring-development), not by a paywall.
+
+See [LICENSE](LICENSE) for the full GPLv3 text and [COPYRIGHT](COPYRIGHT) for the commercial and contribution terms.
 
 ---
 

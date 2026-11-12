@@ -9,6 +9,6 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Stutter Guard</Product>
     <Company>Kareem Shabaka</Company>
-    <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under GPL-3.0 with Non-Commercial Rider.</Copyright>
+    <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under the GNU General Public License v3.0 or later; commercial licensing available on request.</Copyright>
   </PropertyGroup>
 </Project>

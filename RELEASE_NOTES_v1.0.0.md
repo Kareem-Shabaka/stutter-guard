@@ -117,7 +117,7 @@ nothing installed.
 
 | File | Size | SHA-256 |
 | :--- | ---: | :--- |
-| `StutterGuard.exe` | 65,431,784 bytes | `E7B7040E7296DB1F77AA21C6EA7DEB932D63FC486145F426C0AC8078F3BB259C` |
+| `StutterGuard.exe` | 65,432,449 bytes | `C92AF2AC736BE2250CBAC6026E640A47731F543AFDC6B6606685F76B89E33040` |
 | `DpcTimerRes.exe` | 6,656 bytes | `44781A8F7DD72065201C7600C24D660562E07FA770A41321B1CDF1D28A3FBCEE` |
 
 The published `StutterGuard.exe` is self-contained, requires the UAC **administrator** manifest it
@@ -147,4 +147,4 @@ Get-FileHash .\StutterGuard.exe -Algorithm SHA256
 
 ## Licence
 
-GPL-3.0 with a Non-Commercial Rider. See `LICENSE`.
+GNU General Public License v3.0 or later. Commercial licensing is available on request for use that the GPL does not suit. See `LICENSE` and `COPYRIGHT`.

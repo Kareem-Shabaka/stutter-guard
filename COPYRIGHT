@@ -1,0 +1,54 @@
+STUTTER GUARD
+Copyright (C) 2026 Kareem Shabaka. All Rights Reserved.
+
+================================================================================
+                                LICENSING
+================================================================================
+
+Stutter Guard is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+Stutter Guard is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full text of the GNU General Public License version 3 is in the LICENSE
+file, and at <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+--------------------------------------------------------------------------------
+COMMERCIAL LICENSING
+--------------------------------------------------------------------------------
+
+The GNU General Public License permits commercial use, provided its conditions
+are met: among other things, if you distribute the software or a work based on
+it, you must do so under the GPL and make the complete corresponding source
+code available under the GPL.
+
+If that does not suit you - for example you want to ship Stutter Guard inside a
+closed-source product, bundle it in a paid package, or otherwise use it without
+the GPL's source-disclosure obligations - a separate commercial licence is
+available. It is granted in writing, per organisation, on request.
+
+    Contact: https://github.com/Kareem-Shabaka
+
+There is no obligation to buy anything. Personal, educational, academic and
+non-commercial use is free under the GPL, exactly as before.
+
+--------------------------------------------------------------------------------
+CONTRIBUTIONS
+--------------------------------------------------------------------------------
+
+Unless you state otherwise, any contribution you intentionally submit for
+inclusion in this project is licensed as above, without any additional terms or
+conditions. This is what allows the project to offer the commercial licence
+described above; if you are not comfortable with it, please do not contribute.
+
+--------------------------------------------------------------------------------
+TRADEMARK
+--------------------------------------------------------------------------------
+
+The GPL licenses copyright, not names. "Stutter Guard" and the project's visual
+identity are not licensed for use in a way that suggests your fork is the
+original project, or that it is endorsed by the original author.
