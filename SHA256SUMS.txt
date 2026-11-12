@@ -1,5 +1,5 @@
 # Stutter Guard v1.0.0 - SHA-256 checksums of the published release binaries
 # The binaries themselves live in publish\ (gitignored); these are the hashes to verify.
 
-77FFCDA8EABF8E01FE3D9C95591E78CB341C0D0D9D57ADDF4DBF736F87321236  *StutterGuard.exe   (publish\StutterGuard.exe, 65427869 bytes)
+E7B7040E7296DB1F77AA21C6EA7DEB932D63FC486145F426C0AC8078F3BB259C  *StutterGuard.exe   (publish\StutterGuard.exe, 65431784 bytes)
 44781A8F7DD72065201C7600C24D660562E07FA770A41321B1CDF1D28A3FBCEE  *DpcTimerRes.exe  (src\DpcTimerRes\DpcTimerRes.exe, 6656 bytes)
