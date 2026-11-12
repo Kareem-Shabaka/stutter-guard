@@ -1,6 +1,6 @@
 /*
   DpcTimerRes.exe - part of Stutter Guard.
-  Copyright (C) 2026 Kareem Shabaka. Licensed under GPL-3.0 with Non-Commercial Rider.
+  Copyright (C) 2026 Kareem Shabaka. Licensed under the GNU General Public License v3.0 or later; commercial licensing available on request. See COPYRIGHT.
 
   Holds the Windows system timer at a fixed resolution for as long as it runs.
   Started at logon by the scheduled task "\Stutter Guard\Timer resolution".
