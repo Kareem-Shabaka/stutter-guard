@@ -117,7 +117,7 @@ nothing installed.
 
 | File | Size | SHA-256 |
 | :--- | ---: | :--- |
-| `StutterGuard.exe` | 65,427,869 bytes | `77FFCDA8EABF8E01FE3D9C95591E78CB341C0D0D9D57ADDF4DBF736F87321236` |
+| `StutterGuard.exe` | 65,431,784 bytes | `E7B7040E7296DB1F77AA21C6EA7DEB932D63FC486145F426C0AC8078F3BB259C` |
 | `DpcTimerRes.exe` | 6,656 bytes | `44781A8F7DD72065201C7600C24D660562E07FA770A41321B1CDF1D28A3FBCEE` |
 
 The published `StutterGuard.exe` is self-contained, requires the UAC **administrator** manifest it
