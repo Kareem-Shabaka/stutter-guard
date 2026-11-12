@@ -398,6 +398,22 @@
                         <ItemsControl ItemsSource="{Binding Lines}" />
                     </Border>
 
+                    <!-- MPO: an overlay override is still on this machine from an older version or another tool. -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12"
+                            Visibility="{Binding HasMpoOverride, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding MpoHeadline}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" Margin="0,0,0,6" />
+                            <TextBlock Text="{Binding MpoDetail}" TextWrapping="Wrap" />
+                            <TextBlock Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="Stutter Guard no longer switches MPO off: it fixed a few badly broken systems and broke HDR, FreeSync and overlays on others. This override is already on your PC, so you can put Windows back to its default here. Your current values are recorded first." />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Content="Remove the override" Command="{Binding RemoveMpoCommand}" Padding="16,6" FontWeight="SemiBold" Margin="0,0,8,6" />
+                                <Button Content="Keep it" Command="{Binding KeepMpoCommand}" Padding="14,6" Margin="0,0,8,6"
+                                        ToolTip="Leaves the registry value alone." />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding MpoMessage}" TextWrapping="Wrap" Style="{StaticResource Secondary}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Border>
                     <!-- Drift: a driver update or Windows update put applied tweaks back. -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12"
                             Visibility="{Binding HasDrift, Converter={StaticResource BoolToVis}}">

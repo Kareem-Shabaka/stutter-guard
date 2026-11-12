@@ -271,6 +271,54 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 ``````
 ---
 
+## Wave 11 - MPO tweak removed, leftover override offered for removal
+
+`graphics.mpo-off` was the one tweak in the app that was a **diagnostic workaround rather than a tune**.
+It helped a handful of badly broken systems and gave other people flashing black screens, broken HDR and
+broken FreeSync. An app should not switch that on.
+
+### What changed
+
+| Change | Where |
+| :--- | :--- |
+| `graphics.mpo-off` deleted, module removed from the engine | `Tweaks\Graphics.cs` (deleted), `Engine.cs:80` |
+| `MpoOverride` finds leftover overrides from any source | `Tweaks\MpoOverride.cs` |
+| `MpoOverrides()` / `RemoveMpoOverrides()` on the engine | `Engine.cs` |
+| Home card: "Remove the override" / "Keep it" | `Pages.cs`, `MainWindow.xaml` |
+
+### How the "ask" works
+
+- **Detected:** `DisableOverlays` (what 0.7 set) and `OverlayTestMode` (the older community method) on
+  `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers`, plus `OverlayTestMode` on each GPU class key.
+  `OverlayTestMode = 0` is the stock "overlays allowed" value and is not reported.
+- **Asked, not done:** the Home card names every value found and where it came from, and only acts when
+  the user presses **Remove the override**. It confirms first.
+- **Reversible:** removal is an ordinary journal transaction. `RecordOriginal` captures the value before
+  it is deleted, so Revert on the GPU screen (and `undo-all.ps1`) restores it exactly.
+- **Not nagging:** **Keep it** is remembered in journal state, keyed to the exact values found. Change the
+  override and it asks again.
+
+### Tests (31 new, 828 -> 859)
+
+- The catalog no longer contains any MPO tweak, and no tweak writes `DisableOverlays`.
+- Detection accepts `DisableOverlays = 1` and `OverlayTestMode = 5`, rejects `OverlayTestMode = 0`, reports
+  nothing on a clean machine, and survives an unreadable key without throwing.
+- Removal runs end to end against a throwaway `HKCU` key: value found through the real registry read,
+  deleted, baseline recorded as `1`, second scan clean, then `RevertAll` puts `1` back.
+- `Keep it` is remembered for those values, a changed value asks again, and an empty finding set is never
+  dismissed.
+
+### Live-data note
+
+While this was being built, the live journal on the test machine went from 87 to 86 originals. That was
+**not** the test suite: re-running `--selftest` leaves `journal.json` and `undo-all.ps1` byte-identical and
+adds zero log lines. The log shows `Reverted graphics.mpo-off` at 02:12:49 with exactly one applied entry
+removed, which is a single-row Revert from the running v1.0.0 app (that build still had the row). Its
+recorded original was `Existed: false`, so the revert correctly deleted `DisableOverlays` and left the
+registry at the Windows default. `PreAuditBackup\journal.good.json` is untouched and still holds all 87.
+
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -283,7 +331,8 @@ dotnet publish -c Release →  publish\StutterGuard.exe refreshed
 | After DriftWatcher (cda74dc) | 450 |
 | After Wave 8 | 570 |
 | After Wave 9 (hybrid policy) | 600 |
-| After Wave 10 (28-CPU matrix) | **828** |
+| After Wave 10 (28-CPU matrix) | 828 |
+| After Wave 11 (MPO removal) | **859** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 

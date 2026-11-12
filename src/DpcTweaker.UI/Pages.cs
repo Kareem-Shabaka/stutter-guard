@@ -76,6 +76,8 @@ public sealed class HomePageViewModel : PageViewModel
         ReportBugCommand = SendFeedbackCommand;
         HealDriftedCommand = new RelayCommand(() => _ = HealDriftedAsync(), () => HasDrift && !Busy);
         OpenSafetyCommand = new RelayCommand(() => _main.SelectedPage = _main.Safety);
+        RemoveMpoCommand = new RelayCommand(() => _ = RemoveMpoAsync(), () => HasMpoOverride && !Busy);
+        KeepMpoCommand = new RelayCommand(KeepMpo, () => HasMpoOverride && !Busy);
     }
 
     private DriftReport _drift = DriftReport.Clean;
@@ -145,6 +147,7 @@ public sealed class HomePageViewModel : PageViewModel
             if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
             await _main.RefreshAllAsync();
             RefreshDrift();
+            RefreshMpo();
         }
         catch (Exception ex)
         {
@@ -155,6 +158,106 @@ public sealed class HomePageViewModel : PageViewModel
         {
             Busy = false;
             HealDriftedCommand.Refresh();
+        }
+    }
+
+    // ---------------------------------------------------------------- MPO override
+
+    private IReadOnlyList<MpoFinding> _mpo = Array.Empty<MpoFinding>();
+    private bool _mpoDismissed;
+    private string _mpoMessage = "";
+
+    /// <summary>True when this machine still carries an MPO-disabling override from any source.</summary>
+    public bool HasMpoOverride => _mpo.Count > 0 && !_mpoDismissed;
+
+    public string MpoHeadline => _mpo.Count == 1
+        ? "MPO overlay is switched off by a registry override"
+        : _mpo.Count + " MPO overrides are still on this machine";
+
+    /// <summary>Which values were found and where, so the user can judge before removing them.</summary>
+    public string MpoDetail => _mpo.Count == 0 ? "" : MpoOverride.Describe(_mpo);
+
+    public string MpoMessage
+    {
+        get => _mpoMessage;
+        private set => Set(ref _mpoMessage, value);
+    }
+
+    public RelayCommand RemoveMpoCommand { get; }
+    public RelayCommand KeepMpoCommand { get; }
+
+    /// <summary>Re-checks for MPO overrides. Read-only and cheap: two values per GPU at most.</summary>
+    public void RefreshMpo()
+    {
+        var engine = _main.Engine;
+        if (engine is null) return;
+        try
+        {
+            _mpo = engine.MpoOverrides();
+            _mpoDismissed = MpoOverride.IsDismissed(engine, _mpo);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("MPO check failed: " + ex.Message);
+            _mpo = Array.Empty<MpoFinding>();
+        }
+        OnPropertyChanged(nameof(HasMpoOverride));
+        OnPropertyChanged(nameof(MpoHeadline));
+        OnPropertyChanged(nameof(MpoDetail));
+        RemoveMpoCommand.Refresh();
+        KeepMpoCommand.Refresh();
+    }
+
+    /// <summary>"Keep it": leave the registry alone and stop asking about these exact values.</summary>
+    private void KeepMpo()
+    {
+        var engine = _main.Engine;
+        if (engine is null) return;
+        MpoOverride.Dismiss(engine, _mpo);
+        _mpoDismissed = true;
+        OnPropertyChanged(nameof(HasMpoOverride));
+        RemoveMpoCommand.Refresh();
+        KeepMpoCommand.Refresh();
+    }
+
+    private async Task RemoveMpoAsync()
+    {
+        var engine = _main.Engine;
+        if (engine is null || !HasMpoOverride) return;
+
+        // Saying yes here is the whole consent step: the values are listed on the card, and the
+        // journal records each one before it is deleted, so Revert can put them back.
+        if (!_main.Ui.Confirm("Remove the MPO override",
+                MpoHeadline + ".\n\nFound: " + MpoDetail + "\n\n" +
+                "Removing it puts Multi-Plane Overlay back on Windows default. That is the right call unless this override " +
+                "was added to work around a specific problem you still have. Your previous values are recorded first, so " +
+                "Revert on the GPU screen puts them straight back.\n\nRemove now?"))
+            return;
+
+        Busy = true;
+        MpoMessage = "Removing the override...";
+        try
+        {
+            var results = await Task.Run(() => engine.RemoveMpoOverrides());
+            int ok = results.Count(r => r.Ok);
+            var failed = results.Where(r => !r.Ok).ToList();
+            MpoMessage = ok == results.Count
+                ? "Removed. Restart (or sign out) for the compositor to pick up the default."
+                : $"Removed {ok} of {results.Count}. " +
+                  string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}"));
+            if (results.Any(r => r.Ok)) _main.ForceRestartNeeded();
+            await _main.RefreshAllAsync();
+            RefreshMpo();
+        }
+        catch (Exception ex)
+        {
+            MpoMessage = "Could not remove it: " + ex.Message;
+            Log.Error("MPO removal failed: " + ex);
+        }
+        finally
+        {
+            Busy = false;
+            RemoveMpoCommand.Refresh();
         }
     }
 
@@ -224,6 +327,7 @@ public sealed class HomePageViewModel : PageViewModel
         OnPropertyChanged(nameof(HasWarnings));
         LoadBench();
         RefreshDrift();
+        RefreshMpo();
     }
 
     public void LoadBench()
