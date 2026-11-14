@@ -1,4 +1,6 @@
 using DpcTweaker.Core.Detection;
+using DpcTweaker.Core.Diagnostics;
+using DpcTweaker.Core.Native;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Model;
@@ -304,6 +306,34 @@ public sealed class TweakEngine
     /// sets MPO off itself, it only offers to undo an override that is already there.
     /// </summary>
     public IReadOnlyList<MpoFinding> MpoOverrides() => MpoOverride.Find(Profile);
+
+    /// <summary>
+    /// Latency costs on this machine that no tweak can remove, with the display and DPC evidence
+    /// behind each one. Read-only; samples DPC counters for about a second.
+    /// </summary>
+    public IReadOnlyList<TriageFinding> Triage(TimeSpan? sample = null)
+    {
+        var window = sample ?? TimeSpan.FromSeconds(1);
+        var displays = Displays.Active();
+
+        IReadOnlyList<CpuRates>? rates = null;
+        try
+        {
+            int n = Math.Max(1, Profile.Cpu.LogicalCount);
+            var a = SysInfo.Counters(n);
+            Thread.Sleep((int)window.TotalMilliseconds);
+            var b = SysInfo.Counters(n);
+            rates = CpuRates.Between(a, b, window.TotalSeconds);
+        }
+        catch (Exception ex)
+        {
+            // The display findings are still worth showing without the counters.
+            Log.Warn("DPC sample failed: " + ex.Message);
+        }
+
+        var gameCores = Plan.Applicable ? Plan.ReservedCpus : new List<int>();
+        return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores));
+    }
 
     /// <summary>
     /// Deletes whatever MPO overrides were found, inside ordinary journal transactions so the

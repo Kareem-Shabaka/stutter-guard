@@ -319,6 +319,53 @@ registry at the Windows default. `PreAuditBackup\journal.good.json` is untouched
 
 ---
 
+## Wave 12 - latency triage: name the costs tweaks cannot remove
+
+A live machine with every tweak applied still reported a **803.89 us DPC in `amdkmdag.sys`**. That is the
+single most useful thing this project has learned about itself: interrupt pinning relocates a DPC, it never
+shortens one. The app had no way to say that, so it kept implying the next toggle would help.
+
+### What was added
+
+| Change | Where |
+| :--- | :--- |
+| Display enumeration (mode + refresh per active display) | `Native\Displays.cs` |
+| Rule engine that names un-fixable costs, with `AffinityCanFix` per finding | `Diagnostics\LatencyTriage.cs` |
+| `Triage()` - 1 s DPC sample + display scan | `Engine.cs` |
+| Home card "Costs tweaks cannot fix" + Check this PC | `Pages.cs`, `MainWindow.xaml` |
+
+### The rules
+
+- **Mixed refresh rates across displays (High).** Windows composites every attached display and the GPU
+  driver services that in its own DPC. 240 / 120 / 60 Hz forces several cadences, which is a common cause
+  of large `amdkmdag.sys` DPC times. Says plainly that no pin or registry value removes it.
+- **Three or more displays (Medium).** Composite cost per wake-up.
+- **DPC landing on a reserved game core (High, affinity CAN help).** Means the pins are not holding.
+- **Sustained DPC load on the worst core (Medium).**
+
+Every finding carries `AffinityCanFix`, and the UI states that the ones it cannot fix belong to the user.
+
+### What it reported on the machine that prompted it
+
+- Three active displays at **240 / 120 / 60 Hz** -> High, not fixable by the app.
+- Per-core DPC showed **7.81 % on logical CPU 16** (first CCD1 core) and nothing on CCD0, which confirms
+  the 9950X3D plan is doing its job: device DPCs are on the frequency CCD, the V-Cache CCD stays clean.
+- Therefore the 803.89 us figure is **one long DPC, not a placement problem**. The honest answer is to
+  match the display refresh rates or disconnect the spares, not to tune harder.
+
+### Tests (29 new, 859 -> 888)
+
+Mixed vs matching refresh, one/two/many displays, 0 Hz ignored, empty list, reserved-core threshold on
+both sides, sustained-load detection, ordering, real enumeration, and `engine.Triage()` end to end against
+a temporary data directory.
+
+### Note on the shipped binary
+
+This lands **after** v1.0.0 was published. It is not in the v1.0.0 binary and must not be republished under
+that tag; it needs its own version.
+
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -332,7 +379,8 @@ registry at the Windows default. `PreAuditBackup\journal.good.json` is untouched
 | After Wave 8 | 570 |
 | After Wave 9 (hybrid policy) | 600 |
 | After Wave 10 (28-CPU matrix) | 828 |
-| After Wave 11 (MPO removal) | **859** |
+| After Wave 11 (MPO removal) | 859 |
+| After Wave 12 (latency triage) | **888** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 

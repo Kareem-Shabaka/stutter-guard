@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using DpcTweaker.Core;
 using DpcTweaker.Core.Detection;
+using DpcTweaker.Core.Diagnostics;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Model;
@@ -78,6 +79,7 @@ public sealed class HomePageViewModel : PageViewModel
         OpenSafetyCommand = new RelayCommand(() => _main.SelectedPage = _main.Safety);
         RemoveMpoCommand = new RelayCommand(() => _ = RemoveMpoAsync(), () => HasMpoOverride && !Busy);
         KeepMpoCommand = new RelayCommand(KeepMpo, () => HasMpoOverride && !Busy);
+        RunTriageCommand = new RelayCommand(() => _ = RunTriageAsync(), () => !Busy);
     }
 
     private DriftReport _drift = DriftReport.Clean;
@@ -158,6 +160,56 @@ public sealed class HomePageViewModel : PageViewModel
         {
             Busy = false;
             HealDriftedCommand.Refresh();
+        }
+    }
+
+    // ---------------------------------------------------------------- latency triage
+
+    /// <summary>Costs found on this machine that the tweaks cannot remove, worst first.</summary>
+    public ObservableCollection<TriageFinding> Triage { get; } = new();
+
+    private string _triageMessage = "";
+
+    public string TriageMessage
+    {
+        get => _triageMessage;
+        private set => Set(ref _triageMessage, value);
+    }
+
+    public bool HasTriage => Triage.Count > 0;
+
+    public RelayCommand RunTriageCommand { get; }
+
+    /// <summary>
+    /// Samples displays and DPC counters for about a second and reports what no tweak can fix.
+    /// Deliberately a button, not a startup scan: the sample costs a second and is only useful
+    /// when someone is actually chasing a stutter.
+    /// </summary>
+    private async Task RunTriageAsync()
+    {
+        var engine = _main.Engine;
+        if (engine is null) return;
+        Busy = true;
+        TriageMessage = "Sampling displays and DPC counters...";
+        try
+        {
+            var found = await Task.Run(() => engine.Triage());
+            Triage.Clear();
+            foreach (var f in found) Triage.Add(f);
+            OnPropertyChanged(nameof(HasTriage));
+            TriageMessage = found.Count == 0
+                ? "Nothing found that would cost DPC latency on this machine."
+                : $"{found.Count} finding(s). The ones marked as needing a manual fix cannot be removed by interrupt pinning.";
+        }
+        catch (Exception ex)
+        {
+            TriageMessage = "Triage failed: " + ex.Message;
+            Log.Error("Triage failed: " + ex);
+        }
+        finally
+        {
+            Busy = false;
+            RunTriageCommand.Refresh();
         }
     }
 

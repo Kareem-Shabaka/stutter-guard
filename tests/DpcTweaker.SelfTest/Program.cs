@@ -4,6 +4,7 @@ using System.Xml;
 using DpcTweaker.Core;
 using DpcTweaker.Core.Catalog;
 using DpcTweaker.Core.Detection;
+using DpcTweaker.Core.Diagnostics;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Reports;
 using DpcTweaker.Core.Interrupts;
@@ -2995,6 +2996,123 @@ Console.WriteLine("MPO: the tweak is gone, the override is offered for removal")
         }
         catch { }
         try { Directory.Delete(dir, true); } catch { }
+    }
+}
+// ================================================================ latency triage (costs tweaks cannot fix)
+
+Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove");
+{
+    static DisplayInfo Disp(string dev, int w, int h, int hz, bool primary = false) =>
+        new(dev, "AMD Radeon RX 9070 XT", w, h, hz, primary);
+    static CpuRates Rate(int cpu, double dpcPct, double isrPct = 0.1, double dpcPerSec = 120, double intPerSec = 400) =>
+        new(cpu, intPerSec, dpcPerSec, isrPct, dpcPct);
+
+    // ---- mixed refresh rates: the real cause of large amdkmdag DPC times ----
+    var mixed = new[]
+    {
+        Disp("DISPLAY1", 1920, 1080, 240, primary: true),
+        Disp("DISPLAY2", 3840, 2160, 120),
+        Disp("DISPLAY3", 1280, 1024, 60),
+    };
+    var f = LatencyTriage.Scan(mixed, null, null);
+    var mix = f.FirstOrDefault(x => x.Title.Contains("different refresh rates"));
+    Check("mixed refresh rates are detected", mix is not null, string.Join(" | ", f.Select(x => x.Title)));
+    Check("mixed refresh is High severity", mix?.Severity == TriageSeverity.High, mix?.Severity.ToString() ?? "none");
+    Check("mixed refresh says affinity cannot fix it", mix is { AffinityCanFix: false });
+    Check("the finding lists every rate", mix is not null && mix.Title.Contains("240") && mix.Title.Contains("120") && mix.Title.Contains("60"), mix?.Title ?? "");
+    Check("the finding names the primary display", mix is not null && mix.Detail.Contains("primary"), mix?.Detail ?? "");
+    Check("the guidance names amdkmdag", mix is not null && mix.Guidance.Contains("amdkmdag"), mix?.Guidance ?? "");
+
+    // ---- three of the same rate: count warning but no mixed warning ----
+    var threeSame = new[]
+    {
+        Disp("DISPLAY1", 1920, 1080, 240, primary: true),
+        Disp("DISPLAY2", 1920, 1080, 240),
+        Disp("DISPLAY3", 1920, 1080, 240),
+    };
+    var same = LatencyTriage.Scan(threeSame, null, null);
+    Check("matching refresh rates produce no mixed warning", !same.Any(x => x.Title.Contains("different refresh rates")),
+        string.Join(" | ", same.Select(x => x.Title)));
+    Check("three displays still warn about count", same.Any(x => x.Title.Contains("3 displays")),
+        string.Join(" | ", same.Select(x => x.Title)));
+    Check("the count warning is Medium", same.First(x => x.Title.Contains("3 displays")).Severity == TriageSeverity.Medium);
+
+    // ---- one or two displays at one rate: nothing to say ----
+    Check("a single display produces no findings", LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true) }).Count == 0);
+    Check("two displays at the same rate produce no findings",
+        LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true), Disp("DISPLAY2", 1920, 1080, 240) }).Count == 0);
+    Check("an empty display list is safe", LatencyTriage.Scan(Array.Empty<DisplayInfo>()).Count == 0);
+    Check("a display reporting 0 Hz is ignored", LatencyTriage.Scan(new[] { Disp("X", 640, 480, 0), Disp("Y", 640, 480, 0) }).Count == 0);
+
+    // ---- DPCs landing on cores the plan reserves ----
+    var ratesHot = new[] { Rate(0, 0.30), Rate(1, 0.20), Rate(2, 4.10), Rate(3, 0.15) };
+    var hot = LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true) }, ratesHot, new[] { 0, 1, 2, 3 });
+    var hotFinding = hot.FirstOrDefault(x => x.Title.Contains("landing on game cores"));
+    Check("DPC on a reserved core is detected", hotFinding is not null, string.Join(" | ", hot.Select(x => x.Title)));
+    Check("the reserved-core finding is High", hotFinding?.Severity == TriageSeverity.High);
+    Check("the reserved-core finding says affinity CAN help", hotFinding is { AffinityCanFix: true });
+    Check("it names the offending CPU and its share", hotFinding is not null && hotFinding.Title.Contains("CPU 2") && hotFinding.Title.Contains("4.10"), hotFinding?.Title ?? "");
+    Check("only the hot core is listed", hotFinding is not null && !hotFinding.Title.Contains("CPU 0"), hotFinding?.Title ?? "");
+
+    // ---- below the threshold: silence ----
+    var ratesCalm = new[] { Rate(0, 0.05), Rate(1, 0.03), Rate(2, 0.02), Rate(3, 0.01) };
+    Check("quiet cores produce no reserved-core warning",
+        !LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true) }, ratesCalm, new[] { 0, 1, 2, 3 }).Any(x => x.Title.Contains("landing on game cores")));
+
+    // ---- sustained load on any core ----
+    var sustained = new[] { Rate(0, 0.05), Rate(5, 3.20) };
+    var s = LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true) }, sustained, Array.Empty<int>());
+    var sus = s.FirstOrDefault(x => x.Title.Contains("Sustained DPC load"));
+    Check("sustained DPC load is detected", sus is not null, string.Join(" | ", s.Select(x => x.Title)));
+    Check("sustained load is Medium", sus?.Severity == TriageSeverity.Medium);
+    Check("sustained load names the worst CPU", sus is not null && sus.Title.Contains("CPU 5"), sus?.Title ?? "");
+
+    // ---- no counters available: display findings still work ----
+    var noCounters = LatencyTriage.Scan(mixed, null, new[] { 0, 1 });
+    Check("display findings survive a missing counter sample", noCounters.Count >= 2, noCounters.Count.ToString());
+
+    // ---- ordering ----
+    var ordered = LatencyTriage.Ordered(f);
+    Check("ordering puts High before Medium",
+        ordered.Select(x => (int)x.Severity).SequenceEqual(ordered.Select(x => (int)x.Severity).OrderByDescending(v => v)),
+        string.Join(",", ordered.Select(x => x.Severity.ToString())));
+
+    // ---- the real machine: enumeration and the engine path must not throw ----
+    bool enumOk = true;
+    IReadOnlyList<DisplayInfo> live = Array.Empty<DisplayInfo>();
+    try { live = Displays.Active(); } catch { enumOk = false; }
+    Check("display enumeration does not throw", enumOk);
+    Check("this machine reports at least one display", live.Count >= 1, live.Count.ToString());
+    Check("every enumerated display has a sane mode",
+        live.All(d => d.Width > 0 && d.Height > 0 && d.RefreshHz > 0),
+        string.Join(", ", live.Select(d => $"{d.Device} {d.Width}x{d.Height}@{d.RefreshHz}")));
+
+    string tdir = Path.Combine(Path.GetTempPath(), "dpc-triage-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tdir);
+    string saved = Paths.DataDir;
+    Paths.DataDir = tdir;
+    try
+    {
+        var j = new Journal(Path.Combine(tdir, "journal.json"));
+        var eng = new TweakEngine(new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFFFFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        }, j);
+
+        bool threw = false;
+        int count = -1;
+        try { count = eng.Triage(TimeSpan.FromMilliseconds(40)).Count; } catch { threw = true; }
+        Check("engine.Triage samples and returns without throwing", !threw, threw ? "threw" : count.ToString());
+        Check("engine.Triage returns a usable list", count >= 0, count.ToString());
+    }
+    finally
+    {
+        Paths.DataDir = saved;
+        try { Directory.Delete(tdir, true); } catch { }
     }
 }
 Console.WriteLine($"{passed} passed, {failures} failed");
