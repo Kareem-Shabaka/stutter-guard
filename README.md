@@ -9,27 +9,26 @@
 > **"Why does a high-end gaming PC running at 200+ average FPS still hitch, micro-stutter, or drop audio?"**  
 > Average FPS measures raw compute throughput when scenes are static. **1% Lows, frame pacing, and DPC kernel latency** dictate what happens during an aim flick, a rapid turn, or an intense multiplayer firefight. Stutter Guard is built from the ground up to eliminate micro-stutters and lock in real-time responsiveness.
 
-Every optimization originates from verifiable latency profiling, and every claim here is graded by what backs it. Stutter Guard's interrupt-placement work came out of a measured case on the author's own machine (Ryzen 9 9950X3D + Radeon RX 9070 XT): with the plan applied, a ready thread on a CPU reserved for interrupts waited a median of **8.9 µs** instead of **782 µs** while synthetic load held the interrupt cores busy. That number is the author's own measurement, not a third-party one, and it reproduces only under that load condition - an idle-desktop LatencyMon run on the same box shows a highest interrupt-to-process figure of about **320 µs**, which is a different metric and is not what the 8.9 figure describes. Zero snake oil. Zero black-box registry scripts. Every tweak in the application documents **what it does**, **why it works**, **what it costs**, **failure modes**, and **the empirical evidence**.
+Every claim on this page is graded by what backs it: **measured**, **documented by a primary source**, or explicitly marked unverified. The interrupt-placement work was measured on a Ryzen 9 9950X3D with a Radeon RX 9070 XT: with the plan applied, a ready thread on a processor reserved for interrupts waited a median of **8.9 µs** against **782 µs** while synthetic load held the interrupt cores busy, with a control core proving locality. Zero snake oil. Zero black-box registry scripts. Every tweak documents **what it does**, **why it works**, **what it costs**, its failure modes, and the evidence behind it.
 
 ---
 
 ## What's New in v1.2.0
 
-v1.2.0 is the release where the app stops being able to tell you something it cannot back up.
+v1.2.0 makes the app's reporting match what it can measure: every driver rule is compared against the identifiers Windows itself uses, every present device node is scanned, and DPC findings are stated against Microsoft's published budgets.
 
 | Change | Why it matters |
 | :--- | :--- |
-| **The driver advisory catalogue can match** | 22 of 77 rules targeted USB, HDAUDIO, ACPI, ROOT and Software Component nodes, and the scan only ever produced `PCI\` nodes - so they could not fire on any machine. Rules were also compared against device *instance* ids, a different string shape by definition, with a `Contains` fallback that made a Realtek audio rule fire on a Realtek Ethernet card. Every rule is now matched against the hardware ids and compatible ids Windows actually reports, and every node is scanned. |
-| **AMD rules are reachable** | Rows store `"23.9.1 (31.0.21029.1006)"` - release name plus the WDDM build - while a machine only ever reports `31.0.21029.1006`. Measured: 0 of 33 listed variants were detected, so a bugged AMD driver was reported as *clean*. Both forms are now compared, and an out-of-date AMD driver is no longer told to **roll back**. |
-| **Processes pinned onto interrupt cores are named** | The scheduler has no interrupt-load heuristic, so a process restricted to a core reserved for devices competes with every interrupt there (measured: 782 µs against 8.9 µs for a ready thread). A full mask is never reported, because it restricts nothing. |
-| **Microsoft's own budgets are quoted** | A "large DPC" is now stated against the documented 100 µs per DPC routine and 25 µs per ISR, and SMIs - the cause the OS cannot move - are named as the remaining candidate when DPCs survive a clean install. |
-| **The receive queue count and the interrupt mask agree** | RSS described LPs 20–23 while the mask confined every message to 20 and 22, so half the queues got their DPC on a different CPU from their ISR. |
-| **Defaults that contradicted the evidence** | Interrupt moderation was ticked on desktops and unticked on laptops - backwards, given the measured interrupt rate - and Flow Control off carried a cost of `"None."`. Both are now unticked with an honest price. |
-| **A preset that reverts** | Switching Everything → Safe now actually undoes what it drops, instead of only unticking boxes. |
+| **Driver advisories match what Windows reports** | Every rule is compared against a device's hardware ids, compatible ids and instance id - the strings the PnP manager itself matches on - so rules for USB, HDAUDIO, ACPI, ROOT and Software Component devices surface as well as PCI ones. Every present node is scanned, not only PCI functions. |
+| **AMD driver versions on both forms** | AMD rows carry the release name and the WDDM build (`23.9.1 (31.0.21029.1006)`); a machine reports only the WDDM build. Both are compared, so a listed AMD regression is detected on a real system, and the update-or-rollback advice compares like with like. |
+| **Processes competing with interrupts are named** | The scheduler has no interrupt-load heuristic, so a process restricted to a processor reserved for devices competes with every interrupt there (measured: 782 µs against 8.9 µs for a ready thread). A full mask is never reported, because it restricts nothing. |
+| **Microsoft's budgets are quoted** | A "large DPC" is stated against the documented 100 µs per DPC routine and 25 µs per ISR. SMIs - the one cause no register, mask or power setting can reach - are named as the remaining candidate when DPCs survive a clean install. |
+| **Receive queues and the interrupt mask describe the same CPUs** | The RSS range, the device mask and the display text are derived from one span, so a receive queue's DPC lands on the same CPU as its ISR. |
+| **Defaults follow the evidence** | Interrupt moderation and Flow Control are off only where the measured benefit supports it, and each states its cost in its own row. |
+| **A preset is a state, not a filter** | Switching tiers applies what the new tier includes and puts back what it leaves out, so going from Everything down to Safe really undoes the costly tweaks. It states both counts and asks before changing anything. |
+| **Release binaries are reproducible** | Two builds of one commit, from different directories, produce the same SHA-256. `build.cmd --verify-repro` proves it on your machine before you publish anything. |
 
-### Corrected in this release
-
-The previous README led with a **733 µs → 11.6 µs** improvement. That was the author's own post, and a same-box run shows a highest interrupt-to-process figure of about 320 µs - a different metric, measured differently. The measured pair this project stands behind is **782 µs → 8.9 µs**, under held synthetic load, with a control core.
+Full detail for every change in this release, including one correction to a previously published figure, is in [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
 
 ---
 ## What's New in v1.0.0
@@ -52,7 +51,7 @@ after a driver update wipes its work.
 - **Driver version normalization** no longer mangles Intel Arc (`32.0.101.x`) or AMD (`32.0.x`) versions into NVIDIA-style numbers, and no longer treats the `nvraid.sys` / `nvstor.sys` storage drivers as display drivers.
 - **Version matching compares whole components**, so a rule for `1.18` can no longer match `.3118`.
 - **The most severe advisory wins** when a device matches several catalog entries, instead of the first in file order.
-- **The test suite grew from 215 to 828 assertions**, including a WAL durability and rollback suite, a drift-heal-revert proof against a real throwaway registry key, and hostile-input fuzzing.
+- **The test suite grew from 215 assertions to 888 by the v1.0.0 release, and stands at 1043 today**, including a WAL durability and rollback suite, a drift-heal-revert proof against a real throwaway registry key, and hostile-input fuzzing.
 
 ---
 
@@ -377,7 +376,7 @@ cd stutter-guard
 build.cmd
 ```
 
-`build.cmd` executes the entire 828-assertion test suite, restores dependencies, and publishes a self-contained single-file executable to:
+`build.cmd` executes the entire 1043-assertion test suite, restores dependencies, and publishes a self-contained single-file executable to:
 ```
 publish\StutterGuard.exe
 ```
@@ -413,7 +412,7 @@ stutter-guard/
 │   ├── DpcTweaker.UI/               # Pure MVVM view models (INotifyPropertyChanged, RelayCommand)
 │   └── DpcTweaker.App/              # WPF desktop application (Fluent Dark/Light UI, boot agent)
 ├── tests/
-│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix: 828 assertions across 28 CPU architectures
+│   └── DpcTweaker.SelfTest/         # Zero-dependency test matrix: 1043 assertions across 28 CPU architectures
 ├── tools/                           # Automated bad driver catalog generation & verification toolchain
 ├── build.cmd                        # Automated build & publish script
 ├── LICENSE                          # GNU GPL v3 (verbatim); see COPYRIGHT for commercial terms
@@ -428,9 +427,9 @@ Stutter Guard documents what it does **not** do as carefully as what it does.
 
 | Limitation | Detail |
 | :--- | :--- |
-| **22 of the 77 driver rules cannot surface in a scan yet** | The auditor is complete - all 77 rules fire correctly when handed a matching device, and the test suite proves it. But the device scanner only enumerates PCI devices, so the rules targeting USB audio interfaces, HDAUDIO codecs, ACPI/ROOT nodes and SWC audio APOs have nothing to match in a real scan. This is the highest-value outstanding work. |
+| **Measurement scope** | The 782 µs to 8.9 µs pair was measured on one machine under held synthetic load, with a control core. It is a wake-latency measurement, not an idle-desktop figure: LatencyMon on the same box reports a highest interrupt-to-process of about 320 µs, which measures a different leg of the same path. DPC and ISR **durations** cannot be measured by this app without kernel ETW, so it reports rates and names the possibility, rather than guessing at a duration. |
 | **RSS placement is bounded by what NDIS can express** | NDIS spreads receive queues over a **contiguous** processor range. The app sizes the queue count to fill that span so queues reach distinct physical cores, but it cannot make queues skip a processor. |
-| **Telemetry endpoints are embedded in the binary** | Hardware reports and feedback go to the developer's own channels. The webhook URLs are obfuscated, not encrypted, so they can be extracted from the executable. Submitting is always explicit and opt-in, and the app never sends anything on its own. |
+| **Telemetry endpoints are visible in the source** | The webhook URLs are written out in full, not obfuscated, so you can read where a report goes before you build the app. A readable webhook is spammable, which is the trade accepted for that checkability. Submitting is always explicit and opt-in, and the app never sends anything on its own. |
 | **Verification is simulation-based** | The topology matrix, drift engine and WAL are tested against synthetic topologies and a throwaway registry key, not against every shipping CPU. Real firmware can report a layout that differs from what the tests model. |
 | **Several tweaks need a restart** | Interrupt affinity, MSI mode and GPU registry keys are read by drivers at device start. The app flags a restart, and the interrupt check tells you whether the pins actually landed. |
 | **Light C-states cost idle power** | Restricting cores to C1 raises idle package power by roughly 15-20 W on a desktop. This is stated on the Power screen rather than hidden. |
