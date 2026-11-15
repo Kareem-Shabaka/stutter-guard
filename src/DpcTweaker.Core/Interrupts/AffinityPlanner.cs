@@ -64,6 +64,15 @@ public sealed class AffinityPlan
     public string? NotApplicableReason { get; init; }
     public List<int> ReservedCpus { get; init; } = new();
     public string ReservedReason { get; init; } = "";
+    /// <summary>
+    /// The logical processors devices are pinned to: the union of every assignment's pinned CPUs.
+    /// Deliberately NOT expanded to SMT siblings. The background mask that was validated on the
+    /// reference 9950X3D keeps each pinned LP's sibling free, and sibling contention measured as
+    /// non-harmful for wake latency there: a pegged sibling lowered p99 from 465 to 19 us because
+    /// it holds the core out of its sleep states. Expanding to whole cores would exclude twice as
+    /// many logical processors for no measured benefit.
+    /// </summary>
+    public List<int> DeviceCpus { get; init; } = new();
     public List<RankedCore> Candidates { get; init; } = new();
     public List<Assignment> Assignments { get; init; } = new();
     public List<string> Notes { get; init; } = new();
@@ -243,6 +252,7 @@ public static class AffinityPlanner
         {
             ReservedCpus = cores.Where(c => reserved.Contains(c.Id)).SelectMany(c => c.Threads).OrderBy(x => x).ToList(),
             ReservedReason = reason,
+            DeviceCpus = assignments.SelectMany(a => a.Cpus).Distinct().OrderBy(x => x).ToList(),
             Candidates = candidates,
             Assignments = assignments,
             Notes = notes,

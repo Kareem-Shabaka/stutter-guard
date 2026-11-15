@@ -101,7 +101,13 @@ public sealed class CpuTopology
         return string.Join("; ", parts);
     }
 
-    public static string FormatCpus(IEnumerable<int> cpus)
+    /// <summary>
+    /// Renders CPUs as ranges, e.g. "0-15,17,19". The separator defaults to a comma because most
+    /// callers use the result in prose. Process Lasso masks MUST pass ";" -- Bitsum documents the
+    /// affinity syntax as "0-3;6;8-11", and a comma inside a mask is ambiguous in the INI, where
+    /// fields are themselves comma-separated.
+    /// </summary>
+    public static string FormatCpus(IEnumerable<int> cpus, string separator = ",")
     {
         var list = cpus.OrderBy(x => x).ToList();
         if (list.Count == 0) return "-";
@@ -114,7 +120,7 @@ public sealed class CpuTopology
             start = prev = c;
         }
         ranges.Add(start == prev ? $"{start}" : $"{start}-{prev}");
-        return string.Join(",", ranges);
+        return string.Join(separator, ranges);
     }
 
     /// <summary>

@@ -10,12 +10,22 @@ namespace DpcTweaker.Core.Reports;
 /// <summary>
 /// Starter Process Lasso rules for core separation, in Bitsum's JSON rules format
 /// (processlasso.schema.json 2026-01-17, the format the author's 48-rule "Game Mode" file uses):
-/// games and dwm.exe on the game cores at High priority with thread priority boost off,
+/// games and dwm.exe on the game cores at High priority. Dynamic thread priority boost is left ON:
+/// Windows' wake boosts (+6 mouse/keyboard, +8 sound) are what let a woken input or audio thread
+/// preempt, so switching them off works against the very latency being targeted.
 /// and a catch-all *.* on the other cores as the last rule.
 /// </summary>
 public static class LassoRules
 {
     public const string SchemaId = "https://bitsum.com/json-schemas/2026-01-17-00/processlasso.schema.json";
+
+    /// <summary>
+    /// Fewest CPUs a catch-all may name. Below this, refusing to emit it is the better answer: a
+    /// catch-all of one to three CPUs would squeeze every background process on the machine into them,
+    /// and it happens precisely when the device plan has claimed most of the machine, so the fix there
+    /// is to trim device pins rather than to emit a crippled mask.
+    /// </summary>
+    public const int MinBackgroundCpus = 4;
 
     /// <summary>The author's 46 games plus common competitive titles. The user edits the list in Lasso afterwards.</summary>
     public static readonly string[] Games =
@@ -62,32 +72,37 @@ public static class LassoRules
         }
         else return null;
 
-        var other = all.Except(game).ToList();
-        string note = "";
-        // Like the author's catch-all (18-31): keep background apps off the GPU's interrupt core too, if there's room.
-        if (plan.Assignments.FirstOrDefault(a => a.Role == DeviceRole.Gpu) is { } gpu)
-        {
-            var gpuCore = topo.Cpus.Where(c => gpu.Cpus.Any(g => topo.Cpus.First(x => x.Index == g).CoreId == c.CoreId)).Select(c => c.Index).ToList();
-            if (gpuCore.All(other.Contains) && other.Count - gpuCore.Count >= 4)
-            {
-                other = other.Except(gpuCore).ToList();
-                note = $" CPUs {CpuTopology.FormatCpus(gpuCore)} (the GPU's interrupt core) are left out of the catch-all, so background apps don't share it.";
-            }
-        }
+        // Background gets every logical processor that is NOT pinned to a device. Game cores stay in the
+        // mask on purpose: games hold them anyway via their own rule plus High priority, and background
+        // may legitimately use the V-Cache CCD while no game is running.
+        //
+        // Subtracting the devices' CPUs is the whole point. This used to leave out only the GPU's core -
+        // reasoned as "like the author's catch-all 18-31" - which on a 9950X3D emitted 18-31, exactly the
+        // cores the interrupt plan had reserved for seven other devices. Measured cost of that placement:
+        // median wake latency 782 us against 8.9 us idle, about 90x.
+        var deviceCpus = plan.DeviceCpus.ToHashSet();
+        var other = all.Where(c => !deviceCpus.Contains(c)).ToList();
+        string note = deviceCpus.Count == 0
+            ? ""
+            : $" Devices hold CPUs {CpuTopology.FormatCpus(deviceCpus.OrderBy(x => x))}; they are left out of the catch-all so background apps never share an interrupt core.";
         return new Split(game, other, label, note);
     }
 
     public static string Build(SystemProfile p, AffinityPlan plan)
     {
         var split = SplitFor(p, plan) ?? throw new InvalidOperationException("This CPU has one CCD and no E-cores: there's nothing to separate.");
-        string games = CpuTopology.FormatCpus(split.GameCpus);
-        string other = CpuTopology.FormatCpus(split.OtherCpus);
+        string games = CpuTopology.FormatCpus(split.GameCpus, ";");
 
-        var rules = new JsonArray
-        {
-            new JsonObject { ["cpuAffinity"] = other, ["cpuAffinityDelay"] = 0, ["processName"] = "*.*" },
-            new JsonObject { ["cpuAffinity"] = games, ["cpuAffinityDelay"] = 0, ["processName"] = "dwm.exe" },
-        };
+        // Refuse a catch-all that would be worse than none. Emitting a mask that overlapped device CPUs
+        // would be the old defect all over again, so the only two honest options are "a useful mask" or
+        // "no catch-all, and say why".
+        bool emitCatchAll = split.OtherCpus.Count >= MinBackgroundCpus;
+        string other = emitCatchAll ? CpuTopology.FormatCpus(split.OtherCpus, ";") : "";
+
+        var rules = new JsonArray();
+        if (emitCatchAll)
+            rules.Add(new JsonObject { ["cpuAffinity"] = other, ["cpuAffinityDelay"] = 0, ["processName"] = "*.*" });
+        rules.Add(new JsonObject { ["cpuAffinity"] = games, ["cpuAffinityDelay"] = 0, ["processName"] = "dwm.exe" });
         foreach (string g in Games)
         {
             rules.Add(new JsonObject
@@ -97,29 +112,31 @@ public static class LassoRules
                 ["priorityClass"] = "High",
                 ["priorityClassEnforcedByRegistry"] = false,
                 ["processName"] = g,
-                ["threadPriorityBoosts"] = "off",
             });
         }
 
         var order = new JsonArray();
         foreach (string g in Games) order.Add(g);
         order.Add("dwm.exe");
-        order.Add("*.*");
+        // Keep the order array in step with the rules: an order entry for a rule that was never emitted
+        // is a second, quieter version of the same bug.
+        if (emitCatchAll) order.Add("*.*");
         var gamesOnly = new JsonArray();
         foreach (string g in Games) gamesOnly.Add(g);
-        var gamesOnly2 = new JsonArray();
-        foreach (string g in Games) gamesOnly2.Add(g);
+
+        string background = emitCatchAll
+            ? $"background on CPUs {other}, which excludes every CPU a device uses for interrupts"
+            : $"no catch-all rule: only {split.OtherCpus.Count} CPU(s) are free of devices, too few to hold every background process, so leave background placement to Windows and trim device pins";
 
         var root = new JsonObject
         {
             ["$id"] = SchemaId,
             ["$schema"] = "https://json-schema.org/draft/2020-12/schema",
             ["title"] = "Process Lasso Rules",
-            ["description"] = $"Stutter Guard starter rules for {p.CpuName}: games and dwm.exe on {split.GameLabel} (CPUs {games}), High priority, thread priority boost off; everything else on CPUs {other}. Add your own games.",
+            ["description"] = $"Stutter Guard starter rules for {p.CpuName}: games and dwm.exe on {split.GameLabel} (CPUs {games}) at High priority; {background}. Dynamic thread priority boost is left on. Add your own games.",
             ["cpuModel"] = p.CpuName,
             ["cpuAffinityRuleOrder"] = order,
             ["priorityClassRuleOrder"] = gamesOnly,
-            ["priorityBoostRuleOrder"] = gamesOnly2,
             ["ruleSets"] = rules,
         };
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });

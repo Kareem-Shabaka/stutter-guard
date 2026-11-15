@@ -75,10 +75,10 @@ public static class Recommendations
                     : "The Balanced path is selected, where Windows parking (and AMD's V-Cache optimizer or Intel Thread Director) picks the cores. Process Lasso is the alternative if pinning games manually; it pairs with the Tuned Ultimate plan.",
                 "Turn every automatic feature off: ProBalance, IdleSaver, SmartTrim, Performance Mode, the Bitsum power plan, Gaming Mode. Set Lasso to start the tuned power plan.",
                 $"Games → {split.GameLabel} (CPUs {games}). dwm.exe → the same CPUs, so the desktop compositor sits next to the game.",
-                $"A separate profile (\"Game Mode\") with a catch-all *.* → CPUs {other} as its last rule. Background apps then stay off the game's cores during gameplay.{split.Note}",
-                "Per game: High priority and thread priority boost off. On the reference desktop that removed about 90% of the remaining 1% low dips.",
+                $"A separate profile (\"Game Mode\") with a catch-all *.* → CPUs {other} as its last rule. Background apps stay off the devices' interrupt CPUs, and the game keeps its own cores by priority.{split.Note}",
+                "Per game: High priority only, and leave dynamic thread priority boost ON. Windows' wake boosts (+6 for mouse/keyboard, +8 for sound) are what let a woken input or audio thread preempt, so switching them off works against latency.",
                 "\"Save starter rules\" writes these rules for this CPU as a Process Lasso JSON rules file to the Desktop (matching the reference configuration). Import it into an isolated profile so the default profile stays intact.",
-                $"Add every played game before switching to that profile: a game that isn't in the list falls under the catch-all and runs on CPUs {other}{(p.Cpu.IsHybrid ? " (E-cores only, a severe slowdown)" : "")}.",
+                $"Add every played game before switching to that profile: a game that isn't in the list gets no affinity rule: Windows schedules it wherever it likes, though the catch-all still keeps it off the devices' interrupt CPUs.",
             };
             list.Add(new Recommendation("lasso", "Process Lasso, set up for core separation", p.Cpu.IsHybrid ? "Intel hybrid CPU" : "Dual-CCD CPU",
                 lines, new[] { new RecLink("Process Lasso (Bitsum)", "https://bitsum.com/") }, Action: "lasso"));
