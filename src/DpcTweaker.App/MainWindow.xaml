@@ -454,7 +454,12 @@
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Margin="0,2,0,0" />
-                                                <TextBlock Text="{Binding Guidance}" TextWrapping="Wrap" Margin="0,4,0,0" Opacity="0.85" />
+                                                <!-- The actionable line, labelled. Without the label the guidance
+                                                     read as one more paragraph of explanation, which is how a
+                                                     finding turns into worry instead of a task. -->
+                                                <TextBlock Text="What you can do" FontWeight="SemiBold" FontSize="12"
+                                                           TextWrapping="Wrap" Margin="0,8,0,0" Opacity="0.85" />
+                                                <TextBlock Text="{Binding Guidance}" TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.85" />
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>

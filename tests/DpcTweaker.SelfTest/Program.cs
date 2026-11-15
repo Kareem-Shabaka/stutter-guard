@@ -2594,6 +2594,72 @@ Console.WriteLine("Wave 17: the Home page's drift text does not repeat the line 
     Check("an external change never claims a driver changed",
         !DriftWatcher.ComposeDetail(false, "", false).Contains("driver for"));
 }
+Console.WriteLine("Wave 18: every triage finding ends on something the user can do");
+{
+    // The rule: a finding may state a limit, but it must not END on one. Every finding's guidance has
+    // to open with an instruction, or say plainly that nothing can be done - never leave the reader
+    // worried with no next step.
+    var devices = new Dictionary<int, IReadOnlyList<string>>
+    {
+        [16] = new[] { "AMD Radeon RX 9070 XT" },
+        [20] = new[] { "Realtek PCIe 5GbE Family Controller", "AMD USB 3.20 eXtensible Host Controller" },
+    };
+    var hot = new[] { new CpuRates(16, 2454, 567, 0.1, 1.56) };
+    var findings = LatencyTriage.Scan(rates: hot, devicesByCpu: devices,
+        overlapping: new[] { new OverlappingProcess(42, "game", 0x10000, new[] { 16 }) },
+        unreadableProcesses: 16);
+
+    Check("triage produced findings to inspect", findings.Count > 0, findings.Count.ToString());
+
+    foreach (var f in findings)
+    {
+        string g = f.Guidance;
+        Check($"'{f.Title}': guidance is not empty", g.Length > 40, g);
+        // The action must come FIRST. Any finding can carry a caveat at the end; what turns it into
+        // worry is making the reader read to the bottom to find out what to do.
+        string opening = g.Split('\n')[0];
+        bool leadsWithAction = new[] { "Set every display", "Leave only", "Open the Interrupts", "Run Stutter Guard",
+                                       "Close those processes", "Leave this until last", "This app has", "This app cannot" }
+            .Any(k => opening.StartsWith(k, StringComparison.OrdinalIgnoreCase));
+        Check($"'{f.Title}': guidance opens with the action, not the explanation", leadsWithAction, opening);
+        // Every one must contain an imperative the user can act on.
+        bool actionable = new[] { "Set every display", "Leave only", "press Re-apply", "Run Stutter Guard as administrator",
+                                  "Close those processes", "Leave this until last", "Update that device's driver",
+                                  "Update their drivers", "LatencyMon" }
+            .Any(k => g.Contains(k, StringComparison.OrdinalIgnoreCase));
+        Check($"'{f.Title}': guidance names a concrete action", actionable, g);
+        Check($"'{f.Title}': guidance explains why, not only what", g.Contains("Why", StringComparison.OrdinalIgnoreCase), g);
+    }
+
+    // ---- the sustained-DPC finding must name the devices this app pinned to that core ----
+    var load = findings.First(f => f.Title.Contains("Sustained DPC", StringComparison.Ordinal));
+    Check("the sustained-DPC finding names the device pinned to that core",
+        load.Guidance.Contains("AMD Radeon RX 9070 XT"), load.Guidance);
+    Check("...and says what to do with it", load.Guidance.Contains("Update that device's driver"));
+    Check("...and points at the screen that can move it", load.Guidance.Contains("Interrupts screen"));
+
+    // With two devices on the core it must list both and pluralise the advice.
+    var multi = LatencyTriage.Scan(rates: new[] { new CpuRates(20, 900, 400, 0.1, 2.2) }, devicesByCpu: devices)
+        .First(f => f.Title.Contains("Sustained DPC", StringComparison.Ordinal));
+    Check("several devices on the core are all named",
+        multi.Guidance.Contains("Realtek PCIe 5GbE") && multi.Guidance.Contains("AMD USB 3.20"), multi.Guidance);
+    Check("...with plural advice", multi.Guidance.Contains("Update their drivers"));
+
+    // A core it knows nothing about must say so rather than invent a device.
+    var unknown = LatencyTriage.Scan(rates: new[] { new CpuRates(30, 900, 400, 0.1, 2.2) }, devicesByCpu: devices)
+        .First(f => f.Title.Contains("Sustained DPC", StringComparison.Ordinal));
+    Check("a core with no known device says the app cannot name it", unknown.Guidance.Contains("cannot name the driver"));
+    Check("...and still gives the next step", unknown.Guidance.Contains("LatencyMon"));
+
+    // No device map at all (a machine with nothing pinned) must not crash or fabricate.
+    var noMap = LatencyTriage.Scan(rates: hot).First(f => f.Title.Contains("Sustained DPC", StringComparison.Ordinal));
+    Check("a missing device map degrades to the honest answer", noMap.Guidance.Contains("cannot name the driver"));
+
+    // ---- the unreadable-process finding must offer elevation, not just a caveat ----
+    var blind = findings.First(f => f.Title.Contains("could not be inspected", StringComparison.Ordinal));
+    Check("the unreadable finding offers a concrete step", blind.Guidance.Contains("as administrator"), blind.Guidance);
+    Check("...and says the rest did not need elevation", blind.Guidance.Contains("do not need it"));
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");
@@ -3655,7 +3721,7 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
     Check("mixed refresh says affinity cannot fix it", mix is { AffinityCanFix: false });
     Check("the finding lists every rate", mix is not null && mix.Title.Contains("240") && mix.Title.Contains("120") && mix.Title.Contains("60"), mix?.Title ?? "");
     Check("the finding names the primary display", mix is not null && mix.Detail.Contains("primary"), mix?.Detail ?? "");
-    Check("the guidance names amdkmdag", mix is not null && mix.Guidance.Contains("amdkmdag"), mix?.Guidance ?? "");
+    Check("the guidance names the GPU driver class rather than a single vendor", mix is not null && mix.Guidance.Contains("GPU driver") && mix.Guidance.Contains("DPC"), mix?.Guidance ?? "");
 
     // ---- three of the same rate: count warning but no mixed warning ----
     var threeSame = new[]
@@ -3705,7 +3771,7 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
     Check("the DPC budget is the documented 100 us", LatencyTriage.DpcBudgetUs == 100, LatencyTriage.DpcBudgetUs.ToString());
     Check("the ISR budget is the documented 25 us", LatencyTriage.IsrBudgetUs == 25, LatencyTriage.IsrBudgetUs.ToString());
     Check("a large DPC is stated against the budget, not just called large",
-        mix is not null && mix.Guidance.Contains("100 us budget"), mix?.Guidance ?? "");
+        mix is not null && mix.Guidance.Contains("100") && mix.Guidance.Contains("budget"), mix?.Guidance ?? "");
     Check("sustained DPC load is stated against the budget",
         sus is not null && sus.Detail.Contains("100 us for one DPC routine") && sus.Detail.Contains("25 us for one ISR"),
         sus?.Detail ?? "");

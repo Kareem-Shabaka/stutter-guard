@@ -352,7 +352,31 @@ public sealed class TweakEngine
             Log.Warn("Process overlap check failed: " + ex.Message);
         }
 
-        return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores, overlap, unreadable));
+        // Which devices this app has on which core. Windows will not say which driver a DPC belongs to, but
+        // naming the devices pinned to the hot core turns "go and find out" into something the user can act on.
+        var devicesByCpu = new Dictionary<int, List<string>>();
+        void Note(int cpu, string name)
+        {
+            if (!devicesByCpu.TryGetValue(cpu, out var list)) devicesByCpu[cpu] = list = new List<string>();
+            if (!list.Contains(name)) list.Add(name);
+        }
+
+        // Live pins first: they describe what is actually on the core now.
+        foreach (var d in Profile.Devices)
+        {
+            if (d.ExistingMask is not ulong mask || mask == 0) continue;
+            for (int c = 0; c < 64; c++)
+                if ((mask & (1UL << c)) != 0) Note(c, d.Name);
+        }
+
+        // Nothing pinned yet (a fresh machine runs this scan before applying anything): fall back to what
+        // the plan would place, so the advice is still specific rather than blank.
+        if (devicesByCpu.Count == 0 && Plan.Applicable)
+            foreach (var a in Plan.Assignments)
+                foreach (int c in a.MaskCpus) Note(c, a.Device.Name);
+
+        return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores, overlap, unreadable,
+            devicesByCpu.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value)));
     }
 
     /// <summary>
