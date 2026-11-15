@@ -12,8 +12,8 @@
 # ---- What is measured, and what is not ----
 #
 # Builds are reproducible in a fixed environment. Measured 2026-11-15 on .NET SDK 10.0.402,
-# win-x64: two clean publishes of one commit, into two different directories, produced
-# 65,447,000 bytes with the same SHA-256 (851FA3465EA11D59B141C3FEF8266E9352BE30FEA8477EC80B7D6B4F403D8880).
+# win-x64, on this very commit: two clean publishes, into two different directories, produced
+# 65,446,991 bytes with the same SHA-256 (E36FE73D9E6F4DEDC5D41FDD6215DC05776BC3F2D1C0809B7FD6054F6B1D5122).
 # `build.cmd --verify-repro` repeats that check on your machine.
 #
 # That does not mean your own build must equal a released hash: a different SDK patch level,

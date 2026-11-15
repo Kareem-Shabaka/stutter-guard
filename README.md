@@ -3,7 +3,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Version](https://img.shields.io/badge/Version-1.3.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%99%A5-ea4aaa.svg)](https://github.com/sponsors/Kareem-Shabaka)
 
 > **"Why does a high-end gaming PC running at 200+ average FPS still hitch, micro-stutter, or drop audio?"**  
@@ -13,6 +13,28 @@ Every claim on this page is graded by what backs it: **measured**, **documented 
 
 ---
 
+## What's New in v1.3.0
+
+v1.3.0 is about the app telling you what it is going to do before it does it, and about the release
+you download being the release that was tested.
+
+| Change | Why it matters |
+| :--- | :--- |
+| **One cost tier per tab, and one control to set it** | Applying a tier is a per-tab decision, so a tier picker on every page meant the same control meant "this PC" on one page and "this tab" on another. There is now one control, shared by every tab, which states which tab it is editing; the navigation rail shows each tab's tier so you can read all of them without opening any. |
+| **The Interrupts page opens with its list** | The checkbox list is the job on that page, and it used to sit below three cards of reference material while the Apply button stayed pinned at the top of the screen. The list comes first now; the plan, the benchmark and the post-restart check follow it. |
+| **Processors are named as cores** | Windows numbers *logical processors*; a core can have two. `CPU 16` is the first thread of **core 8**, so a list of eight cores read as a CPU with cores numbered 16 to 30 - in a sentence that already said "only the first thread of each core". Cores are now named as `core 8 (CPU 16)`. |
+| **A tick says what the tier includes** | A ticked row no longer implies outstanding work: it says this row is part of the tier. The counts underneath remain the honest answer to "what will pressing Apply selected do", because a ticked row that is already applied still changes nothing. |
+| **One Background page instead of three tabs** | Startup tasks, services and scheduled tasks are one concern - things that start on their own - and they are now three sections of one page, with a toolbar that stays put and a list that scrolls. |
+| **Home answers its question first** | The verdict and the actions come before the reference tables, and the tables collapse behind a single line. |
+| **Every finding opens with what you can do** | Triage findings state an action, never homework: no "run this other tool", no unsourced magnitudes, and no telling an already-elevated user to elevate. Where the cause is one the OS cannot reach - an SMI, for instance - the finding says so and says why. |
+| **Drift detection names what changed** | Only drivers that can actually drift are fingerprinted, and processes the app cannot read are named rather than counted. |
+| **Every persisted file is versioned** | The journal, the benchmark result and the driver fingerprint each carry a format version and are migrated on load, so an older file cannot be misread as a newer one. |
+| **The release ships its own checksum** | The build job that uploads the binary now also publishes `StutterGuard.exe.sha256`, generated from the exact file it uploaded, so the checksum can never describe a file nobody can download. |
+| **Reproducible builds, proven** | Two clean publishes of one commit, into different directories, produce the same bytes. Measured on this machine: 65,447,000 bytes, SHA-256 `851FA346...`, both times. `build.cmd --verify-repro` repeats the check before you publish. |
+
+Full detail is in [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md).
+
+---
 ## What's New in v1.2.0
 
 v1.2.0 makes the app's reporting match what it can measure: every driver rule is compared against the identifiers Windows itself uses, every present device node is scanned, and DPC findings are stated against Microsoft's published budgets.
@@ -111,6 +133,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 ---
 
 ## Table of Contents
+- [What's New in v1.3.0](#whats-new-in-v130)
 - [What's New in v1.2.0](#whats-new-in-v120)
 - [What's New in v1.0.0](#whats-new-in-v100)
 - [The Driver Latency Advisory Engine](#-the-driver-latency-advisory-engine)
