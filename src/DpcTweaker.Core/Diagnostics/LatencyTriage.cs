@@ -74,11 +74,10 @@ public static class LatencyTriage
                     TriageSeverity.High,
                     $"{hz.Count} different refresh rates across {active.Count} displays ({string.Join(" / ", hz)} Hz)",
                     list + ".",
-                                        "Set every display to the same refresh rate (Settings > System > Display > Advanced display), or disconnect the " +
-                    "ones you are not using while you play. That is the whole fix - no setting in this app removes it.\n\n" +
-                    "Why: Windows composites every attached display and the GPU driver does that work in its own DPC. Mixed rates make " +
-                    "it wake for several cadences instead of one, which is a common cause of large amdgpu DPC times - well past " +
-                    $"Microsoft's {DpcBudgetUs:0} µs budget for one DPC.",
+                    "Each display is composited at its own cadence, so the graphics driver does work in its " +
+                    "interrupt handler for every attached screen, not only for the game's. Three cadences mean three " +
+                    "schedules to service. That is a cost of the setup rather than a fault, and nothing this app changes " +
+                    "alters it - it is worth knowing when you read the numbers.",
                     false));
             }
         }
@@ -89,10 +88,10 @@ public static class LatencyTriage
             findings.Add(new TriageFinding(
                 TriageSeverity.Medium,
                 $"{active.Count} displays attached",
-                $"Composite cost grows with every attached display: {string.Join(", ", active.Select(d => d.Mode))}.",
-                                    "Leave only the display you play on connected while gaming.\n\n" +
-                    "Why: compositing cost grows with every attached display. On a machine that is already tuned this is a bigger " +
-                    "win than any further affinity change.",
+                $"Attached: {string.Join(", ", active.Select(d => d.Mode))}.",
+                    "Every attached display is another surface the compositor presents each cycle, so the cost is " +
+                    "paid whether or not anything is open on it. That is the whole reason more screens means more " +
+                    "driver work; how much it costs on your card is not something this app can put a number on.",
                 false));
         }
 
@@ -141,14 +140,12 @@ public static class LatencyTriage
             findings.Add(new TriageFinding(
                 TriageSeverity.Info,
                 "System Management Interrupts are outside Windows' control",
-                "Firmware raises an SMI straight to the processor, commonly for 100 us or more at a time. No register, " +
-                "driver, affinity mask or power setting can see one, move one or stop one, and Windows is not told it happened.",
-                    "Leave this until last. If large DPC times survive a clean Windows install on this board, try these in order, " +
-                    "re-measuring after each: update the BIOS, then turn off in firmware the hardware you do not use - legacy USB " +
-                    "support, serial and parallel ports, unused controllers.\n\n" +
-                    "Why this app cannot check for you: firmware raises an SMI straight to the processor, commonly for 100 us or " +
-                    "more, and Windows is never told it happened. This is the one cause no register, driver, affinity mask or power " +
-                    "setting can reach - and this app cannot measure it, so treat it as the last candidate, not the first.",
+                    "Firmware raises an SMI straight to the processor, outside Windows' interrupt handling, and the " +
+                    "operating system is never told when or for how long. No register, driver, affinity mask or power " +
+                    "setting can see one, move one or stop one.",
+                    "Nothing on this machine can act on it, and this app cannot measure it. That leaves an SMI as the " +
+                    "explanation for large DPC times that survive a clean Windows install on the same board - the last " +
+                    "candidate rather than the first, and the one worth knowing about only when everything else is clean.",
                 false));
         }
 
@@ -167,11 +164,13 @@ public static class LatencyTriage
                 TriageSeverity.High,
                 $"{overlapping.Count} process(es) restricted onto the interrupt cores ({string.Join(", ", cpus.Select(c => "CPU " + c))})",
                 string.Join(", ", names.Take(8)) + (names.Count > 8 ? $", and {names.Count - 8} more" : "") + ".",
-                    "Close those processes, or remove the affinity restriction they are running with, then run this check again. " +
-                    "If you did not set those masks yourself, the tool that did is the thing to change - a process manager keeping " +
-                    "a rule, or a launcher applying one at startup.\n\n" +
-                    "Why: the scheduler does not know a core is servicing a device, so anything restricted to that core competes " +
-                    "with every interrupt on it. This app moves devices, not processes, so it cannot undo this for you.",
+                    "These are running with an explicit affinity mask that names a processor this machine uses for " +
+                    "devices, so the scheduler is free to run them beside the interrupts. Usually something else set " +
+                    "those masks - a process manager keeping a rule, or a launcher applying one at startup - so the " +
+                    "program itself is not doing anything wrong.\n\n" +
+                    "Why it is worth knowing: the scheduler does not know a core is servicing a device, so anything " +
+                    "pinned there competes with every interrupt on it. This app moves devices, not processes, so it " +
+                    "cannot change this for you.",
                     false));
         }
 
@@ -225,18 +224,18 @@ public static class LatencyTriage
     /// and it stays honest rather than guessing when it knows nothing about the core.
     /// </para>
     /// </summary>
- static string Suspects(int cpu, IReadOnlyDictionary<int, IReadOnlyList<string>>? devicesByCpu)
+    static string Suspects(int cpu, IReadOnlyDictionary<int, IReadOnlyList<string>>? devicesByCpu)
     {
         if (devicesByCpu is null || !devicesByCpu.TryGetValue(cpu, out var names) || names.Count == 0)
             return "This app cannot name the driver behind it: Windows does not report which driver a DPC belongs to " +
-                   "without kernel tracing. LatencyMon's Drivers tab can, and that is the next thing to run.";
+                   "without kernel tracing. LatencyMon's Drivers tab does show the name.";
 
         string list = string.Join(", ", names);
         return names.Count == 1
-            ? $"This app has one device pinned to CPU {cpu}: {list}. Update that device's driver, or move it to another " +
-              "core on the Interrupts screen, then run this check again."
-            : $"This app has these devices pinned to CPU {cpu}: {list}. Update their drivers, or spread them onto other " +
-              "cores on the Interrupts screen, then run this check again.";
+            ? $"This app has one device pinned to CPU {cpu}: {list}. That is the device whose work this app put here, " +
+              "and the first place to look if the load traces back to a device."
+            : $"This app has these devices pinned to CPU {cpu}: {list}. Those are the devices whose work this app put " +
+              "here, and the first place to look if the load traces back to a device.";
     }
 
     /// <summary>Worst-first, for display.</summary>
