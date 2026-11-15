@@ -338,6 +338,7 @@ public sealed class TweakEngine
         // unelevated; the unreadable count is reported rather than folded into a clean zero.
         IReadOnlyList<OverlappingProcess> overlap = Array.Empty<OverlappingProcess>();
         int unreadable = 0, protectedCount = 0;
+        IReadOnlyList<UnreadableProcess> unreadableNames = Array.Empty<UnreadableProcess>();
         bool elevated = false;
         try
         {
@@ -347,7 +348,7 @@ public sealed class TweakEngine
             var interruptCpus = ProcessOverlap.LiveCpus(Profile.Devices).ToList();
             if (interruptCpus.Count > 0)
             {
-                overlap = ProcessOverlap.Sample(interruptCpus, Profile.Cpu.LogicalCount, out unreadable, out protectedCount);
+                overlap = ProcessOverlap.Sample(interruptCpus, Profile.Cpu.LogicalCount, out unreadable, out protectedCount, out unreadableNames);
                 elevated = ProcessOverlap.IsElevated();
             }
         }
@@ -381,7 +382,7 @@ public sealed class TweakEngine
 
         var byCpu = devicesByCpu.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value);
         return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores, overlap, unreadable,
-            byCpu, protectedCount, elevated));
+            byCpu, protectedCount, unreadableNames, elevated));
     }
 
     /// <summary>

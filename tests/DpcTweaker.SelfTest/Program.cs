@@ -2710,6 +2710,76 @@ Console.WriteLine("Wave 19: unreadable processes never tell an elevated user to 
     }
     catch (Exception ex) { Check("live sample runs", false, ex.Message); }
 }
+Console.WriteLine("Wave 21: a Windows patch is not a driver update, and unread processes are named");
+{
+    // ---- the fingerprint filter ----
+    // Measured: 41 of 48 fingerprinted PCI devices on this machine carry an inbox driver, all at one
+    // version. Without a filter, a monthly cumulative update reported "Driver Update Detected ... and
+    // 39 more" and hid the single tweak that had actually drifted.
+    Check("pci.sys is recognised as an inbox driver", DriftWatcher.IsInboxDriver("pci.sys"));
+    Check("USBXHCI.SYS is inbox, case-insensitively", DriftWatcher.IsInboxDriver("USBXHCI.SYS"));
+    Check("stornvme.sys is inbox", DriftWatcher.IsInboxDriver("stornvme.sys"));
+    Check("HDAudBus.sys is inbox", DriftWatcher.IsInboxDriver("HDAudBus.sys"));
+    Check("a vendor display driver is not inbox", !DriftWatcher.IsInboxDriver("amdkmdag.sys"));
+    Check("a vendor NIC driver is not inbox", !DriftWatcher.IsInboxDriver("rt640x64.sys"));
+    Check("a vendor audio driver is not inbox", !DriftWatcher.IsInboxDriver("RTKVHD64.sys"));
+    Check("a null driver file is not inbox", !DriftWatcher.IsInboxDriver(null));
+
+    // A device with no driver file is not fingerprinted either (it had none before, and it is noise).
+    var profile = new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "x", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        Devices = Array.Empty<PciDevice>(),
+    };
+    Check("an empty profile fingerprints to nothing", DriftWatcher.Capture(profile).Length == 0);
+
+    // ---- the cause decision: inbox-only changes must NOT read as a driver update ----
+    // ChangedDevices is driven by the fingerprint, which now cannot contain an inbox device, so the
+    // only way to see 41 "changed devices" is a vendor install - which is what the headline claims.
+    string withVendor = "PCI\\VEN_1002&DEV_7550=x|y;PCI\\VEN_10EC&DEV_8126=a|b";
+    var changed = DriftWatcher.ChangedDevices(withVendor, "PCI\\VEN_1002&DEV_7550=x2|y;PCI\\VEN_10EC&DEV_8126=a|b", profile);
+    Check("a vendor version bump is detected", changed.Count == 1, string.Join(",", changed));
+    Check("an unchanged device is not reported", !changed.Any(c => c.Contains("10EC")));
+
+    // ---- unreadable processes are NAMED ----
+    var listed = new[]
+    {
+        new DpcTweaker.Core.Interrupts.UnreadableProcess(1968, "svchost", true),
+        new DpcTweaker.Core.Interrupts.UnreadableProcess(1764, "audiodg", true),
+        new DpcTweaker.Core.Interrupts.UnreadableProcess(9001, "someapp", false),
+    };
+    var named = LatencyTriage.Scan(unreadableProcesses: 3, protectedProcesses: 2, elevated: true, unreadableNames: listed)
+        .Single(f => f.Title.Contains("could not be read", StringComparison.OrdinalIgnoreCase));
+    Check("the unreadable finding lists the process names", named.Detail.Contains("svchost") && named.Detail.Contains("audiodg"), named.Detail);
+    Check("...including the non-protected one", named.Detail.Contains("someapp"), named.Detail);
+    Check("...under a plain label", named.Detail.Contains("Unread:"), named.Detail);
+
+    // A long list is capped so the card cannot become a wall.
+    var many = Enumerable.Range(0, 20).Select(i => new DpcTweaker.Core.Interrupts.UnreadableProcess(i + 100, "p" + i, true)).ToList();
+    var capped = LatencyTriage.Scan(unreadableProcesses: 20, protectedProcesses: 20, elevated: true, unreadableNames: many)
+        .Single(f => f.Title.Contains("could not be read", StringComparison.OrdinalIgnoreCase));
+    Check("a long list is truncated with a count", capped.Detail.Contains("and 10 more"), capped.Detail);
+
+    // With no names supplied nothing is invented.
+    var nameless = LatencyTriage.Scan(unreadableProcesses: 5, protectedProcesses: 5, elevated: true)
+        .Single(f => f.Title.Contains("could not be read", StringComparison.OrdinalIgnoreCase));
+    Check("no names means no list", !nameless.Detail.Contains("Unread:"), nameless.Detail);
+
+    // ---- the live sampler must actually produce names ----
+    try
+    {
+        ProcessOverlap.Sample(new[] { 0 }, Environment.ProcessorCount, out int u, out int pr, out var liveNames);
+        Check("the live sampler returns one entry per unreadable process", liveNames.Count == u, $"{liveNames.Count} names, {u} unreadable");
+        Check("every live entry has a name", liveNames.All(x => !string.IsNullOrWhiteSpace(x.Name)));
+        var protectedOnes = liveNames.Where(x => x.Protected).Select(x => x.Name).Distinct().Take(6).ToList();
+        if (protectedOnes.Count > 0) Console.WriteLine("        protected on this machine: " + string.Join(", ", protectedOnes));
+    }
+    catch (Exception ex) { Check("live sampler with names runs", false, ex.Message); }
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");

@@ -78,13 +78,47 @@ public static class DriftWatcher
     public const string StateKey = "drift.fingerprint";
 
     /// <summary>
-    /// Device instance id -> "driverVersion|driverDate" for every device that has a driver key.
-    /// Those are exactly the devices whose Driver-registry keys a reinstall rewrites.
+    /// Windows' own inbox drivers. They are the reason this fingerprint needed a filter.
+    /// <para>
+    /// Measured on the author's machine: 41 of 48 fingerprinted PCI devices carry one of these, all at
+    /// <c>10.0.26100.9974</c> - pci.sys on 19 nodes, USBXHCI on 4, stornvme on 2, plus 16 nodes with no
+    /// driver file at all. One cumulative update moves every one of them, so a monthly Windows patch read
+    /// as "Driver Update Detected ... and 39 more" and buried the single tweak that had actually drifted.
+    /// An inbox driver version is Windows' version, not a vendor's, so a change in it is a Windows update
+    /// and the report should say so instead of naming 41 PCI bridges.
+    /// </para>
+    /// </summary>
+    private static readonly HashSet<string> InboxDrivers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pci.sys", "usbhub.sys", "usbccgp.sys", "usbxhci.sys", "usbehci.sys",
+        "stornvme.sys", "storahci.sys", "storport.sys", "spaceport.sys", "disk.sys",
+        "partmgr.sys", "volmgr.sys", "volsnap.sys", "msisadrv.sys", "hdabus.sys",
+        "hdaudbus.sys", "acpi.sys", "intelppm.sys", "amdppm.sys", "pdc.sys",
+        "ndis.sys", "tcpip.sys", "wdf01000.sys", "monitor.sys", "usbvideo.sys",
+    };
+
+    /// <summary>True for a device whose driver ships with Windows rather than with its vendor.</summary>
+    public static bool IsInboxDriver(string? driverFile) =>
+        !string.IsNullOrWhiteSpace(driverFile) && InboxDrivers.Contains(driverFile);
+
+    /// <summary>
+    /// Device instance id -> "driverVersion|driverDate" for every device whose driver belongs to a
+    /// vendor. Windows' inbox drivers are excluded: see <see cref="InboxDrivers"/>. Those are exactly
+    /// the devices whose Driver-registry keys a vendor reinstall rewrites.
     /// </summary>
     public static string Capture(SystemProfile profile) =>
         Compose(profile.Devices
-            .Where(d => d.ClassKey is not null)
+            .Where(d => d.ClassKey is not null && HasOwnDriver(d) && !IsInboxDriver(d.DriverFileName))
             .Select(d => (d.InstanceId, d.DriverVersion, d.DriverDate)));
+
+    /// <summary>
+    /// True when the node has a driver of its own to update. A PCI host bridge or an SMBus controller
+    /// reports no service and no driver file: nothing can be reinstalled, so nothing about it can drift,
+    /// and including it only added 16 entries that could never change for a reason worth reporting.
+    /// Measured on the author's machine: 16 of the 48 fingerprinted nodes were exactly this.
+    /// </summary>
+    private static bool HasOwnDriver(DpcTweaker.Core.Detection.PciDevice d) =>
+        !string.IsNullOrWhiteSpace(d.DriverFileName) || !string.IsNullOrWhiteSpace(d.Service);
 
     /// <summary>Builds the fingerprint string from instance id / version / date triples.</summary>
     internal static string Compose(IEnumerable<(string InstanceId, string? Version, string? Date)> devices)

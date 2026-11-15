@@ -57,6 +57,7 @@ public static class LatencyTriage
         int unreadableProcesses = 0,
         IReadOnlyDictionary<int, IReadOnlyList<string>>? devicesByCpu = null,
         int protectedProcesses = 0,
+        IReadOnlyList<DpcTweaker.Core.Interrupts.UnreadableProcess>? unreadableNames = null,
         bool elevated = false)
     {
         var findings = new List<TriageFinding>();
@@ -179,6 +180,16 @@ public static class LatencyTriage
         if (unreadableProcesses > 0)
         {
             int explainable = Math.Max(0, unreadableProcesses - protectedProcesses);
+
+    // Name them. A count is something to worry about; a list is something to read and dismiss.
+    string names = "";
+    if (unreadableNames is { Count: > 0 })
+    {
+        var shown = unreadableNames.Take(10).Select(u => u.Name).ToList();
+        names = unreadableNames.Count > shown.Count
+            ? $"\n\nUnread: {string.Join(", ", shown)} and {unreadableNames.Count - shown.Count} more."
+            : $"\n\nUnread: {string.Join(", ", shown)}.";
+    }
             string title;
             string detail;
             string guidance;
@@ -189,22 +200,22 @@ public static class LatencyTriage
                 // so there is no action to offer and saying "run as administrator" would be false.
                 title = $"{protectedProcesses} Windows processes could not be read (protected by Windows)";
                 detail = "These are System, Idle and the services Windows marks protected. No user-mode tool can read their " +
-                         "affinity, and elevation does not change that.";
+                         "affinity, and elevation does not change that." + names;
                 guidance = "Nothing to do. A program competes with interrupts through an affinity mask, and every process on " +
                            "this PC that could carry one was read.";
             }
             else if (elevated)
             {
                 title = $"{unreadableProcesses} process(es) could not be read, {protectedProcesses} of them protected by Windows";
-                detail = "Stutter Guard is already running as administrator, so these are refusals elevation cannot fix.";
-                guidance = "Nothing to do unless one of them is a program you recognise as heavy. In that case close it and run this " +
-                           "check again, so its affinity can be read.";
+                detail = "Stutter Guard is already running as administrator, so these are refusals elevation cannot fix." + names;
+                guidance = "Nothing to do here. This app cannot read those processes, and it cannot say whether any of them " +
+                           "competes with an interrupt - the numbers above are the honest answer to that, not this list.";
             }
             else
             {
                 title = $"{unreadableProcesses} process(es) could not be inspected for affinity masks";
                 detail = $"{explainable} of them are other-account processes, which answer access-denied without elevation; " +
-                         $"{protectedProcesses} are Windows-internal and cannot be read by anything.";
+                         $"{protectedProcesses} are Windows-internal and cannot be read by anything." + names;
                 guidance = "Run Stutter Guard as administrator and press the check again to include the other-account ones. The pins, " +
                     "the budgets and everything else above do not need elevation.\n\n" +
                     "Why it is counted: a silent zero would look like a clean machine when it is only an unread one.";

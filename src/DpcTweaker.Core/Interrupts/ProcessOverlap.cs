@@ -12,6 +12,14 @@ namespace DpcTweaker.Core.Interrupts;
 public sealed record OverlappingProcess(int Pid, string Name, ulong Mask, IReadOnlyList<int> OverlapCpus);
 
 /// <summary>
+/// A process whose affinity could not be read. The name is still known: ProcessName needs no handle,
+/// so a user can be told <b>which</b> programs were unread rather than only how many. Without the names
+/// the count is something to worry about; with them it is something to check off.
+/// </summary>
+/// <param name="Protected">True for the ones Windows shields from every user-mode caller, elevated or not.</param>
+public sealed record UnreadableProcess(int Pid, string Name, bool Protected);
+
+/// <summary>
 /// Finds processes that are pinned onto the cores the interrupt plan reserves.
 /// <para>
 /// The scheduler has no interrupt-load heuristic: it does not know a core is servicing a device, so it
@@ -133,11 +141,18 @@ public static class ProcessOverlap
     /// from 87 to 15, and every one of the 15 was in this category.
     /// </param>
     public static IReadOnlyList<OverlappingProcess> Sample(
-        IReadOnlyCollection<int> interruptCpus, int logicalCount, out int unreadable, out int protectedCount)
+        IReadOnlyCollection<int> interruptCpus, int logicalCount, out int unreadable, out int protectedCount) =>
+        Sample(interruptCpus, logicalCount, out unreadable, out protectedCount, out _);
+
+    public static IReadOnlyList<OverlappingProcess> Sample(
+        IReadOnlyCollection<int> interruptCpus, int logicalCount,
+        out int unreadable, out int protectedCount, out IReadOnlyList<UnreadableProcess> unreadableNames)
     {
         unreadable = 0;
         protectedCount = 0;
+        unreadableNames = Array.Empty<UnreadableProcess>();
         var rows = new List<(int, string, ulong)>();
+        var blind = new List<UnreadableProcess>();
 
         // GetProcessAffinityMask answers for one processor group, so masks are only meaningful up to
         // 64 logical processors. Beyond that the count is reported instead of a false negative.
@@ -156,16 +171,20 @@ public static class ProcessOverlap
                     // Idle and System, plus everything Windows protects from user mode (System-owned
                     // services running protected, audiodg, Defender's components). Elevation does not
                     // change these, so they are counted apart from the ones a refusal actually explains.
-                    if (NeverReadable.Contains(p.Id) || p.SessionId == 0) protectedCount++;
+                    bool shielded = NeverReadable.Contains(p.Id) || p.SessionId == 0;
+                    if (shielded) protectedCount++;
                     unreadable++;
+                    blind.Add(new UnreadableProcess(p.Id, SafeName(p), shielded));
                     continue;
                 }
                 rows.Add((p.Id, p.ProcessName, (ulong)mask));
             }
             catch
             {
-                if (NeverReadable.Contains(p.Id) || p.SessionId == 0) protectedCount++;
+                bool shielded = NeverReadable.Contains(p.Id) || p.SessionId == 0;
+                if (shielded) protectedCount++;
                 unreadable++;
+                blind.Add(new UnreadableProcess(p.Id, SafeName(p), shielded));
             }
             finally
             {
@@ -173,6 +192,16 @@ public static class ProcessOverlap
             }
         }
 
+        // Busiest-looking first is not knowable here, so order by name for a stable, scannable list.
+        unreadableNames = blind.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                               .ThenBy(b => b.Pid)
+                               .ToList();
         return Find(rows, interruptCpus, logicalCount);
+    }
+
+    /// <summary>ProcessName can throw on a protected process; the name is the whole point, so guard it.</summary>
+    private static string SafeName(Process p)
+    {
+        try { return p.ProcessName; } catch { return "pid " + p.Id; }
     }
 }
