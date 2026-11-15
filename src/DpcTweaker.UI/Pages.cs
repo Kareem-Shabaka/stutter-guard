@@ -319,6 +319,32 @@ public sealed class HomePageViewModel : PageViewModel
     public ObservableCollection<InfoLine> BenchLines { get; } = new();
     public bool HasWarnings => Warnings.Count > 0;
 
+    private string _identityLine = "";
+    private string _statusLine = "";
+
+    /// <summary>
+    /// What this PC is, on one line, for the collapsed "what Stutter Guard read" header. A closed
+    /// disclosure whose header only repeats its own title tells a first-run user nothing; this keeps
+    /// the OS, CPU and graphics card visible while the other ten rows stay shut.
+    /// </summary>
+    public string IdentityLine
+    {
+        get => _identityLine;
+        private set => Set(ref _identityLine, value);
+    }
+
+    /// <summary>
+    /// The verdict in one sentence: is this PC tuned, to which tier, and is anything waiting. The page
+    /// used to answer that with five counts in a table near the bottom.
+    /// </summary>
+    public string StatusLine
+    {
+        get => _statusLine;
+        private set => Set(ref _statusLine, value);
+    }
+
+    public bool HasStatusLine => _statusLine.Length > 0;
+
     public string BenchStatus
     {
         get => _benchStatus;
@@ -373,6 +399,11 @@ public sealed class HomePageViewModel : PageViewModel
         if (p.TimerResolution is { } tr) Lines.Add(new InfoLine("Timer now", $"{tr.Current / 10000.0:0.000} ms"));
         Lines.Add(new InfoLine("WHEA errors", p.WheaErrors14Days is null ? "unknown" : $"{p.WheaErrors14Days} in 14 days"));
         Lines.Add(new InfoLine("Process Lasso", p.Software.ProcessLasso ? "installed" : "not found"));
+
+        // The same facts, condensed to one line, so the table can start closed.
+        var parts = new List<string> { p.Windows.Display, p.CpuName };
+        parts.AddRange(p.Gpus.Select(g => g.Label));
+        IdentityLine = string.Join(" \u00B7 ", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
 
         Warnings.Clear();
         foreach (var w in p.Warnings) Warnings.Add(w);
@@ -467,6 +498,24 @@ public sealed class HomePageViewModel : PageViewModel
         Counts.Add(new InfoLine("Drifted", list.Count(r => r.Status == TweakStatus.Drifted).ToString()));
         Counts.Add(new InfoLine("Not applied", list.Count(r => r.Status == TweakStatus.NotApplied).ToString()));
         Counts.Add(new InfoLine("Failed", list.Count(r => r.Status == TweakStatus.Failed).ToString()));
+
+        int applied = list.Count(r => r.Status == TweakStatus.Applied);
+        int pending = list.Count(r => r.Status == TweakStatus.PendingReboot);
+        int drifted = list.Count(r => r.Status == TweakStatus.Drifted);
+        int failed = list.Count(r => r.Status == TweakStatus.Failed);
+        int waiting = list.Count(r => r.Status == TweakStatus.NotApplied);
+
+        string tier = TweakPresetSelector.Label(_main.Engine?.Options.Preset ?? TweakPreset.Safe);
+        var line = new List<string> { $"Tuned to {tier}: {applied} of {list.Count} tweaks applied" };
+
+        // What needs the user, if anything, in the order it matters.
+        if (pending > 0) line.Add($"{pending} waiting on a restart");
+        if (drifted > 0) line.Add($"{drifted} reset by an update and needing re-applying");
+        if (failed > 0) line.Add($"{failed} failed");
+        if (drifted == 0 && failed == 0 && pending == 0 && waiting > 0) line.Add($"{waiting} never applied");
+
+        StatusLine = string.Join(", ", line) + ".";
+        OnPropertyChanged(nameof(HasStatusLine));
     }
 
     private void SaveReport()

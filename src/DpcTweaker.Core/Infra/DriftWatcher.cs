@@ -207,19 +207,27 @@ public static class DriftWatcher
             _ => changed[0] + ", " + changed[1] + $" and {changed.Count - 2} more",
         };
 
-        string detail = driverChanged
-            ? $"The driver for {who} changed since these tweaks were applied" +
-              (before is null ? " (no earlier fingerprint was recorded, so this is inferred)." :
-               ". A driver install or update usually wipes the device's Interrupt Management and Class keys, which puts interrupts back on CPU 0.") +
-              " Re-applying keeps the original before-state in the journal, so every revert still works."
-            : "These were applied and no driver version changed, so a Windows update, another tuning tool or a manual edit put them back. " +
-              "Re-applying keeps the original before-state in the journal, so every revert still works.";
-
-        detail = "Affected: " + string.Join(", ", groups.Select(g => $"{g.Label} ({g.Count})")) + ".\n\n" + detail;
+        string detail = ComposeDetail(driverChanged, who, before is not null);
 
         Log.Info($"Drift: {headline} ({cause})" +
                  (changed.Count > 0 ? " — driver changed: " + string.Join(", ", changed) : "") +
                  " — " + string.Join(", ", groups.Select(g => $"{g.Module}={g.Count}")));
         return new DriftReport(drifted, cause, changed, groups, headline, detail);
     }
+
+    /// <summary>
+    /// The explanatory paragraph under the drift headline. It deliberately does <b>not</b> open with the
+    /// affected list: the UI prints <see cref="DriftReport.SubsystemText"/> on its own line immediately
+    /// above this text, and prefixing both put the same sentence on screen twice.
+    /// </summary>
+    /// <param name="hadFingerprint">False when no earlier fingerprint was recorded, so the cause is inferred.</param>
+    public static string ComposeDetail(bool driverChanged, string who, bool hadFingerprint) =>
+        driverChanged
+            ? $"The driver for {who} changed since these tweaks were applied" +
+              (hadFingerprint
+                  ? ". A driver install or update usually wipes the device's Interrupt Management and Class keys, which puts interrupts back on CPU 0."
+                  : " (no earlier fingerprint was recorded, so this is inferred).") +
+              " Re-applying keeps the original before-state in the journal, so every revert still works."
+            : "These were applied and no driver version changed, so a Windows update, another tuning tool or a manual edit put them back. " +
+              "Re-applying keeps the original before-state in the journal, so every revert still works.";
 }

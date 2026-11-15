@@ -2564,6 +2564,36 @@ Console.WriteLine("Wave 16: a preset's ticks show what it includes, not what is 
     Check("the summary counts the applied row as already done", allDone.AlreadyDone == 1);
     Check("the summary says nothing will be applied", SelectionSummary.Describe(TweakPreset.Safe, allDone).Contains("nothing will be applied"));
 }
+Console.WriteLine("Wave 17: the Home page's drift text does not repeat the line above it");
+{
+    // The UI prints SubsystemText ("Affected: Interrupts / MSI (1).") on its own line, then Detail
+    // underneath. Detail used to open with the same list, so the sentence appeared twice on screen.
+    string[] affected = { "Interrupts / MSI (1)", "GPU driver keys (2)" };
+    foreach (var (driverChanged, who, hadFingerprint) in new[]
+    {
+        (true,  "AMD Radeon RX 9070 XT", true),
+        (true,  "AMD Radeon RX 9070 XT", false),
+        (false, "",                      false),
+    })
+    {
+        string detail = DriftWatcher.ComposeDetail(driverChanged, who, hadFingerprint);
+        string label = $"{driverChanged}/{hadFingerprint}";
+        Check($"drift detail ({label}) does not open with the affected list", !detail.StartsWith("Affected:", StringComparison.OrdinalIgnoreCase));
+        Check($"drift detail ({label}) does not repeat any affected entry",
+            !affected.Any(a => detail.Contains(a, StringComparison.OrdinalIgnoreCase)), detail);
+        Check($"drift detail ({label}) still explains the revert guarantee",
+            detail.Contains("Re-applying keeps the original before-state"));
+        Check($"drift detail ({label}) is not empty", detail.Length > 40);
+    }
+
+    // A driver-update report must name the device; a non-driver cause must not invent one.
+    string withDevice = DriftWatcher.ComposeDetail(true, "AMD Radeon RX 9070 XT", true);
+    Check("a driver cause names the device that changed", withDevice.Contains("AMD Radeon RX 9070 XT"));
+    Check("an inferred cause says so rather than asserting it",
+        DriftWatcher.ComposeDetail(true, "X", false).Contains("inferred"));
+    Check("an external change never claims a driver changed",
+        !DriftWatcher.ComposeDetail(false, "", false).Contains("driver for"));
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");
