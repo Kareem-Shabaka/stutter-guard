@@ -105,12 +105,13 @@ public static class LassoRules
         rules.Add(new JsonObject { ["cpuAffinity"] = games, ["cpuAffinityDelay"] = 0, ["processName"] = "dwm.exe" });
         foreach (string g in Games)
         {
+            // No priority key. Bitsum's own setup guide: "Leave the game's priority alone.
+            // Raising a game to High or Realtime priority rarely helps and can cause stutter or
+            // hangs." Emitting High for sixty games shipped the thing the vendor warns against.
             rules.Add(new JsonObject
             {
                 ["cpuAffinity"] = games,
                 ["cpuAffinityDelay"] = 0,
-                ["priorityClass"] = "High",
-                ["priorityClassEnforcedByRegistry"] = false,
                 ["processName"] = g,
             });
         }
@@ -121,8 +122,6 @@ public static class LassoRules
         // Keep the order array in step with the rules: an order entry for a rule that was never emitted
         // is a second, quieter version of the same bug.
         if (emitCatchAll) order.Add("*.*");
-        var gamesOnly = new JsonArray();
-        foreach (string g in Games) gamesOnly.Add(g);
 
         string background = emitCatchAll
             ? $"background on CPUs {other}, which excludes every CPU a device uses for interrupts"
@@ -133,10 +132,9 @@ public static class LassoRules
             ["$id"] = SchemaId,
             ["$schema"] = "https://json-schema.org/draft/2020-12/schema",
             ["title"] = "Process Lasso Rules",
-            ["description"] = $"Stutter Guard starter rules for {p.CpuName}: games and dwm.exe on {split.GameLabel} (CPUs {games}) at High priority; {background}. Dynamic thread priority boost is left on. Add your own games.",
+            ["description"] = $"Stutter Guard starter rules for {p.CpuName}: games and dwm.exe on {split.GameLabel} (CPUs {games}); {background}. Priorities are left at Windows defaults and dynamic thread priority boost stays on. Add your own games.",
             ["cpuModel"] = p.CpuName,
             ["cpuAffinityRuleOrder"] = order,
-            ["priorityClassRuleOrder"] = gamesOnly,
             ["ruleSets"] = rules,
         };
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });

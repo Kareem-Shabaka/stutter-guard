@@ -71,11 +71,11 @@ public static class Recommendations
             var lines = new List<string>
             {
                 lassoPath
-                    ? "The Tuned Ultimate plan is selected, so Windows no longer decides which cores games run on. Process Lasso does it instead, matching the reference desktop configuration."
+                    ? "The Tuned Ultimate plan is selected, so Windows no longer decides which cores games run on. Process Lasso does it instead."
                     : "The Balanced path is selected, where Windows parking (and AMD's V-Cache optimizer or Intel Thread Director) picks the cores. Process Lasso is the alternative if pinning games manually; it pairs with the Tuned Ultimate plan.",
                 $"Games → {split.GameLabel} (CPUs {games}). dwm.exe → the same CPUs, so the desktop compositor sits next to the game.",
-                $"A separate profile (\"Game Mode\") with a catch-all *.* → CPUs {other} as its last rule. Background apps stay off the devices' interrupt CPUs, and the game keeps its own cores by priority.{split.Note}",
-                "\"Save starter rules\" writes these rules for this CPU as a Process Lasso JSON rules file to the Desktop (matching the reference configuration). Import it into an isolated profile so the default profile stays intact.",
+                $"A separate profile (\"Game Mode\") with a catch-all *.* → CPUs {other} as its last rule. That mask leaves out every CPU a device uses for interrupts, so background work never shares an interrupt core with a device.{split.Note}",
+                "\"Save starter rules\" writes these rules for this CPU as a Process Lasso JSON rules file to the Desktop. Import it into an isolated profile so the default profile stays intact.",
                 $"Add every played game before switching to that profile: a game that isn't in the list gets no affinity rule: Windows schedules it wherever it likes, though the catch-all still keeps it off the devices' interrupt CPUs.",
             };
             list.Add(new Recommendation("lasso", "Process Lasso, set up for core separation", p.Cpu.IsHybrid ? "Intel hybrid CPU" : "Dual-CCD CPU",

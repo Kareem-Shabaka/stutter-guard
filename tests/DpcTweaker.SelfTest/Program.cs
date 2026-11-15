@@ -764,7 +764,13 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var order = root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Select(x => x.GetString()).ToList();
     Check("catch-all is the last affinity rule", order.Last() == "*.*" && order[^2] == "dwm.exe");
     var mk = root.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "mk12.exe");
-    Check("game rule: 0-15, High", mk.GetProperty("cpuAffinity").GetString() == "0-15" && mk.GetProperty("priorityClass").GetString() == "High");
+    Check("game rule: 0-15 affinity", mk.GetProperty("cpuAffinity").GetString() == "0-15");
+    // Bitsum's setup guide: "Leave the game's priority alone. Raising a game to High or Realtime
+    // priority rarely helps and can cause stutter or hangs." No priority may be emitted at all.
+    Check("game rule sets no priority", !mk.TryGetProperty("priorityClass", out _));
+    Check("no priority is emitted anywhere in the rules",
+        !root.GetProperty("ruleSets").EnumerateArray().Any(r => r.TryGetProperty("priorityClass", out _)));
+    Check("no priorityClassRuleOrder is emitted", !root.TryGetProperty("priorityClassRuleOrder", out _));
     // Dynamic thread priority boost must be left alone: Windows' +6 mouse/keyboard and +8 sound wake
     // boosts are what let a woken input or audio thread preempt, so emitting "off" worked against latency.
     Check("game rule does not disable dynamic thread priority boost", !mk.TryGetProperty("threadPriorityBoosts", out _));
