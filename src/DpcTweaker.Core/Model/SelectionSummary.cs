@@ -23,10 +23,9 @@ public sealed record SelectionCounts(
 /// <summary>
 /// Answers "what will actually be used if I press Apply selected?".
 /// <para>
-/// A tick alone cannot answer it: a ticked row that is already applied changes nothing, and an unticked row
-/// can be unticked because it is done, because the preset excludes it, or because the tweak opts in
-/// individually. So the classification is status-first, and it is deliberately the same precedence the row
-/// uses to decide its own tick — one model of the row, two consumers.
+/// A tick alone cannot answer it, and that matters more now that the tick shows preset membership rather
+/// than outstanding work: a ticked row may already be applied, and an unticked row may be excluded by the
+/// preset or opted out of by the tweak itself. The classification is therefore status-first.
 /// </para>
 /// </summary>
 public static class SelectionSummary

@@ -22,7 +22,7 @@ public sealed class TweakRowViewModel : ObservableObject
     private bool _tickDecided;
 
     /// <param name="carriedSelection">The tick from the previous list (after an options change), if this row was there.</param>
-    private readonly TweakPreset _preset;
+    private TweakPreset _preset;
 
     /// <param name="preset">Which cost tier is pre-selected. A preset can only remove from the
     /// tweaks that opt in by default; it never adds one the tweak itself opted out of.</param>
@@ -31,7 +31,7 @@ public sealed class TweakRowViewModel : ObservableObject
     {
         _preset = preset;
         Tweak = tweak;
-        // Until the first status read, nothing is ticked. Then: ticked only if it still needs doing.
+        // Until the first status read, nothing is ticked. Then: ticked when the preset includes it.
         _isSelected = carriedSelection ?? false;
         _tickDecided = carriedSelection is not null;
     }
@@ -71,6 +71,34 @@ public sealed class TweakRowViewModel : ObservableObject
         get => _isSelected;
         set => Set(ref _isSelected, value);
     }
+
+    /// <summary>
+    /// Whether the chosen preset includes this row. This is what the checkbox shows: a preset's
+    /// contents stay visible after it has been applied, instead of vanishing as the work gets done.
+    /// </summary>
+    public bool InPreset => TweakPresetSelector.Ticks(_preset, Info.CostClass, Info.Evidence, Info.DefaultSelected, IsApplicable);
+
+    /// <summary>
+    /// Re-decides the tick for a different tier <b>without touching the machine</b>, so picking a preset
+    /// from the list shows what it covers before anything is applied. Explicit, so it overrides a carried
+    /// tick the same way Load does on a preset change.
+    /// </summary>
+    public void SetPreset(TweakPreset preset)
+    {
+        if (_preset == preset) return;
+        _preset = preset;
+        OnPropertyChanged(nameof(PresetExclusion));
+        OnPropertyChanged(nameof(HasPresetExclusion));
+        OnPropertyChanged(nameof(InPreset));
+        _tickDecided = true;
+        IsSelected = InPreset;
+    }
+
+    /// <summary>
+    /// True when pressing Apply selected would actually change this row. A ticked row that is already
+    /// applied is included in its preset but needs no work, so the button leaves it alone.
+    /// </summary>
+    public bool NeedsWork => Status is TweakStatus.NotApplied or TweakStatus.Drifted or TweakStatus.Failed;
 
     public bool IsExpanded
     {
@@ -158,21 +186,24 @@ public sealed class TweakRowViewModel : ObservableObject
         IsApplicable = s.Status != TweakStatus.NotApplicable;
         if (!IsApplicable) IsSelected = false;
 
-        // The checkbox means "include in Apply selected", so on the first read only rows
-        // that still need doing get ticked (if the tweak is on by default for this PC).
+        // The checkbox shows what the preset includes, not what is left to do. An applied row stays
+        // ticked, so the preset's contents can be read at any time; the status chip beside it already
+        // says whether the value is on the machine. Apply selected uses NeedsWork, so a ticked row
+        // that is already applied is not re-applied.
         if (!_tickDecided && s.Status != TweakStatus.Unknown)
         {
             _tickDecided = true;
-            IsSelected = IsApplicable && Info.DefaultSelected &&
-                         TweakPresetSelector.Selects(_preset, Info.CostClass, Info.Evidence) &&
-                         s.Status is TweakStatus.NotApplied or TweakStatus.Drifted or TweakStatus.Failed;
+            IsSelected = InPreset;
         }
     }
 
-    /// <summary>After a successful apply the row is done: untick it.</summary>
+    /// <summary>
+    /// After a successful apply the row is not unticked: it belongs to the preset either way, and a
+    /// box that cleared itself the moment it worked would erase the answer to "what does this preset
+    /// cover". The status chip is what changes.
+    /// </summary>
     public void MarkDone()
     {
         _tickDecided = true;
-        IsSelected = false;
     }
 }

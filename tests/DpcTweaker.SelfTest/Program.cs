@@ -2500,6 +2500,70 @@ Console.WriteLine("Wave 15: a process restricted onto an interrupt core is named
         Check("the live overlap sampler runs without throwing", false, ex.Message);
     }
 }
+Console.WriteLine("Wave 16: a preset's ticks show what it includes, not what is left to do");
+{
+    // The user's requirement: choosing a preset must show that preset's contents whether or not the
+    // settings have already been applied. Applied rows are included; excluded rows are not; a row that
+    // opted out of being on by default stays out; a row this PC cannot use is never ticked.
+    bool Tick(TweakPreset p, TweakCost c, Evidence e, bool def = true, bool ok = true) =>
+        TweakPresetSelector.Ticks(p, c, e, def, ok);
+
+    // ---- applied state is not an input at all: that is the whole point ----
+    Check("Essential ticks a free measured row", Tick(TweakPreset.Essential, TweakCost.Free, Evidence.Measured));
+    Check("Essential does not tick a small-cost row", !Tick(TweakPreset.Essential, TweakCost.Small, Evidence.Measured));
+    Check("Safe ticks a small-cost documented row", Tick(TweakPreset.Safe, TweakCost.Small, Evidence.Documented));
+    Check("Safe does not tick an expensive row", !Tick(TweakPreset.Safe, TweakCost.Expensive, Evidence.Measured));
+    Check("Safe does not tick a community-only row", !Tick(TweakPreset.Safe, TweakCost.Small, Evidence.Anecdotal));
+    Check("Costly ticks the expensive row", Tick(TweakPreset.Costly, TweakCost.Expensive, Evidence.Measured));
+    Check("Costly still does not tick a community-only row", !Tick(TweakPreset.Costly, TweakCost.Small, Evidence.Anecdotal));
+    Check("Everything ticks both", Tick(TweakPreset.Everything, TweakCost.Expensive, Evidence.Measured) &&
+                                   Tick(TweakPreset.Everything, TweakCost.Small, Evidence.Anecdotal));
+
+    // ---- the two absolute rules survive the change ----
+    Check("nothing ticks an unclassified cost", !Enum.GetValues<TweakPreset>().Any(p => Tick(p, TweakCost.Unclassified, Evidence.Measured)));
+    Check("only Everything ticks an anecdotal row", !Tick(TweakPreset.Essential, TweakCost.Free, Evidence.Anecdotal) &&
+        !Tick(TweakPreset.Safe, TweakCost.Free, Evidence.Anecdotal) &&
+        !Tick(TweakPreset.Costly, TweakCost.Free, Evidence.Anecdotal) &&
+        Tick(TweakPreset.Everything, TweakCost.Free, Evidence.Anecdotal));
+
+    // ---- opt-in and not-applicable are still respected ----
+    Check("a tweak that opted out is never ticked by a preset", !Tick(TweakPreset.Everything, TweakCost.Free, Evidence.Measured, def: false));
+    Check("an inapplicable row is never ticked", !Tick(TweakPreset.Everything, TweakCost.Free, Evidence.Measured, ok: false));
+    Check("ticking agrees with Selects whenever the row is eligible", Enum.GetValues<TweakPreset>().All(p =>
+        Tick(p, TweakCost.Small, Evidence.Documented) == TweakPresetSelector.Selects(p, TweakCost.Small, Evidence.Documented)));
+
+    // ---- consequence: Apply selected must not re-apply what is already applied ----
+    // The tick no longer implies work, so the button's filter is tick AND status. This mirrors
+    // TweakRowViewModel.NeedsWork and SelectionSummary's status-first precedence.
+    static bool NeedsWork(TweakStatus s) => s is TweakStatus.NotApplied or TweakStatus.Drifted or TweakStatus.Failed;
+    Check("an applied row needs no work", !NeedsWork(TweakStatus.Applied));
+    Check("a pending-restart row needs no work", !NeedsWork(TweakStatus.PendingReboot));
+    Check("a not-applied row needs work", NeedsWork(TweakStatus.NotApplied));
+    Check("a drifted row needs work", NeedsWork(TweakStatus.Drifted));
+    Check("a failed row needs work", NeedsWork(TweakStatus.Failed));
+
+    // ---- consequence: the preset switch still reverts what it drops ----
+    // With ticks now covering applied rows, the transition must not read a tick as "apply me".
+    RowFacts F(string id, TweakCost c, Evidence e, TweakStatus s, bool ticked) => new(id, id, ticked, true, true, c, e, s);
+    var everythingApplied = new[]
+    {
+        F("free",   TweakCost.Free,      Evidence.Measured, TweakStatus.Applied, ticked: true),
+        F("costly", TweakCost.Expensive, Evidence.Measured, TweakStatus.Applied, ticked: true),
+    };
+    var down = PresetTransition.Plan(TweakPreset.Safe, everythingApplied);
+    Check("an applied and ticked costly row is still put back by Safe", down.ToRevert.Contains("costly"), string.Join(",", down.ToRevert));
+    Check("an applied and ticked free row is left alone by Safe", !down.ToRevert.Contains("free"));
+    Check("applied rows are never re-applied by a preset switch", down.ToApply.Count == 0, string.Join(",", down.ToApply));
+
+    // ---- consequence: the summary stays honest when every ticked row is done ----
+    var allDone = SelectionSummary.Compute(TweakPreset.Safe, new[]
+    {
+        F("free", TweakCost.Free, Evidence.Measured, TweakStatus.Applied, ticked: true),
+    });
+    Check("the summary reports no pending work when the ticked rows are applied", allDone.WillApply.Count == 0);
+    Check("the summary counts the applied row as already done", allDone.AlreadyDone == 1);
+    Check("the summary says nothing will be applied", SelectionSummary.Describe(TweakPreset.Safe, allDone).Contains("nothing will be applied"));
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");

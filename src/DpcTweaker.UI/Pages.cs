@@ -617,11 +617,24 @@ public sealed class ModulePageViewModel : PageViewModel
         get => _presetChoice;
         set
         {
-            if (Set(ref _presetChoice, value)) OnPropertyChanged(nameof(PresetDescription));
+            if (!Set(ref _presetChoice, value)) return;
+            OnPropertyChanged(nameof(PresetDescription));
+
+            // Picking a tier reticks the list immediately, so what a preset covers is visible before it
+            // is applied. This is a preview: nothing on the PC changes until "Apply this preset" (which
+            // also puts back what the new tier leaves out) or "Apply selected" is pressed.
+            if (!_loading && value is not null && Rows.Count > 0)
+            {
+                foreach (var r in Rows) r.SetPreset(value.Value);
+                RecomputeSelectionSummary();
+            }
         }
     }
 
     private Choice<TweakPreset>? _presetChoice;
+
+    /// <summary>True while Load is rebuilding the list, so the picker setter does not retick stale rows.</summary>
+    private bool _loading;
 
     public string PresetDescription => _presetChoice?.Description ?? "";
 
@@ -670,8 +683,11 @@ public sealed class ModulePageViewModel : PageViewModel
             r.Info.Id, r.Title, r.IsSelected, r.IsApplicable, r.Info.DefaultSelected,
             r.Info.CostClass, r.Info.Evidence, r.Status));
 
-        var counts = DpcTweaker.Core.Model.SelectionSummary.Compute(_preset, facts);
-        SelectionSummary = DpcTweaker.Core.Model.SelectionSummary.Describe(_preset, counts);
+        // The tier the picker shows, which is what the list is ticked for. The saved option can lag it
+        // until "Apply this preset" commits the choice.
+        var shown = _presetChoice?.Value ?? _preset;
+        var counts = DpcTweaker.Core.Model.SelectionSummary.Compute(shown, facts);
+        SelectionSummary = DpcTweaker.Core.Model.SelectionSummary.Describe(shown, counts);
         SelectionPreview = DpcTweaker.Core.Model.SelectionSummary.Preview(counts);
     }
     public RelayCommand SetPresetCommand { get; }
@@ -787,8 +803,16 @@ public sealed class ModulePageViewModel : PageViewModel
     {
         var incoming = engine.Options.Preset;
         bool presetChanged = incoming != _preset || !carryTicks;
-        PresetChoice = Presets.FirstOrDefault(x => x.Value == incoming);
-        _preset = incoming;
+        _loading = true;
+        try
+        {
+            PresetChoice = Presets.FirstOrDefault(x => x.Value == incoming);
+            _preset = incoming;
+        }
+        finally
+        {
+            _loading = false;
+        }
 
         var previous = Rows.ToDictionary(r => r.Info.Id, r => r.IsSelected);
         Items.Clear();
@@ -839,8 +863,18 @@ public sealed class ModulePageViewModel : PageViewModel
     {
         var engine = _main.Engine;
         if (engine is null) return;
-        var selected = Rows.Where(r => r.IsSelected && r.IsApplicable).ToList();
-        if (selected.Count == 0) { Message = "Nothing selected."; return; }
+        // A tick now means "this preset includes it", so it cannot also mean "apply it again": an
+        // applied value would be rewritten and re-journalled for no change. Apply works from the tick
+        // AND the status, which is the same precedence the summary and the preset switch use.
+        var ticked = Rows.Where(r => r.IsSelected && r.IsApplicable).ToList();
+        if (ticked.Count == 0) { Message = "Nothing selected."; return; }
+
+        var selected = ticked.Where(r => r.NeedsWork).ToList();
+        if (selected.Count == 0)
+        {
+            Message = $"Nothing to apply: all {ticked.Count} ticked tweak(s) are already on this PC.";
+            return;
+        }
         if (!await _main.EnsureRestorePointAsync()) return;
 
         SetBusy(true);

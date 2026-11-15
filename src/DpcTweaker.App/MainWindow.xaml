@@ -554,8 +554,9 @@
                                 ToolTip="Makes this PC match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks before changing anything. Nothing changes until you confirm." />
                     </StackPanel>
                     <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
-                    <!-- What the current ticks would actually do. A tick on an already-applied row
-                         changes nothing, so the counts are the honest answer to "what will be used". -->
+                    <!-- A tick shows what the preset includes. A ticked row that is already applied still
+                         changes nothing when you press Apply selected, so the counts below remain the honest
+                         answer to "what will be used". -->
                     <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
                                Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
                     <TextBlock Text="{Binding SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
@@ -574,7 +575,7 @@
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
                     <Button Content="Apply selected" Command="{Binding ApplySelectedCommand}" Padding="16,6" Margin="0,0,8,0"
                             Style="{DynamicResource AccentButtonStyle}"
-                            ToolTip="Applies the ticked rows above. This is the button that changes your PC." />
+                            ToolTip="Applies the ticked rows that are not already on this PC. A tick shows what the preset includes, so rows already applied are left alone. This is the button that changes your PC." />
                     <Button Content="Revert selected" Command="{Binding RevertSelectedCommand}" Padding="14,6" Margin="0,0,8,0"
                             ToolTip="Puts back the previous value of each ticked row." />
                     <Button Content="Select all" Command="{Binding SelectAllCommand}" Padding="14,6" Margin="0,0,8,0"

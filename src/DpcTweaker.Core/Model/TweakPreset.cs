@@ -51,6 +51,17 @@ public static class TweakPresetSelector
         };
     }
 
+    /// <summary>
+    /// Whether the preset <b>ticks</b> this row. The tick answers "does this preset include it", not
+    /// "does it still need doing": a row that is already applied belongs to the preset just as much as
+    /// one that is not, and showing it unticked made a preset's contents impossible to read once
+    /// applied. Whether pressing Apply changes anything is answered separately, from the row's status.
+    /// </summary>
+    /// <param name="defaultSelected">The tweak's own opt-in choice. A preset never adds a tweak that
+    /// opted out of being on by default, and never drops one that opted in on cost grounds alone.</param>
+    /// <param name="applicable">False for a row this machine cannot use at all.</param>
+    public static bool Ticks(TweakPreset preset, TweakCost cost, Evidence evidence, bool defaultSelected, bool applicable) =>
+        applicable && defaultSelected && Selects(preset, cost, evidence);
     /// <summary>Why this tweak is not ticked by the preset, or null when it is.</summary>
     public static string? ExclusionReason(TweakPreset preset, TweakCost cost, Evidence evidence)
     {
