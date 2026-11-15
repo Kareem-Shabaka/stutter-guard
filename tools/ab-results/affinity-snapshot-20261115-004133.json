@@ -1,0 +1,357 @@
+﻿[
+    {
+        "Name":  "amd3dvcacheUser",
+        "Id":  9304,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "AMDRSSrcExt",
+        "Id":  16408,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "ApplicationFrameHost",
+        "Id":  14484,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "backgroundTaskHost",
+        "Id":  11920,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  4084,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  5108,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  5128,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  5872,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  6132,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Cherry Studio",
+        "Id":  14184,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "cmd",
+        "Id":  3964,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "cmd",
+        "Id":  8972,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "cmd",
+        "Id":  16764,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "cncmd",
+        "Id":  14396,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  3716,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  8336,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  9228,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  9652,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  12108,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  13236,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  13676,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  15384,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  15952,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  16672,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  16784,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "conhost",
+        "Id":  17160,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "CrossDeviceResume",
+        "Id":  9296,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "explorer",
+        "Id":  8924,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "GameInputRedistService",
+        "Id":  7924,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "mcp-youtube-transcript",
+        "Id":  16712,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  8432,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  10160,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  11552,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  11676,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  11724,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "msedgewebview2",
+        "Id":  12500,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  2968,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  3664,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  8360,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  8376,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  9220,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  9640,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  13288,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "node",
+        "Id":  16548,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "Notepad",
+        "Id":  6672,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "powershell",
+        "Id":  3056,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "powershell",
+        "Id":  9112,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "python",
+        "Id":  13060,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "python",
+        "Id":  15692,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "RadeonSoftware",
+        "Id":  16960,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "RtkAudUService64",
+        "Id":  13208,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "rundll32",
+        "Id":  9412,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "RuntimeBroker",
+        "Id":  10808,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "RuntimeBroker",
+        "Id":  13296,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "RuntimeBroker",
+        "Id":  16600,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "SearchHost",
+        "Id":  10844,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "ShellExperienceHost",
+        "Id":  6524,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "ShellHost",
+        "Id":  9564,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "sihost",
+        "Id":  5332,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "StartMenuExperienceHost",
+        "Id":  10852,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  2204,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  4168,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  5380,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  10384,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  11348,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "svchost",
+        "Id":  16716,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "taskhostw",
+        "Id":  8240,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "TextInputHost",
+        "Id":  15000,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "UserOOBEBroker",
+        "Id":  7976,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "windhawk",
+        "Id":  8040,
+        "Affinity":  "0xFFFC0000"
+    },
+    {
+        "Name":  "windhawk",
+        "Id":  8168,
+        "Affinity":  "0xFFFC0000"
+    }
+]
