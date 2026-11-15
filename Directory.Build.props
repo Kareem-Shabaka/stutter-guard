@@ -7,6 +7,18 @@
     <InformationalVersion>1.2.0</InformationalVersion>
     <!-- Never append +<commit>: the version the app shows must be the version you shipped. -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- Reproducible output, measured rather than assumed.
+         What was wrong: the same commit built in two directories gave two binaries. What it was NOT:
+         a source-path leak - both PDBs carried bare file names only, and adding PathMap changed
+         nothing. What it was: the debug block, i.e. the PE TimeDateStamp at offset 0x88 and the
+         CodeView/PDB hashes. Dropping debug info for Release made three builds in two directories
+         byte-identical (65,438,272 bytes, one SHA-256).
+         PathMap and Deterministic are kept as defence in depth for anyone who turns a PDB back on;
+         ContinuousIntegrationBuild is what makes the SDK stop writing machine-specific paths.
+         The claim is testable:  build.cmd's verify-repro switch. -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release'">true</ContinuousIntegrationBuild>
     <Product>Stutter Guard</Product>
     <Company>Kareem Shabaka</Company>
     <Copyright>Copyright (C) 2026 Kareem Shabaka. Licensed under the GNU General Public License v3.0 or later; commercial licensing available on request.</Copyright>
