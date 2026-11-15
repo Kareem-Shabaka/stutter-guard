@@ -451,10 +451,29 @@ Console.WriteLine("Interrupt plan: the desktop (9950X3D, its real devices)");
     Check("empty CPU USB controllers pinned too", plan.Assignments.Count(a => a.Role == DeviceRole.OtherUsb) == 3, Map());
     Check("storage, PSP, bridges, disabled Wi-Fi left alone", plan.Assignments.All(a => a.Device.Kind is not (PciKind.Storage or PciKind.Never) && a.Device.Started), Map());
     Check("8 cores used, none shared", plan.Assignments.Sum(a => a.Cpus.Length) == 8 && plan.Assignments.All(a => !a.Shared), Map());
-    Check("DeviceCpus = the union of the pinned CPUs",
-        string.Join(",", plan.DeviceCpus) == "16,18,20,22,24,26,28,30", string.Join(",", plan.DeviceCpus));
-    Check("DeviceCpus are first threads only, not sibling-expanded",
-        plan.DeviceCpus.All(c => c % 2 == 0) && plan.DeviceCpus.Count == 8, string.Join(",", plan.DeviceCpus));
+    // The NIC has an RSS plan, and NDIS assigns receive queues by logical processor: its two cores mean
+    // four LPs (20-23). They join the set the plan keeps background work off, or a queue lands on a CPU
+    // that never takes that queue's interrupt. Every other device stays on first threads only.
+    Check("DeviceCpus = the union of the pinned CPUs, plus the RSS span's siblings",
+        string.Join(",", plan.DeviceCpus) == "16,18,20,21,22,23,24,26,28,30", string.Join(",", plan.DeviceCpus));
+    Check("no Rss plan means no sibling expansion",
+        plan.Assignments.Where(a => a.Rss is null).SelectMany(a => a.MaskCpus).All(c => c % 2 == 0), string.Join(",", plan.DeviceCpus));
+    Check("the RSS span is exactly this device's interrupt mask",
+        plan.Assignments.Single(a => a.Device.DeviceId == "8126").MaskCpus.SequenceEqual(new[] { 20, 21, 22, 23 }),
+        string.Join(",", plan.Assignments.Single(a => a.Device.DeviceId == "8126").MaskCpus));
+    Check("no receive queue can be assigned a CPU the mask excludes",
+        plan.Assignments.Where(a => a.Rss is not null).All(a => Enumerable.Range(a.Rss!.BaseProcNumber, a.Rss.NumProcessors).All(a.MaskCpus.Contains)),
+        string.Join(",", plan.DeviceCpus));
+
+    // A pin the user already had is never widened just to make the keywords fit.
+    var narrowed = AffinityPlanner.Clamp(new RssPlan(20, 23, 4, 2), new[] { 20, 22 });
+    Check("a kept pin's RSS range is narrowed to what the mask allows",
+        narrowed is not null && narrowed.BaseProcNumber == 20 && narrowed.MaxProcNumber == 20 && narrowed.NumProcessors == 1,
+        narrowed is null ? "null" : $"{narrowed.BaseProcNumber}-{narrowed.MaxProcNumber}/{narrowed.NumProcessors}");
+    Check("a range that already fits is left exactly as it was",
+        AffinityPlanner.Clamp(new RssPlan(20, 23, 4, 2), new[] { 20, 21, 22, 23 }) is { BaseProcNumber: 20, MaxProcNumber: 23, NumProcessors: 4 });
+    Check("a range with no allowed CPU at all yields nothing to write",
+        AffinityPlanner.Clamp(new RssPlan(20, 23, 4, 2), new[] { 16, 18 }) is null);
     Check("DeviceCpus never overlap the cores kept free of devices",
         !plan.DeviceCpus.Intersect(plan.ReservedCpus).Any(), string.Join(",", plan.DeviceCpus));
     Check("disabled Wi-Fi noted", plan.Notes.Any(n => n.Contains("Qualcomm")));
@@ -728,10 +747,10 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
     var split = LassoRules.SplitFor(profile, plan);
     Check("games on the V-Cache CCD 0-15", split is not null && CpuTopology.FormatCpus(split.GameCpus) == "0-15");
-    // The defect: this used to be "18-31", exactly the CPUs the interrupt plan reserved for devices.
-    // The expected value is the mask validated on real hardware (0xAAAAFFFF).
-    Check("catch-all excludes every device CPU (was 18-31, the bug)",
-        split is not null && CpuTopology.FormatCpus(split.OtherCpus, ";") == "0-15;17;19;21;23;25;27;29;31",
+    // 21 and 23 are excluded too: they are the siblings of the NIC's two cores, and its receive queues
+    // are assigned by logical processor, so background work there would sit on a queue's own CPU.
+    Check("catch-all excludes every device CPU, RSS siblings included (was 18-31, the bug)",
+        split is not null && CpuTopology.FormatCpus(split.OtherCpus, ";") == "0-15;17;19;25;27;29;31",
         split is null ? "" : CpuTopology.FormatCpus(split.OtherCpus, ";"));
     Check("catch-all never intersects a device CPU",
         split is not null && !split.OtherCpus.Intersect(plan.DeviceCpus).Any(),

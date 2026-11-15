@@ -54,8 +54,23 @@ public sealed class Assignment
     public RssPlan? Rss { get; init; }
     public required string Reason { get; init; }
 
-    public ulong Mask => Cpus.Aggregate(0UL, (m, c) => m | (1UL << c));
-    public string CpuText => (Cpus.Length == 1 ? "CPU " : "CPUs ") + string.Join(", ", Cpus);
+    /// <summary>
+    /// The logical processors this device's interrupts are allowed on.
+    /// <para>
+    /// Usually the pinned CPUs. For a network adapter with an RSS plan it is the whole
+    /// BaseProcNumber..MaxRssProcNumber span, because that is what the RSS keywords it is about to
+    /// write actually cover: RSS assigns queues by logical processor, so a queue on a sibling the
+    /// mask excluded gets its DPC on a different CPU from its own ISR. Two cores means four LPs,
+    /// and no core is added by saying so - the extra LPs are siblings of cores already chosen,
+    /// which is the case the measurements found non-harmful.
+    /// </para>
+    /// </summary>
+    public int[] MaskCpus => Rss is { } r && !Kept
+        ? Enumerable.Range(r.BaseProcNumber, Math.Max(1, r.MaxProcNumber - r.BaseProcNumber + 1)).ToArray()
+        : Cpus;
+
+    public ulong Mask => MaskCpus.Aggregate(0UL, (m, c) => m | (1UL << c));
+    public string CpuText => (MaskCpus.Length == 1 ? "CPU " : "CPUs ") + string.Join(", ", MaskCpus);
 }
 
 public sealed class AffinityPlan
@@ -65,12 +80,21 @@ public sealed class AffinityPlan
     public List<int> ReservedCpus { get; init; } = new();
     public string ReservedReason { get; init; } = "";
     /// <summary>
-    /// The logical processors devices are pinned to: the union of every assignment's pinned CPUs.
-    /// Deliberately NOT expanded to SMT siblings. The background mask that was validated on the
+    /// The logical processors devices are pinned to: the union of each assignment's
+    /// <see cref="Assignment.MaskCpus"/>.
+    /// <para>
+    /// Not expanded to every SMT sibling of every device. The background mask validated on the
     /// reference 9950X3D keeps each pinned LP's sibling free, and sibling contention measured as
-    /// non-harmful for wake latency there: a pegged sibling lowered p99 from 465 to 19 us because
-    /// it holds the core out of its sleep states. Expanding to whole cores would exclude twice as
-    /// many logical processors for no measured benefit.
+    /// non-harmful for wake latency there: a pegged sibling lowered p99 from 465 to 19 us because it
+    /// holds the core out of its sleep states. Expanding every core would exclude twice as many
+    /// logical processors for no measured benefit.
+    /// </para>
+    /// <para>
+    /// One exception, and it is not a preference: a network adapter with an RSS plan covers a
+    /// contiguous logical-processor range, so its siblings are included. Leaving them out would let
+    /// background work sit on an LP the adapter's receive queues are assigned to while its
+    /// interrupts were confined elsewhere - the disagreement this property exists to avoid.
+    /// </para>
     /// </summary>
     public List<int> DeviceCpus { get; init; } = new();
     public List<RankedCore> Candidates { get; init; } = new();
@@ -252,7 +276,7 @@ public static class AffinityPlanner
         {
             ReservedCpus = cores.Where(c => reserved.Contains(c.Id)).SelectMany(c => c.Threads).OrderBy(x => x).ToList(),
             ReservedReason = reason,
-            DeviceCpus = assignments.SelectMany(a => a.Cpus).Distinct().OrderBy(x => x).ToList(),
+            DeviceCpus = assignments.SelectMany(a => a.MaskCpus).Distinct().OrderBy(x => x).ToList(),
             Candidates = candidates,
             Assignments = assignments,
             Notes = notes,
@@ -471,6 +495,33 @@ public static class AffinityPlanner
                 : c => !c.PerformanceCore,
         _ => null,
     };
+
+    /// <summary>
+    /// Narrows an RSS plan so it never covers a logical processor the interrupt mask excludes.
+    /// <para>
+    /// The keywords describe one contiguous range, and a mask need not be contiguous: a pin kept
+    /// from an earlier run can name the first thread of two cores and leave their siblings free.
+    /// Advertising the sibling anyway would put a receive queue on a CPU that never takes that
+    /// queue's interrupt. Returns null when the range cannot be narrowed to anything, so the caller
+    /// writes nothing rather than something misleading.
+    /// </para>
+    /// </summary>
+    internal static RssPlan? Clamp(RssPlan rss, IEnumerable<int> maskCpus)
+    {
+        var allowed = maskCpus as HashSet<int> ?? maskCpus.ToHashSet();
+        int span = Math.Max(1, rss.MaxProcNumber - rss.BaseProcNumber + 1);
+        bool fits = true;
+        for (int c = rss.BaseProcNumber; c < rss.BaseProcNumber + span; c++)
+            if (!allowed.Contains(c)) { fits = false; break; }
+        if (fits) return rss;
+
+        int last = rss.BaseProcNumber;
+        while (last <= rss.MaxProcNumber && allowed.Contains(last)) last++;
+        last--;
+        if (last < rss.BaseProcNumber) return null;
+
+        return rss with { MaxProcNumber = last, NumProcessors = last - rss.BaseProcNumber + 1 };
+    }
 
     internal static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)
     {

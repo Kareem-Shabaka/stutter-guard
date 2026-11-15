@@ -108,6 +108,8 @@ public sealed class RssTweak : TweakBase
 {
     private readonly Assignment _a;
     private readonly List<(string Name, string Value)> _items;
+    /// <summary>Why nothing will be written, when the kept pin and an RSS range cannot both hold.</summary>
+    public string? SkipReason { get; private set; }
 
     public RssTweak(Assignment a, Journal journal) : base(new TweakInfo
     {
@@ -136,8 +138,21 @@ public sealed class RssTweak : TweakBase
         // logical processors, so on SMT it is cores * threads, and *RssMaxProcNumber is the last LP
         // of the last core. Without that, "base 20, max 22, 2 processors" picks LPs 20 and 21:
         // the two threads of a single core.
-        var rss = a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1);
+        var wanted = a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1);
+
+        // Never advertise a logical processor the interrupt mask excludes. A plan kept from an earlier
+        // run can name one thread of two cores and leave their siblings to background work; writing the
+        // sibling into the RSS range anyway would put a receive queue on a CPU that never takes that
+        // queue's interrupt, which is the disagreement this whole change exists to remove.
+        var rss = AffinityPlanner.Clamp(wanted, a.MaskCpus);
         _items = new List<(string, string)>();
+        if (rss is null)
+        {
+            SkipReason = "The kept interrupt pin and an RSS range cannot both be expressed: the keywords " +
+                         "describe one contiguous block and this pin is not one. Nothing is written rather " +
+                         "than a range that includes a CPU this adapter never interrupts.";
+            return;
+        }
         if (d.RssCapable) _items.Add(("*RSS", "1"));
         string queues = ChooseQueues(d, rss);
         if (d.RssQueueOptions.Contains(queues)) _items.Add(("*NumRssQueues", queues));
@@ -170,6 +185,7 @@ public sealed class RssTweak : TweakBase
 
     protected override Probe Read()
     {
+        if (_items.Count == 0) return new Probe(false, "(nothing written)", "(nothing)", SkipReason);
         string? key = _a.Device.ClassKey;
         if (key is null) return new Probe(false, "?", "?", "The adapter's driver key wasn't found.");
         var parts = new List<string>();
@@ -186,6 +202,7 @@ public sealed class RssTweak : TweakBase
 
     public override void Apply(TweakContext ctx)
     {
+        if (_items.Count == 0) return; // nothing to write; SkipReason says why
         string key = _a.Device.ClassKey ?? throw new InvalidOperationException("The adapter's driver key wasn't found.");
         ctx.Backup.ExportKeyOnce(key);
         foreach (var (name, value) in _items) RegWrite.Set(ctx, Info.Id, key, name, RegistryValueKind.String, value);
