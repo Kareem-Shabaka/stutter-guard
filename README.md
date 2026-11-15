@@ -17,6 +17,10 @@ frame time come from the same machine.
 latency, away from the cores your game uses. Then it records every change it made, so you can put all
 of it back.**
 
+### [Download Stutter Guard 1.3.0](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
+
+One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
+
 ![The Stutter Guard window](docs/images/app-214811.png)
 
 ---
@@ -84,8 +88,8 @@ four hours. That is the shape of a single long call, not a storm, and the app re
 
 ## Install in three steps
 
-**1. Download and verify.** Take `StutterGuard.exe` and `StutterGuard.exe.sha256` from the releases
-page, then check the hash:
+**1. Download and verify.** Get `StutterGuard.exe` and `StutterGuard.exe.sha256` from the
+[releases page](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest), then check the hash:
 
 ```powershell
 Get-FileHash .\StutterGuard.exe -Algorithm SHA256
@@ -98,8 +102,6 @@ scope. Single self-contained file, about 65 MB - there is no .NET runtime to ins
 action states what it is about to change, and states both counts before a tier switch.
 
 Windows 10 or 11, x64.
-
-**[Download the latest release](https://github.com/Kareem-Shabaka/stutter-guard/releases)**
 
 ---
 
