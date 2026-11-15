@@ -1,0 +1,27 @@
+# Normalise text files in the index. The working tree on Windows stays CRLF; the repository stores LF.
+* text=auto
+
+*.cs      text diff=csharp
+*.xaml    text
+*.csproj  text
+*.sln     text
+*.props   text
+*.md      text
+*.yml     text
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+*.json    text
+*.manifest text
+
+# Binary: never diffed, never converted.
+*.exe   binary
+*.dll   binary
+*.ico   binary
+*.png   binary
+*.gif   binary
+*.bmp   binary
+
+# Generated output is not part of the source of truth.
+publish/**  -text
+**/obj/**  -text
+**/bin/**  -text
