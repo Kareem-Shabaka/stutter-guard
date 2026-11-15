@@ -62,6 +62,7 @@ public sealed class DevicePowerTaskTweak : TweakBase
         Cost = "A little idle power.",
         CanBreak = "Nothing known. \"Allow this device to wake the computer\" is left as it is.",
         Evidence = Evidence.Measured,
+        CostClass = TweakCost.Small,
         Risk = Risk.Low,
     }, journal)
     { }
@@ -125,6 +126,7 @@ public sealed class TimerTaskTweak : TweakBase
         Cost = "Doubles timer interrupts on every core. On laptops it also stops the CPU resting on battery.",
         CanBreak = "Nothing known. Needs \"Global timer requests\" on to apply system-wide.",
         Evidence = Evidence.Anecdotal,
+        CostClass = TweakCost.Small,
         Risk = Risk.Low,
         DefaultSelected = defaultOn,
     }, journal)
@@ -231,6 +233,7 @@ public static class BootTasksModule
             Cost = "None by itself.",
             CanBreak = "Nothing known.",
             Evidence = Evidence.Documented,
+            CostClass = TweakCost.Free,
             Risk = Risk.Low,
             NeedsReboot = true,
             DefaultSelected = !profile.IsLaptop,

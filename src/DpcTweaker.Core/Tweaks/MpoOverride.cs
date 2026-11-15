@@ -85,6 +85,7 @@ public static class MpoOverride
             Cost = "None: this removes an override rather than adding one.",
             CanBreak = "Nothing. If the override was genuinely helping, Revert recorded it and puts it back.",
             Evidence = Evidence.Documented,
+            CostClass = TweakCost.Free,
             Risk = Risk.Low,
             NeedsReboot = true,
         }, journal, f.KeyPath, f.Name, RegistryValueKind.DWord, null)).ToList();

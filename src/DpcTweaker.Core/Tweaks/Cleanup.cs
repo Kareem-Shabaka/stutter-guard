@@ -75,6 +75,7 @@ public sealed class ServiceStartTweak : TweakBase
             Cost = string.IsNullOrWhiteSpace(entry.IfOff) ? "Unknown." : entry.IfOff,
             CanBreak = entry.IfOff,
             Evidence = CleanupGroups.ParseEvidence(entry.Evidence),
+            CostClass = entry.Group is "hardware" or "disk" ? TweakCost.Small : TweakCost.Free,
             Risk = group is "hardware" or "disk" or "latency" || target == StartType.Disabled && group == "optional" ? Risk.Medium : Risk.Low,
             NeedsReboot = true,
         }, journal)
@@ -198,6 +199,7 @@ public sealed class TaskDisableTweak : TweakBase
         Cost = entry.IfOff,
         CanBreak = entry.IfOff + (string.IsNullOrEmpty(entry.ComesBack) ? "" : " " + entry.ComesBack),
         Evidence = CleanupGroups.ParseEvidence(entry.Evidence),
+        CostClass = TweakCost.Free,
         Risk = Risk.Low,
     }, journal)
     {
@@ -236,6 +238,7 @@ public sealed class RevertOnlyTweak : TweakBase
         Why = "Kept so every change can be undone one by one.",
         Cost = "None.",
         Evidence = Evidence.Documented,
+        CostClass = TweakCost.Free,
         Risk = Risk.Low,
         DefaultSelected = false,
     }, journal)

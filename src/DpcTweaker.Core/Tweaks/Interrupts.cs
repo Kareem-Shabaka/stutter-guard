@@ -43,6 +43,7 @@ public sealed class AffinityTweak : TweakBase
         Cost = "None while the core is awake. If Windows parks that core, its interrupts wake it up first.",
         CanBreak = "Nothing known. A driver reinstall can wipe the pin (the row then shows Drifted). Some network drivers steer their own interrupts: the check after the restart shows where they really land.",
         Evidence = Evidence.Measured,
+        CostClass = TweakCost.Free,
         Risk = Risk.Low,
         NeedsReboot = true,
     };
@@ -124,6 +125,7 @@ public sealed class RssTweak : TweakBase
         Cost = "None for gaming. Very fast multi-stream downloads use fewer cores.",
         CanBreak = "Nothing known. A driver update can reset these keywords.",
         Evidence = Evidence.Measured,
+        CostClass = TweakCost.Free,
         Risk = Risk.Low,
         NeedsReboot = true,
     }, journal)
@@ -213,6 +215,7 @@ public sealed class MsiTweak : TweakBase
                 ? "Rarely, a driver advertises MSI but misbehaves: the device stops (Device Manager code 10, no sound or no network). Revert this row and restart."
                 : "Some drivers advertise MSI but misbehave with it: the device stops working (code 10). Revert this row and restart; if Windows won't start, use Safe Mode and undo-all.ps1.",
         Evidence = safeClass ? Evidence.Measured : Evidence.Anecdotal,
+        CostClass = safeClass ? TweakCost.Free : TweakCost.Small,
         Risk = storage ? Risk.High : safeClass ? Risk.Low : Risk.Medium,
         NeedsReboot = true,
         DefaultSelected = (safeClass || allMode) && !storage,
@@ -271,6 +274,7 @@ public sealed class LeftoverAffinityTweak : TweakBase
         Why = "Kept so every change the app made can be undone one by one.",
         Cost = "None.",
         Evidence = Evidence.Documented,
+        CostClass = TweakCost.Free,
         Risk = Risk.Low,
         NeedsReboot = true,
         DefaultSelected = false,

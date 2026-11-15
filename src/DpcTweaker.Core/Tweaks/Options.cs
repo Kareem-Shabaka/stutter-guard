@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Interrupts;
+using DpcTweaker.Core.Model;
 using DpcTweaker.Core.Infra;
 
 namespace DpcTweaker.Core.Tweaks;
@@ -39,6 +40,12 @@ public sealed class AppOptions
     public PowerProfileKind PowerProfile { get; set; } = PowerProfileKind.Full;
     public bool ApplyOnBattery { get; set; }
     public CStateMode CState { get; set; } = CStateMode.Light;
+
+    /// <summary>
+    /// Which cost tier of tweaks is pre-selected. Community-only tweaks are never pre-selected below
+    /// TweakPreset.Everything; see TweakPresetSelector.
+    /// </summary>
+    public TweakPreset Preset { get; set; } = TweakPreset.Safe;
 
     /// <summary>Timer resolution in 100-ns units (5000 = 0.5 ms, 5070 = 0.507 ms).</summary>
     public uint TimerResolution { get; set; } = 5000;

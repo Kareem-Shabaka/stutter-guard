@@ -28,6 +28,29 @@ public enum Evidence
 
 public enum Risk { Low, Medium, High }
 
+/// <summary>
+/// What a tweak costs, in user-visible terms, relative to what it buys. This is what the presets
+/// switch on, so "this asks more than it gives" is a mechanical classification rather than a mood.
+/// <para>
+/// Unclassified is the default and is deliberately excluded from every preset: a tweak nobody has
+/// classified must never be ticked for the user. The self-test fails if any built tweak is left here.
+/// </para>
+/// </summary>
+public enum TweakCost
+{
+    /// <summary>Not yet classified. Never auto-selected.</summary>
+    Unclassified,
+    /// <summary>No measurable cost: a registry value with no power, heat, restart or stability exposure.</summary>
+    Free,
+    /// <summary>A real but small cost: a little idle power, one adapter restart, one reboot.</summary>
+    Small,
+    /// <summary>
+    /// Asks a lot for what it offers: meaningful heat or power, a feature the user loses, or a benefit
+    /// the project has not been able to show. These are only selected by the "costly" preset and above.
+    /// </summary>
+    Expensive,
+}
+
 /// <summary>Everything the UI says about a tweak.</summary>
 public sealed record TweakInfo
 {
@@ -44,6 +67,8 @@ public sealed record TweakInfo
     public string CanBreak { get; init; } = "";
     public Evidence Evidence { get; init; } = Evidence.Documented;
     public Risk Risk { get; init; } = Risk.Low;
+    /// <summary>What this costs relative to what it buys. Drives the presets; see TweakPresetSelector.</summary>
+    public TweakCost CostClass { get; init; } = TweakCost.Unclassified;
     public bool NeedsReboot { get; init; }
     public bool DefaultSelected { get; init; } = true;
     /// <summary>Optional group label inside a module (for example a GPU name).</summary>
