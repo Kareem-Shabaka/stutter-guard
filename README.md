@@ -9,7 +9,10 @@
 Stutter Guard places each busy device's interrupts on a core chosen by measured wake latency, and
 records every change it makes so you can put all of it back.**
 
-![Stutter Guard: the Interrupts screen, showing which core each device owns](docs/images/interrupts.png)
+![Processor placement on the reference machine: 32 logical processors, the V-Cache CCD kept free of every device, and one device per core on the second CCD](docs/images/processor-map.svg)
+
+*Drawn from the plan the app recorded on the reference machine. Interrupts were then observed on CPU 18
+and the adapter's DPCs on CPU 20 and 22 - see [docs/MEASUREMENT.md](docs/MEASUREMENT.md).*
 
 A render thread that gets preempted waits for the device routine that preempted it. When a network
 adapter, a USB controller and a graphics card all deliver their interrupts to the same cores the game
