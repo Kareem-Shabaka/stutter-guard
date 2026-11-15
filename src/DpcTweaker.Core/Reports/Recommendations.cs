@@ -73,6 +73,7 @@ public static class Recommendations
                 lassoPath
                     ? "The Tuned Ultimate plan is selected, so Windows no longer decides which cores games run on. Process Lasso does it instead."
                     : "The Balanced path is selected, where Windows parking (and AMD's V-Cache optimizer or Intel Thread Director) picks the cores. Process Lasso is the alternative if pinning games manually; it pairs with the Tuned Ultimate plan.",
+                "Here Process Lasso is the affinity assigner, not the tuner: this app owns the power plan, the interrupt placement and the priority policy. Turn its own optimisers off so two tools are not adjusting the same machine - ProBalance, SmartTrim, IdleSaver, Performance Mode, Gaming Mode and the Bitsum power plan. Leave game priorities at Windows' defaults.",
                 $"Games → {split.GameLabel} (CPUs {games}). dwm.exe → the same CPUs, so the desktop compositor sits next to the game.",
                 $"A separate profile (\"Game Mode\") with a catch-all *.* → CPUs {other} as its last rule. That mask leaves out every CPU a device uses for interrupts, so background work never shares an interrupt core with a device.{split.Note}",
                 "\"Save starter rules\" writes these rules for this CPU as a Process Lasso JSON rules file to the Desktop. Import it into an isolated profile so the default profile stays intact.",
