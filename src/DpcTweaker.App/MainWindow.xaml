@@ -95,7 +95,7 @@
                                Visibility="{Binding ShowParkingQuestion, Converter={StaticResource BoolToVis}}" />
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="170" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
@@ -105,13 +105,13 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Plan" VerticalAlignment="Top" Margin="0,6,12,0" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Core placement" VerticalAlignment="Top" Margin="0,6,12,0" FontWeight="SemiBold" />
                         <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,10">
                             <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding Target}" DisplayMemberPath="Label" MinWidth="320" HorizontalAlignment="Left" />
                             <TextBlock Text="{Binding Target.Description}" Style="{StaticResource Secondary}" Margin="0,4,0,0" />
                         </StackPanel>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Settings" VerticalAlignment="Top" Margin="0,6,12,0" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="How much tuning" VerticalAlignment="Top" Margin="0,6,12,0" FontWeight="SemiBold" />
                         <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,10">
                             <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding Profile}" DisplayMemberPath="Label" MinWidth="320" HorizontalAlignment="Left" />
                             <TextBlock Text="{Binding Profile.Description}" Style="{StaticResource Secondary}" Margin="0,4,0,0" />
@@ -131,8 +131,8 @@
                     </Grid>
                     <TextBlock Text="{Binding PlanDescription}" Margin="0,12,0,0" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button Content="Use these options" Command="{Binding ApplyOptionsCommand}" Padding="14,6" />
-                        <TextBlock Text="Rebuilds the list below. Nothing changes on your PC until you press Apply selected."
+                        <Button Content="Show these settings" Command="{Binding ApplyOptionsCommand}" Padding="14,6" ToolTip="Rebuilds the list of settings below. Nothing on your PC changes until you press Apply selected." />
+                        <TextBlock Text="This only rebuilds the list below. Nothing on your PC changes until you press Apply selected."
                                    Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="12,0,0,0" />
                     </StackPanel>
                 </StackPanel>
@@ -531,34 +531,57 @@
             <Grid Margin="28,20,28,12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
                     <TextBlock Text="{Binding Title}" Style="{StaticResource PageTitle}" />
                     <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" />
+
+                    <!-- Which cost tier ticks the rows below. This is the control that makes the
+                         Essential / Safe / Costly / Everything ladder reachable, and it rebuilds the
+                         list so a change is visible instead of silently ignored. -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Tweaks" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
+                                  DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
+                        <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
+                                Margin="10,0,0,0" Padding="14,4"
+                                ToolTip="Retick the rows below for the chosen tier. Nothing on your PC changes until you press Apply selected." />
+                    </StackPanel>
+                    <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
+                    <!-- What the current ticks would actually do. A tick on an already-applied row
+                         changes nothing, so the counts are the honest answer to "what will be used". -->
+                    <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
+                               Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock Text="{Binding SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Visibility="{Binding HasSelectionPreview, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
 
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
-                    <Button Content="Apply selected" Command="{Binding ApplySelectedCommand}" Padding="16,6" Margin="0,0,8,0"
-                            Style="{DynamicResource AccentButtonStyle}" />
-                    <Button Content="Revert selected" Command="{Binding RevertSelectedCommand}" Padding="14,6" Margin="0,0,8,0" />
-                    <Button Content="Select all" Command="{Binding SelectAllCommand}" Padding="14,6" Margin="0,0,8,0" />
-                    <Button Content="Select none" Command="{Binding SelectNoneCommand}" Padding="14,6" Margin="0,0,8,0" />
-                    <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="14,6" />
-                </StackPanel>
-
-                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                <!-- Options first, then the list they generate. The actions stay pinned at the bottom
+                     so they are never scrolled away from the rows they act on. -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <ContentControl Content="{Binding OptionsPanel}" Visibility="{Binding HasOptions, Converter={StaticResource BoolToVis}}" />
                         <ItemsControl ItemsSource="{Binding Items}" />
                     </StackPanel>
                 </ScrollViewer>
 
-                <TextBlock Grid.Row="4" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button Content="Apply selected" Command="{Binding ApplySelectedCommand}" Padding="16,6" Margin="0,0,8,0"
+                            Style="{DynamicResource AccentButtonStyle}"
+                            ToolTip="Applies the ticked rows above. This is the button that changes your PC." />
+                    <Button Content="Revert selected" Command="{Binding RevertSelectedCommand}" Padding="14,6" Margin="0,0,8,0"
+                            ToolTip="Puts back the previous value of each ticked row." />
+                    <Button Content="Select all" Command="{Binding SelectAllCommand}" Padding="14,6" Margin="0,0,8,0"
+                            ToolTip="Ticks every row, including ones this preset skipped and ones supported only by community reports." />
+                    <Button Content="Select none" Command="{Binding SelectNoneCommand}" Padding="14,6" Margin="0,0,8,0" />
+                    <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="14,6" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,8,0,0" />
             </Grid>
         </DataTemplate>
 

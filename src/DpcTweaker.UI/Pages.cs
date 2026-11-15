@@ -488,15 +488,19 @@ public sealed class HomePageViewModel : PageViewModel
     {
         var engine = _main.Engine;
         if (engine is null) return;
-        if (!_main.Ui.Confirm("Submit Anonymous Hardware Report",
-            "Send an anonymous copy of your hardware scan report (CPU layout, GPU drivers, NIC properties, uncatalogued services) directly to the developer to help optimize Stutter Guard?\n\nNo personal files, usernames, passwords, or IP addresses are collected."))
+        // Build the payload first, then show it in full. Whatever the user approves here is the exact
+        // object that gets posted, so the preview cannot drift from what is actually sent.
+        var payload = TelemetryClient.BuildDataReportPayload(engine);
+        if (!_main.Ui.Review("Review the hardware report before sending",
+            "This is everything that will be sent to the developer, in full. Nothing is sent until you press Send.",
+            TelemetryClient.Preview(payload)))
             return;
 
         Message = "Submitting hardware report...";
         _main.SetGlobalBusy(true);
         try
         {
-            var (ok, msg) = await TelemetryClient.SubmitDataReportAsync(engine);
+            var (ok, msg) = await TelemetryClient.SendDataReportAsync(payload);
             Message = msg;
             if (ok) _main.Ui.Inform("Report Submitted", msg);
             else _main.Ui.Inform("Submission Failed", msg);
@@ -519,11 +523,18 @@ public sealed class HomePageViewModel : PageViewModel
 
         if (string.IsNullOrWhiteSpace(text)) return;
 
-        Message = "Sending feedback to developer...";
+        // Same rule as the hardware report: build once, show it, send exactly what was shown.
+        var payload = TelemetryClient.BuildFeedbackPayload(engine, text);
+        if (!_main.Ui.Review("Review your feedback before sending",
+            "This is everything that will be sent, in full, including your message and any attached files. Nothing is sent until you press Send.",
+            TelemetryClient.Preview(payload)))
+            return;
+
+        Message = "Sending feedback...";
         _main.SetGlobalBusy(true);
         try
         {
-            var (ok, msg) = await TelemetryClient.SubmitFeedbackAsync(engine, text);
+            var (ok, msg) = await TelemetryClient.SendFeedbackAsync(payload);
             Message = msg;
             if (ok) _main.Ui.Inform("Feedback Sent", msg);
             else _main.Ui.Inform("Submission Failed", msg);
@@ -541,11 +552,19 @@ public sealed class ModulePageViewModel : PageViewModel
     private readonly MainViewModel _main;
     private readonly string _module;
 
-    public ModulePageViewModel(MainViewModel main, string module, string title, string icon, string description)
+    /// <summary>
+    /// The cost tier used when a row first decides its tick. Held here, not read from Options on every
+    /// row, so a rebuild can tell whether the preset changed (see Load).
+    /// </summary>
+    private TweakPreset _preset = TweakPreset.Safe;
+
+    public ModulePageViewModel(MainViewModel main, string module, string title, string icon, string description,
+        TweakPreset preset = TweakPreset.Safe)
         : base(title, icon)
     {
         _main = main;
         _module = module;
+        _preset = preset;
         Description = description;
         ApplySelectedCommand = new RelayCommand(() => _ = ApplySelectedAsync(), () => !Busy);
         RevertSelectedCommand = new RelayCommand(() => _ = RevertSelectedAsync(), () => !Busy);
@@ -553,6 +572,10 @@ public sealed class ModulePageViewModel : PageViewModel
         SelectNoneCommand = new RelayCommand(() => { foreach (var r in Rows) r.IsSelected = false; });
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync());
         RevertRowCommand = new RelayCommand(p => { if (p is TweakRowViewModel r) _ = RevertAsync(new[] { r }); });
+        Presets = Enum.GetValues<TweakPreset>()
+            .Select(x => new Choice<TweakPreset>(x, TweakPresetSelector.Label(x), TweakPresetSelector.Description(x)))
+            .ToList();
+        SetPresetCommand = new RelayCommand(() => ApplyPreset());
     }
 
     public string Module => _module;
@@ -575,6 +598,174 @@ public sealed class ModulePageViewModel : PageViewModel
 
     public bool HasOptions => _optionsPanel is not null;
 
+    /// <summary>
+    /// The cost tier this page ticks by. Changed by the preset picker in the page header;
+    /// <see cref="Load"/> re-resolves every tick when it differs from the preset the ticks were made under.
+    /// </summary>
+    public TweakPreset Preset
+    {
+        get => _preset;
+        set => Set(ref _preset, value);
+    }
+
+    /// <summary>The cost tiers this page can tick by.</summary>
+    public List<Choice<TweakPreset>> Presets { get; }
+
+    /// <summary>The tier as the picker shows it; null until the first Load.</summary>
+    public Choice<TweakPreset>? PresetChoice
+    {
+        get => _presetChoice;
+        set
+        {
+            if (Set(ref _presetChoice, value)) OnPropertyChanged(nameof(PresetDescription));
+        }
+    }
+
+    private Choice<TweakPreset>? _presetChoice;
+
+    public string PresetDescription => _presetChoice?.Description ?? "";
+
+    /// <summary>
+    /// What pressing <c>Apply selected</c> would actually do, computed from the rows as they stand.
+    /// A preset changes which rows are ticked, but a tick on a row that is already applied does nothing —
+    /// so the counts, not the ticks, are the honest answer to "what will be used".
+    /// </summary>
+    private string _selectionSummary = "";
+
+    public string SelectionSummary
+    {
+        get => _selectionSummary;
+        private set
+        {
+            if (Set(ref _selectionSummary, value)) OnPropertyChanged(nameof(HasSelectionSummary));
+        }
+    }
+
+    public bool HasSelectionSummary => _selectionSummary.Length > 0;
+
+    /// <summary>The first few titles that will be applied, so the picker has a visible consequence.</summary>
+    private string _selectionPreview = "";
+
+    public string SelectionPreview
+    {
+        get => _selectionPreview;
+        private set
+        {
+            if (Set(ref _selectionPreview, value)) OnPropertyChanged(nameof(HasSelectionPreview));
+        }
+    }
+
+    public bool HasSelectionPreview => _selectionPreview.Length > 0;
+
+    /// <summary>
+    /// Recomputes the preview. Status-first, because a tick alone cannot say whether anything will happen:
+    /// an already-applied row can be ticked and do nothing, and an unticked row can be unticked for four
+    /// different reasons.
+    /// </summary>
+    public void RecomputeSelectionSummary()
+    {
+        if (Rows.Count == 0) { SelectionSummary = ""; SelectionPreview = ""; return; }
+
+        var facts = Rows.Select(r => new RowFacts(
+            r.Info.Id, r.Title, r.IsSelected, r.IsApplicable, r.Info.DefaultSelected,
+            r.Info.CostClass, r.Info.Evidence, r.Status));
+
+        var counts = DpcTweaker.Core.Model.SelectionSummary.Compute(_preset, facts);
+        SelectionSummary = DpcTweaker.Core.Model.SelectionSummary.Describe(_preset, counts);
+        SelectionPreview = DpcTweaker.Core.Model.SelectionSummary.Preview(counts);
+    }
+    public RelayCommand SetPresetCommand { get; }
+
+    /// <summary>
+    /// Makes the machine match the chosen preset: applies what the preset includes and is still needed,
+    /// and puts back what it leaves out. A preset is therefore a declared desired state, which is what lets
+    /// a user go from Everything back to Safe and actually undo the costly tweaks.
+    /// <para>
+    /// Nothing changes on the PC without an explicit confirmation that states both counts, and every
+    /// reverted value comes from the journal, so the whole switch is undoable in the usual way.
+    /// </para>
+    /// </summary>
+    private async void ApplyPreset()
+    {
+        var engine = _main.Engine;
+        if (engine is null || PresetChoice is null) return;
+        var chosen = PresetChoice.Value;
+
+        // Record the choice and retick first: that is free, and it shows the new tier immediately.
+        bool changed = engine.Options.Preset != chosen;
+        if (changed) engine.SetOptions(engine.Options.With(o => o.Preset = chosen));
+        _main.ReloadPages(carryTicks: false);
+
+        // The plan is computed across every module page, because a preset spans all of them.
+        var modules = _main.Pages.OfType<ModulePageViewModel>().ToList();
+        var rows = modules.SelectMany(m => m.Rows).ToList();
+        var facts = rows
+            .Select(r => new RowFacts(r.Info.Id, r.Title, r.IsSelected, r.IsApplicable,
+                r.Info.DefaultSelected, r.Info.CostClass, r.Info.Evidence, r.Status))
+            .ToList();
+        var plan = PresetTransition.Plan(chosen, facts);
+
+        var byId = rows.ToDictionary(r => r.Info.Id);
+
+        bool HasHistory(string id) =>
+            engine.Journal.IsApplied(id) || engine.Journal.OriginalsFor(id).Count > 0;
+
+        // Narrow the plan to what can actually change. A tweak whose value was already like this
+        // before the app touched it has nothing recorded to restore, so counting it as a revert
+        // would overstate the switch and make the app claim work it cannot do.
+        var effective = new TransitionPlan(
+            plan.ToApply.Where(byId.ContainsKey).ToList(),
+            plan.ToRevert.Where(byId.ContainsKey).Where(HasHistory).ToList());
+
+        // Say so when there is nothing to do. Silently returning after a button press reads as a
+        // broken button, and the transition already knows how to explain it.
+        if (effective.IsNoOp)
+        {
+            Message = PresetTransition.Describe(chosen, effective);
+            return;
+        }
+
+        if (!_main.Ui.Confirm("Use this preset", PresetTransition.Describe(chosen, effective))) return;
+
+        var toApply = effective.ToApply.Select(id => byId[id].Tweak).ToList();
+        var toRevert = effective.ToRevert.Select(id => byId[id].Tweak).ToList();
+
+        SetBusy(true);
+        try
+        {
+            // Before ANY change. The reverts below are changes too: asking for a restore point
+            // only when there is something to apply left a switch that could revert first and then
+            // stop, with no restore point and no way back.
+            if (!await _main.EnsureRestorePointAsync()) return;
+
+            // Reverts first, so the applies that follow are not competing with values being undone.
+            int putBack = 0, reverted = 0;
+            if (toRevert.Count > 0)
+            {
+                var rv = await Task.Run(() => engine.Revert(toRevert));
+                reverted = rv.Count;
+                putBack = rv.Count(r => r.Ok);
+            }
+
+            if (toApply.Count > 0)
+            {
+                var ap = await Task.Run(() => engine.Apply(toApply));
+                int ok = ap.Count(r => r.Ok);
+                Message = $"Applied {ok} of {ap.Count}." +
+                          (reverted > 0 ? $" Put back {putBack} of {reverted}." : "");
+                if (ap.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
+            }
+            else if (reverted > 0)
+            {
+                Message = $"Put back {putBack} of {reverted}.";
+            }
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+        await RefreshAsync();
+    }
     public RelayCommand ApplySelectedCommand { get; }
     public RelayCommand RevertSelectedCommand { get; }
     public RelayCommand SelectAllCommand { get; }
@@ -582,20 +773,50 @@ public sealed class ModulePageViewModel : PageViewModel
     public RelayCommand RefreshCommand { get; }
     public RelayCommand RevertRowCommand { get; }
 
-    public void Load(TweakEngine engine)
+    /// <summary>
+    /// Rebuilds the rows. A tick is carried over from the previous list only while the preset has not
+    /// changed: TweakRowViewModel freezes its decision once a tick is carried in, so carrying them
+    /// across a preset change would make the picker look like it did nothing. On a change every row
+    /// re-decides from the new preset, and rows the preset now skips are explicitly unticked.
+    /// </summary>
+    /// <param name="carryTicks">
+    /// False forces every row to re-decide. Used when the preset changed, because a carried tick
+    /// freezes the row's decision and would make the preset picker look inert.
+    /// </param>
+    public void Load(TweakEngine engine, bool carryTicks = true)
     {
+        var incoming = engine.Options.Preset;
+        bool presetChanged = incoming != _preset || !carryTicks;
+        PresetChoice = Presets.FirstOrDefault(x => x.Value == incoming);
+        _preset = incoming;
+
         var previous = Rows.ToDictionary(r => r.Info.Id, r => r.IsSelected);
         Items.Clear();
         Rows.Clear();
+
+        // Safe-recommended first inside every section. Ordering stays within a group so the section
+        // headers keep meaning: a GPU's tweaks stay under the GPU, but the free ones lead.
+        // LINQ OrderBy is stable, so equal ranks keep the catalog's own order.
+        var ordered = engine.InModule(_module)
+            .GroupBy(t => t.Info.Group ?? "")
+            .SelectMany(g => g.OrderBy(t => TweakPresetSelector.RecommendationRank(t.Info.CostClass, t.Info.Evidence)));
+
         string? group = null;
-        foreach (var t in engine.InModule(_module))
+        foreach (var t in ordered)
         {
             if (!string.IsNullOrEmpty(t.Info.Group) && t.Info.Group != group)
             {
                 group = t.Info.Group;
                 Items.Add(new GroupHeaderViewModel(group));
             }
-            var row = new TweakRowViewModel(t, previous.TryGetValue(t.Info.Id, out bool sel) ? sel : null);
+            // On a preset change, carry nothing: a carried tick freezes the row's decision, so the row
+            // would keep its old state in both directions (never unticking an excluded row, and never
+            // ticking a newly-included one). A preset change means "re-apply the preset", so every row
+            // re-decides from scratch on its first status read.
+            bool? carried = presetChanged
+                ? null
+                : (previous.TryGetValue(t.Info.Id, out bool sel) ? sel : null);
+            var row = new TweakRowViewModel(t, incoming, carried);
             Rows.Add(row);
             Items.Add(row);
         }
@@ -713,16 +934,26 @@ public sealed class PowerOptionsViewModel : ObservableObject
     public PowerOptionsViewModel(MainViewModel main, AppOptions o, SystemProfile p)
     {
         _main = main;
+        // Named by what they do to core placement, not by the Windows plan they happen to use: the plan
+        // name is an implementation detail, and "Balanced" alone reads like a power setting rather than a
+        // decision about which cores a game runs on.
         Targets = new()
         {
-            new(PlanTargetKind.TunedUltimate, "Tuned Ultimate Performance", "The app's own copy of Ultimate Performance (or your existing Ultimate plan) with the full low-latency tuning. Pick this if you manage cores yourself with Process Lasso."),
-            new(PlanTargetKind.Balanced, "Balanced, device settings only", "Keeps Windows' parking, which AMD's dual-CCD driver and Intel hybrid scheduling rely on. Only USB, PCIe, disk and Wi-Fi power saving change."),
-            new(PlanTargetKind.CurrentActive, "The plan that's active now", "For laptops: tune the plan your vendor tool switches to in performance mode."),
+            new(PlanTargetKind.TunedUltimate, "I manage core placement myself",
+                "Uses the app's own copy of Ultimate Performance, with Windows core parking off so Windows cannot move a game between CCDs. " +
+                "Games are held on the game cores by your own rules, so pair this with Process Lasso: without it, background work is free to sit on the interrupt CPUs. " +
+                "Costs more idle power and heat than letting Windows decide."),
+            new(PlanTargetKind.Balanced, "Let Windows place games",
+                "Keeps Windows core parking, which AMD's 3D V-Cache driver and Intel Thread Director use to put a game on the right cores. " +
+                "Needs Xbox Game Bar, and Game Bar misses some games. " +
+                "Note this works against the app's interrupt plan, which assumes those cores stay free. The CPU is left stock; only device power settings change."),
+            new(PlanTargetKind.CurrentActive, "Tune whichever plan is active now",
+                "For laptops: tune the plan your vendor tool switches to in performance mode, so you don't end up with two plans fighting each other."),
         };
         Profiles = new()
         {
-            new(PowerProfileKind.Full, "Full low-latency tuning", "CPU idle, EPP, boost, minimum state, plus every device setting."),
-            new(PowerProfileKind.DevicesOnly, "Device settings only", "USB, PCIe, disk and Wi-Fi only; CPU settings stay stock."),
+            new(PowerProfileKind.Full, "Full tuning (CPU + devices)", "CPU idle, EPP, boost and minimum state, plus every device setting."),
+            new(PowerProfileKind.DevicesOnly, "Device power settings only", "USB, PCIe, disk and Wi-Fi only; the CPU is left stock."),
         };
         CStates = new()
         {
@@ -746,7 +977,7 @@ public sealed class PowerOptionsViewModel : ObservableObject
     public bool ParkingCpu { get; }
 
     public string ParkingQuestion => ParkingCpu
-        ? "Your CPU's game placement depends on Windows parking (AMD dual-CCD or Intel hybrid). Do you want Windows and the AMD/Intel drivers to decide which cores games run on (Balanced, device settings only), or manage it yourself with Process Lasso (Tuned Ultimate)?"
+        ? "Two ways to keep a game on the right cores. This choice decides whether Windows core parking stays on."
         : "";
 
     public bool ShowParkingQuestion => ParkingCpu;

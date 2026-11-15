@@ -278,11 +278,18 @@ at startup puts the app into a protection mode that refuses to overwrite either 
 
 Unlike commercial tools or dubious "debloaters", Stutter Guard has **zero background network calls**. It never phones home automatically.
 
-On the **Home** tab, two manual buttons allow submitting diagnostics directly to developer channels on Discord:
-- **Submit hardware report:** Uploads the hardware scan report (CPU topology, GPU drivers, timer resolution) and benchmark logs. Helps expand hardware affinity heuristics for rare or newly released chipsets.
-- **Send feedback:** Prompts for direct user feedback, suggestions, or bug description, and sends it along with the diagnostic log.
+On the **Home** tab, two manual buttons submit diagnostics to developer channels on Discord:
+- **Submit hardware report:** sends the hardware scan report (CPU topology, GPU drivers, NIC properties, timer resolution, uncatalogued services) plus the core benchmark result. Helps expand affinity heuristics for rare or newly released chipsets.
+- **Send feedback:** sends your message plus the same scan report, and today's application log.
 
-Both actions require explicit confirmation and display the exact payload before transmission.
+**Nothing is sent until you have read it.** Each button opens a review window showing, in full:
+- the exact destination the report goes to (the webhook URL is written out in plain text in the source, not obfuscated);
+- every field of the message text;
+- every attached file, with its size;
+- the scan report itself, verbatim;
+- an explicit **NOT SENT** list: your name or Windows user name, passwords, files, IP address, MAC address or Discord tag (unless you type one).
+
+The payload is built once and the object you approve is the object that is posted, so the preview cannot drift from what leaves the machine.
 
 ---
 

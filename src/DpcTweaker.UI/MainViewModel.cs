@@ -25,19 +25,26 @@ public sealed class MainViewModel : ObservableObject
         Ui = ui;
         Home = new HomePageViewModel(this);
         Power = new ModulePageViewModel(this, "Power", "Power plan", "",
-            "The tuned power plan: light C-states, EPP 0, minimum state 100%, and USB / PCIe / disk power saving off. On AMD dual-CCD and Intel hybrid CPUs you choose between Windows parking (Balanced) and managing cores yourself (Ultimate).");
+            "The tuned power plan: light C-states, EPP 0, minimum state 100%, and USB / PCIe / disk power saving off. On AMD dual-CCD and Intel hybrid CPUs you choose between Windows parking (Balanced) and managing cores yourself (Ultimate).",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Gpu = new ModulePageViewModel(this, "GPU", "GPU", "",
-            "Driver registry keys, each with its own checkbox. The app scans your installed driver file and greys out any key it never reads. A driver update removes these keys again.");
+            "Driver registry keys, each with its own checkbox. The app scans your installed driver file and greys out any key it never reads. A driver update removes these keys again.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Interrupts = new ModulePageViewModel(this, "Interrupts", "Interrupts", "\uE950",
-            "Every busy device gets its own core, away from the cores games use: the GPU first, then the USB controller with your mouse, your audio path, the network adapter (its receive queues on the same cores), then the other USB controllers. Plus MSI mode for devices still on a shared IRQ line. Takes effect after a restart; then run the check.");
+            "Every busy device gets its own core, away from the cores games use: the GPU first, then the USB controller with your mouse, your audio path, the network adapter (its receive queues on the same cores), then the other USB controllers. Plus MSI mode for devices still on a shared IRQ line. Takes effect after a restart; then run the check.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Network = new ModulePageViewModel(this, "Network", "Network", "\uE839",
-            "Power saving off on wired adapters: Energy-Efficient Ethernet, Green Ethernet and the vendor's own link power saving, plus Interrupt Moderation on desktops. Each change restarts the adapter once (2-5 seconds offline), no reboot.");
+            "Power saving off on wired adapters: Energy-Efficient Ethernet, Green Ethernet and the vendor's own link power saving, plus Interrupt Moderation on desktops. Each change restarts the adapter once (2-5 seconds offline), no reboot.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         BootTasks = new ModulePageViewModel(this, "Boot tasks", "Boot tasks", "",
-            "Scheduled tasks in the \\Stutter Guard\\ folder of Task Scheduler: device power saving off at every boot, and the system timer held at 0.5 ms from every logon.");
+            "Scheduled tasks in the \\Stutter Guard\\ folder of Task Scheduler: device power saving off at every boot, and the system timer held at 0.5 ms from every logon.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Services = new ModulePageViewModel(this, "Services", "Services", "\uE912",
-            "Every installed service with what it does and what you lose without it. A preset lists only what it would change; nothing changes until you press Apply selected, and each row has its own Revert. Windows, security and game services are locked.");
+            "Every installed service with what it does and what you lose without it. A preset lists only what it would change; nothing changes until you press Apply selected, and each row has its own Revert. Windows, security and game services are locked.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Tasks = new ModulePageViewModel(this, "Tasks", "Scheduled tasks", "\uE823",
-            "Every scheduled task, read as administrator. The preset only disables (never deletes) telemetry, background updaters and optional maintenance. Tasks your apps need are left alone.");
+            "Every scheduled task, read as administrator. The preset only disables (never deletes) telemetry, background updaters and optional maintenance. Tasks your apps need are left alone.",
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Recommendations = new RecommendationsPageViewModel(this);
         Safety = new SafetyPageViewModel(this);
         // Temporarily on this version: Gpu tab is omitted by default and only inserted if an AMD GPU is detected.
@@ -194,7 +201,8 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>Rebuild every module page from the engine's catalog (after options change).</summary>
-    public void ReloadPages()
+    /// <param name="carryTicks">False when the tweak preset changed: rows must re-decide rather than keep old ticks.</param>
+    public void ReloadPages(bool carryTicks = true)
     {
         var e = Engine;
         if (e is null) return;
@@ -203,15 +211,15 @@ public sealed class MainViewModel : ObservableObject
         BootTasks.OptionsPanel = new TimerOptionsViewModel(this, e.Options);
         Interrupts.OptionsPanel = new InterruptOptionsViewModel(this, e);
         Network.OptionsPanel = new NetworkSummaryViewModel(e.Profile);
-        Power.Load(e);
-        Interrupts.Load(e);
-        Network.Load(e);
-        Services.Load(e);
-        Tasks.Load(e);
+        Power.Load(e, carryTicks);
+        Interrupts.Load(e, carryTicks);
+        Network.Load(e, carryTicks);
+        Services.Load(e, carryTicks);
+        Tasks.Load(e, carryTicks);
         Services.OptionsPanel = new CleanupPanelViewModel(this, e, tasks: false);
         Tasks.OptionsPanel = new CleanupPanelViewModel(this, e, tasks: true);
         Recommendations.Load(e);
-        BootTasks.Load(e);
+        BootTasks.Load(e, carryTicks);
 
         // Temporarily on this version: only show the GPU tab if an AMD GPU is detected (until NVIDIA tweaks land)
         bool hasAmdGpu = e.Profile.Gpus.Any(g => g.Vendor == GpuVendor.Amd);
@@ -224,7 +232,7 @@ public sealed class MainViewModel : ObservableObject
                 else Pages.Add(Gpu);
             }
             Gpu.OptionsPanel = new GpuSummaryViewModel(e.Profile);
-            Gpu.Load(e);
+            Gpu.Load(e, carryTicks);
         }
         else
         {
@@ -266,7 +274,10 @@ public sealed class MainViewModel : ObservableObject
 
     public void OnRowsUpdated()
     {
-        var rows = Pages.OfType<ModulePageViewModel>().SelectMany(p => p.Rows).ToList();
+        var modules = Pages.OfType<ModulePageViewModel>().ToList();
+        // The per-page preview is what makes a preset pick visible: it says what Apply selected would do.
+        foreach (var page in modules) page.RecomputeSelectionSummary();
+        var rows = modules.SelectMany(p => p.Rows).ToList();
         Home.UpdateCounts(rows);
         int applied = rows.Count(r => r.Status == TweakStatus.Applied);
         int pending = rows.Count(r => r.Status == TweakStatus.PendingReboot);

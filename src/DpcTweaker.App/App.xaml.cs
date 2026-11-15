@@ -194,6 +194,67 @@ internal sealed class UiHost : IUiHost
         return dialogRes == true ? result : null;
     }
 
+    public bool Review(string title, string message, string payload)
+    {
+        bool send = false;
+        var dlg = new Window
+        {
+            Title = title,
+            Width = 860,
+            Height = 660,
+            WindowStartupLocation = Owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
+            Owner = Owner,
+            WindowStyle = WindowStyle.ToolWindow,
+            Background = Application.Current.TryFindResource("SolidBackgroundFillColorBaseBrush") as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.Black,
+            Foreground = Application.Current.TryFindResource("TextFillColorPrimaryBrush") as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.White,
+        };
+
+        var sp = new System.Windows.Controls.DockPanel { Margin = new Thickness(16) };
+
+        var head = new System.Windows.Controls.TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 10),
+            FontSize = 13,
+            Foreground = dlg.Foreground,
+        };
+        System.Windows.Controls.DockPanel.SetDock(head, System.Windows.Controls.Dock.Top);
+        sp.Children.Add(head);
+
+        var buttons = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 12, 0, 0),
+        };
+        System.Windows.Controls.DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom);
+        var sendBtn = new System.Windows.Controls.Button { Content = "Send", Width = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        sendBtn.Click += (_, _) => { send = true; dlg.DialogResult = true; dlg.Close(); };
+        var cancel = new System.Windows.Controls.Button { Content = "Cancel", Width = 84, Height = 28, IsCancel = true };
+        cancel.Click += (_, _) => { dlg.DialogResult = false; dlg.Close(); };
+        buttons.Children.Add(sendBtn);
+        buttons.Children.Add(cancel);
+        sp.Children.Add(buttons);
+
+        var box = new System.Windows.Controls.TextBox
+        {
+            Text = payload,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas, Courier New, monospace"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.NoWrap,
+            HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
+        sp.Children.Add(box);
+
+        dlg.Content = sp;
+        return dlg.ShowDialog() == true && send;
+    }
     public void Open(string path)
     {
         try

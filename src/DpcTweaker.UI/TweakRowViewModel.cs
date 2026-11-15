@@ -22,8 +22,14 @@ public sealed class TweakRowViewModel : ObservableObject
     private bool _tickDecided;
 
     /// <param name="carriedSelection">The tick from the previous list (after an options change), if this row was there.</param>
-    public TweakRowViewModel(ITweak tweak, bool? carriedSelection = null)
+    private readonly TweakPreset _preset;
+
+    /// <param name="preset">Which cost tier is pre-selected. A preset can only remove from the
+    /// tweaks that opt in by default; it never adds one the tweak itself opted out of.</param>
+    /// <param name="carriedSelection">The tick from the previous list (after an options change), if this row was there.</param>
+    public TweakRowViewModel(ITweak tweak, TweakPreset preset, bool? carriedSelection = null)
     {
+        _preset = preset;
         Tweak = tweak;
         // Until the first status read, nothing is ticked. Then: ticked only if it still needs doing.
         _isSelected = carriedSelection ?? false;
@@ -114,6 +120,20 @@ public sealed class TweakRowViewModel : ObservableObject
 
     public bool HasNote => !string.IsNullOrWhiteSpace(_note);
 
+    /// <summary>Why the current preset leaves this row unticked, or null when it is ticked.</summary>
+    public string PresetExclusion => TweakPresetSelector.ExclusionReason(_preset, Info.CostClass, Info.Evidence) ?? "";
+    public bool HasPresetExclusion => PresetExclusion.Length > 0;
+    public string CostClassText => Info.CostClass switch
+    {
+        TweakCost.Free => "no cost",
+        TweakCost.Small => "small cost",
+        TweakCost.Expensive => "asks a lot",
+        _ => "unclassified",
+    };
+    /// <summary>Which tier this row falls in, so the list reads safe-first with a visible reason.</summary>
+    public string RankText => TweakPresetSelector.RankLabel(
+        TweakPresetSelector.RecommendationRank(Info.CostClass, Info.Evidence));
+
     public TweakStatus Status { get; private set; } = TweakStatus.Unknown;
     public bool SetByApp { get; private set; }
 
@@ -144,6 +164,7 @@ public sealed class TweakRowViewModel : ObservableObject
         {
             _tickDecided = true;
             IsSelected = IsApplicable && Info.DefaultSelected &&
+                         TweakPresetSelector.Selects(_preset, Info.CostClass, Info.Evidence) &&
                          s.Status is TweakStatus.NotApplied or TweakStatus.Drifted or TweakStatus.Failed;
         }
     }

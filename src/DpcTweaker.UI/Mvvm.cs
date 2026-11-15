@@ -54,6 +54,11 @@ public interface IUiHost
 
     void Inform(string title, string message);
 
+    /// <summary>
+    /// Show the exact text that is about to be sent, in a scrollable read-only box, with Send/Cancel.
+    /// Returns true only when the user has actually seen it.
+    /// </summary>
+    bool Review(string title, string message, string payload);
     /// <summary>Prompt the user for multi-line text (e.g. bug report description).</summary>
     string? Prompt(string title, string message, string defaultText = "");
 
