@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -151,7 +152,16 @@ public sealed class Journal
     /// <summary>Keep the broken file for inspection rather than overwriting it.</summary>
     private static void PreserveBroken(string file)
     {
-        try { File.Copy(file, file + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: true); } catch { }
+        try
+        {
+            // Second-resolution stamps collide, and overwrite:true would then destroy the only record
+            // of the earlier failure. Never overwrite: pick the next free name instead.
+            string baseName = file + ".broken-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            string path = baseName;
+            for (int i = 2; File.Exists(path); i++) path = baseName + "-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            File.Copy(file, path, overwrite: false);
+        }
+        catch { }
     }
 
     /// <summary>
@@ -181,7 +191,16 @@ public sealed class Journal
             Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
             string json = JsonSerializer.Serialize(_data, JsonOpts);
             string tmp = _file + ".tmp";
-            File.WriteAllText(tmp, json);
+            // Flush to physical disk before the rename. This file IS the write-ahead record, so the
+            // guarantee "the before-state is durable before the system changes" depends on it reaching
+            // the disk, not just the OS cache: a power loss must not lose the WAL while the registry
+            // change it describes survives.
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(flushToDisk: true);
+            }
             File.Move(tmp, _file, overwrite: true);
         }
     }

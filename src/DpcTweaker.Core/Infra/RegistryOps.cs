@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Win32;
 
 namespace DpcTweaker.Core.Infra;
@@ -55,7 +56,9 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
             : throw new InvalidOperationException(
                 "A REG_NONE value can only be recorded as raw bytes, but this one is " +
                 (Value?.GetType().Name ?? "null") + "."),
-        RegistryValueKind.MultiString => string.Join("\n", (string[])Value!),
+        // REG_MULTI_SZ elements may themselves contain a newline, so a newline-joined form cannot
+        // round-trip (["a\nb","c"] came back as ["a","b","c"]). Record it as a JSON array instead.
+        RegistryValueKind.MultiString => JsonSerializer.Serialize((string[])Value!),
         _ => Value?.ToString() ?? "",
     };
 
@@ -68,12 +71,35 @@ public readonly record struct RegValue(bool Exists, RegistryValueKind Kind, obje
         RegistryValueKind.None => data.Length == 0
             ? Array.Empty<byte>()
             : IsHex(data) ? Convert.FromHexString(data) : data,
-        RegistryValueKind.MultiString => data.Split('\n'),
+        RegistryValueKind.MultiString => DecodeMultiString(data),
         _ => data,
     };
 
     public static string FormatDword(uint v) => v > 9 ? $"{v} (0x{v:X})" : v.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// Reads a recorded REG_MULTI_SZ. New journals store a JSON array, which survives elements that
+    /// contain a newline; journals written before that change joined elements with '\n' and are still
+    /// read the old way, so no existing undo record is lost.
+    /// </summary>
+    private static string[] DecodeMultiString(string data)
+    {
+        int i = 0;
+        while (i < data.Length && char.IsWhiteSpace(data[i])) i++;
+        if (i < data.Length && data[i] == '[')
+        {
+            try
+            {
+                string[]? parsed = JsonSerializer.Deserialize<string[]>(data);
+                if (parsed is not null) return parsed;
+            }
+            catch (JsonException)
+            {
+                // Not actually JSON: fall through to the legacy form rather than throwing away the value.
+            }
+        }
+        return data.Split('\n');
+    }
     private static bool IsHex(string s)
     {
         if (s.Length % 2 != 0) return false;

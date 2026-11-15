@@ -289,7 +289,7 @@ public static class JournalRestorer
         nameof(RegistryValueKind.QWord) => unchecked((long)ulong.Parse(data, CultureInfo.InvariantCulture)).ToString(CultureInfo.InvariantCulture),
         nameof(RegistryValueKind.Binary) => BinaryLiteral(data),
         nameof(RegistryValueKind.None) => BinaryLiteral(data),
-        nameof(RegistryValueKind.MultiString) => "@(" + string.Join(",", data.Split('\n').Select(PowerShellBridge.Quote)) + ")",
+        nameof(RegistryValueKind.MultiString) => "@(" + string.Join(",", ((string[])RegValue.Deserialize(RegistryValueKind.MultiString, data)).Select(PowerShellBridge.Quote)) + ")",
         _ => PowerShellBridge.Quote(data),
     };
 
