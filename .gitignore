@@ -28,3 +28,5 @@ TestResults/
 stutterguard-test-*
 dpctweaker-task-*
 nul
+# Marketing / public-copy drafts live in the Obsidian vault, never in this public repo
+reddit-*.md
