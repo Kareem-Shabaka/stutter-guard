@@ -3399,6 +3399,37 @@ Console.WriteLine("MPO: the tweak is gone, the override is offered for removal")
 }
 // ================================================================ latency triage (costs tweaks cannot fix)
 
+Console.WriteLine("Power: the check interval cannot outrun parking");
+{
+    var ci = DpcTweaker.Core.Tweaks.PowerSettings.All.Single(d => d.Key == "cpu.check-interval");
+    var full = new DpcTweaker.Core.Tweaks.AppOptions();
+    var balanced = new DpcTweaker.Core.Tweaks.AppOptions { PlanTarget = DpcTweaker.Core.Tweaks.PlanTargetKind.Balanced };
+    var devicesOnly = new DpcTweaker.Core.Tweaks.AppOptions { PowerProfile = DpcTweaker.Core.Tweaks.PowerProfileKind.DevicesOnly };
+
+    Check("5000 ms only when this run also holds parking off", ci.Target(full) == 5000, ci.Target(full).ToString());
+    Check("the Balanced path keeps the stock 15 ms interval", ci.Target(balanced) == 15, ci.Target(balanced).ToString());
+    Check("the devices-only profile keeps the stock 15 ms interval", ci.Target(devicesOnly) == 15, ci.Target(devicesOnly).ToString());
+    Check("the rule names the coupling it depends on", ci.Why.Contains("unparked", StringComparison.Ordinal), ci.Why);
+    Check("...and names the Balanced path as the exception", ci.Why.Contains("Balanced", StringComparison.Ordinal), ci.Why);
+
+    var parking = DpcTweaker.Core.Tweaks.PowerSettings.All.Single(d => d.Key == "cpu.core-parking");
+    Check("parking states its measured basis, not a benefit claim", parking.Why.Contains("cold-wake probe", StringComparison.Ordinal), parking.Why);
+    Check("parking says it commits you to manual placement", parking.Why.Contains("manual-affinity", StringComparison.Ordinal), parking.Why);
+    Check("parking names what you lose on a dual-CCD or hybrid CPU", parking.Cost.Contains("Thread Director", StringComparison.Ordinal), parking.Cost);
+
+    // The interval and the parking setting must not be able to disagree on any path.
+    var kinds = new[] { DpcTweaker.Core.Tweaks.PlanTargetKind.TunedUltimate, DpcTweaker.Core.Tweaks.PlanTargetKind.Balanced, DpcTweaker.Core.Tweaks.PlanTargetKind.CurrentActive };
+    var profs = new[] { DpcTweaker.Core.Tweaks.PowerProfileKind.Full, DpcTweaker.Core.Tweaks.PowerProfileKind.DevicesOnly };
+    foreach (var kind in kinds)
+        foreach (var prof in profs)
+        {
+            var o = new DpcTweaker.Core.Tweaks.AppOptions { PlanTarget = kind, PowerProfile = prof };
+            bool longInterval = ci.Target(o) == 5000;
+            Check($"{kind}/{prof}: a long interval is only offered with parking held off",
+                longInterval == DpcTweaker.Core.Tweaks.PowerSettings.ParkingHeldOff(o), $"{longInterval}");
+        }
+}
+
 Console.WriteLine("Network: the weak defaults stay unticked, and the price is stated");
 {
     var nicRules = DpcTweaker.Core.Tweaks.NetworkModule.Rules;

@@ -39,6 +39,14 @@ public static class PowerSettings
     private static string Ms(uint v) => v + " ms";
     private static string Never(uint v) => v == 0 ? "Never" : TimeSpan.FromSeconds(v).ToString() ;
     private static Func<uint, string> Names(params string[] names) => v => v < names.Length ? names[v] : Num(v);
+    /// <summary>
+    /// True only when this run also pins every core unparked, which is what makes a 5-second check
+    /// interval safe. The interval governs the core-parking algorithm as well as the P-state algorithm,
+    /// so on a plan that leaves parking active it would postpone a parking decision by up to 5 seconds.
+    /// Balanced is the path that deliberately leaves parking alone, so there the interval stays stock.
+    /// </summary>
+    public static bool ParkingHeldOff(AppOptions o) =>
+        o.PlanTarget != PlanTargetKind.Balanced && o.PowerProfile == PowerProfileKind.Full;
 
     public static readonly PowerSettingDef[] All =
     {
@@ -90,15 +98,16 @@ public static class PowerSettings
         new("cpu.core-parking", "Core parking: minimum unparked cores", Proc, new("0cc5b647-c1df-4637-891a-dec35c318583"),
             _ => 100, Pct,
             "Keeps every core unparked.",
-            "Already 100% on stock Ultimate; checked. (The Balanced path leaves parking alone on purpose.)", "More idle power.", Evidence.Documented, TweakCost.Small, true, false),
+            "A parked core has to be woken before it can take its first interrupt, and the project's cold-wake probe is what measures that wake; that is the basis for this setting, not a claim that parking costs anything while cores are busy. It also commits you to the manual-affinity architecture: Windows can no longer move a game between cores, so something else has to (Process Lasso, or the Interrupts screen).",
+            "More idle power. On an AMD dual-CCD or Intel hybrid CPU, Windows, the V-Cache driver and Thread Director can no longer move a game onto the right cores; that becomes your job.", Evidence.Documented, TweakCost.Small, true, false),
         new("cpu.boost", "Processor performance boost mode", Proc, new("be337238-0d82-4146-a960-4f3749d470c7"),
             _ => 2, Names("Disabled", "Enabled", "Aggressive", "Efficient enabled", "Efficient aggressive", "Aggressive at guaranteed", "Efficient aggressive at guaranteed"),
             "How eagerly the CPU boosts.",
             "Already Aggressive on stock Ultimate; checked.", "None.", Evidence.Documented, TweakCost.Free, true, false),
         new("cpu.check-interval", "Processor performance time check interval", Proc, new("4d2b0152-7d5c-498b-88e2-34345392a2c5"),
-            _ => 5000, Ms,
+            o => ParkingHeldOff(o) ? 5000u : 15u, Ms,
             "How often Windows' power manager re-evaluates CPU performance (stock 15 ms).",
-            "Fewer power-manager DPCs (PpmCheck, 37-90 µs each in the desktop's traces). With minimum state 100% and EPP 0 the checks do little.",
+            "Fewer power-manager DPCs (PpmCheck ran 37-90 us each in the desktop's traces). The long interval is only safe because this same plan pins every core unparked: the interval governs the parking decision too, so with parking left active it would defer that decision by up to five seconds. On the Balanced path the target stays at the stock 15 ms for exactly that reason.",
             "None measured.", Evidence.Measured, TweakCost.Small, true, false),
         new("pcie.aspm", "PCI Express link state power management", Pcie, new("ee12f906-d277-404b-b6da-e5fa1a576df5"),
             _ => 0, Names("Off", "Moderate power savings", "Maximum power savings"),
@@ -315,8 +324,8 @@ public static class PowerModule
             Group = "Plan",
             Title = "Use the tuned plan",
             What = "Makes the chosen plan the active one. On the Ultimate path the app makes its own copy of Ultimate Performance (or tunes an existing Ultimate plan).",
-            Why = "Every setting below lives in that plan.",
-            Cost = "See the settings.",
+            Why = "Every setting below lives in that plan. Which plan is chosen decides how a game gets onto the right cores.",
+            Cost = "On the Ultimate path it commits you to the manual-affinity architecture: Windows stops parking cores, so it also stops moving a game between CCDs or between P-cores and E-cores, and placement becomes yours (Process Lasso, or the Interrupts screen). The Balanced path is the other trade: parking stays, so Windows and the vendor driver keep placing the game, but none of the CPU settings below can be applied.",
             Evidence = Evidence.Measured,
             CostClass = TweakCost.Small,
             Risk = Risk.Low,
