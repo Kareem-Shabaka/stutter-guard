@@ -610,28 +610,52 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type ui:BackgroundPageViewModel}">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="28,20,28,28">
+            <!-- One scroller for the whole page, holding three lists. It must not be one scroller
+                 per section reached through a ContentControl: the child ModulePageViewModels are
+                 Grids with a Height="*" row wrapping their own ScrollViewer, and a star row inside a
+                 scroller measures against infinite height - so the inner scroller grows to content
+                 height instead of scrolling, and the page stops scrolling entirely. That is exactly
+                 what happened when this page first wrapped the children directly. -->
+            <!-- The lists bind to each section's Items, so no child template is instantiated here. -->
+            <Grid Margin="28,20,28,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
                     <TextBlock Text="Background" Style="{StaticResource PageTitle}" />
-                    <TextBlock Style="{StaticResource Secondary}" Margin="0,0,0,16" TextWrapping="Wrap"
+                    <TextBlock Style="{StaticResource Secondary}" Margin="0,0,0,12" TextWrapping="Wrap"
                                Text="Everything that runs on its own, in three parts: what Stutter Guard installs and keeps running, what is already running as a service, and what Windows fires on a schedule. Each part keeps its own Apply and Revert, so nothing here acts on another part's rows." />
-
-                    <!-- Section 1: what this app installs -->
-                    <TextBlock Text="Startup tasks" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,2" />
-                    <TextBlock Text="{Binding Startup.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
-                    <ContentControl Content="{Binding Startup}" />
-
-                    <!-- Section 2: what is running -->
-                    <TextBlock Text="Services" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,2" />
-                    <TextBlock Text="{Binding Services.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
-                    <ContentControl Content="{Binding Services}" />
-
-                    <!-- Section 3: what else fires on its own -->
-                    <TextBlock Text="Scheduled tasks" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,2" />
-                    <TextBlock Text="{Binding Scheduled.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
-                    <ContentControl Content="{Binding Scheduled}" />
                 </StackPanel>
-            </ScrollViewer>
+
+                <!-- Sections 1-3 share one scrolling region that holds all three, bounded by the
+                     star row below, so the page scrolls as a whole while each section keeps its own
+                     list. The section that is showing uses the space; the others sit above and below
+                     it in the same scroll surface. -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Startup tasks" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,2" />
+                        <TextBlock Text="{Binding Startup.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <ItemsControl ItemsSource="{Binding Startup.Items}" />
+
+                        <TextBlock Text="Services" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,2" />
+                        <TextBlock Text="{Binding Services.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <ItemsControl ItemsSource="{Binding Services.Items}" />
+
+                        <TextBlock Text="Scheduled tasks" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,2" />
+                        <TextBlock Text="{Binding Scheduled.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <ItemsControl ItemsSource="{Binding Scheduled.Items}" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Each section's own last-action message, collected: with one page there is one
+                     place to look, not three boxes to scroll to. -->
+                <TextBlock Grid.Row="3" Text="{Binding PerSectionMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Visibility="{Binding HasSectionMessage, Converter={StaticResource BoolToVis}}" />
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type ui:SafetyPageViewModel}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">

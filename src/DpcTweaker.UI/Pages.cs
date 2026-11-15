@@ -33,6 +33,8 @@ public abstract class PageViewModel : ObservableObject
         set => Set(ref _message, value);
     }
 
+    public bool HasMessage => !string.IsNullOrEmpty(_message);
+
     public bool Busy
     {
         get => _busy;
@@ -1406,9 +1408,22 @@ public sealed class BackgroundPageViewModel : PageViewModel
     /// <summary>Everything else that fires on its own schedule.</summary>
     public ModulePageViewModel Scheduled { get; }
 
-    public DescriptionText StartupDescription => new(Startup.Description);
-    public DescriptionText ServicesDescription => new(Services.Description);
-    public DescriptionText ScheduledDescription => new(Scheduled.Description);
+    /// <summary>
+    /// The three sections report their own results. One page means one place to look, so their
+    /// last action messages are collected here instead of each section keeping a box the user has to
+    /// scroll to and find.
+    /// </summary>
+    public string PerSectionMessage
+    {
+        get
+        {
+            var parts = new[] { Startup.Message, Services.Message, Scheduled.Message }
+                .Where(m => !string.IsNullOrWhiteSpace(m)).ToList();
+            return string.Join(" ", parts);
+        }
+    }
+
+    public bool HasSectionMessage => PerSectionMessage.Length > 0;
 
     /// <summary>Fills all three sections. Each child keeps its own ticks and its own options panel.</summary>
     public void Load(TweakEngine engine, bool carryTicks = true)
