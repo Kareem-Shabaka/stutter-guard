@@ -1095,15 +1095,20 @@ Console.WriteLine("Bad Driver Catalog & DriverAuditor");
     var (nvAction, nvText) = DriverAuditor.DetermineAction("531.18", nvidiaEntry, true);
     Check("NVIDIA 531.18 requires Update", nvAction == DriverActionKind.Update && nvText.Contains("Update"), nvText);
 
-    var amdEntry = badDrivers.FirstOrDefault(b => b.DriverFile.Equals("amdkmdag.sys", StringComparison.OrdinalIgnoreCase) && b.BuggedVersions.Contains("23.11.1"));
+    // The catalogue stores AMD releases as "23.11.1 (31.0.23013.1023)" - release name plus the WDDM
+    // version Windows reports. Match on the release name, and drive the action from the WDDM quad,
+    // because that is the string a machine actually yields. An earlier version of this test searched
+    // for a bare "23.11.1", found nothing, and passed on an else-branch without asserting anything.
+    var amdEntry = badDrivers.FirstOrDefault(b => b.DriverFile.Equals("amdkmdag.sys", StringComparison.OrdinalIgnoreCase) &&
+                                                 b.BuggedVersions.Any(v => v.StartsWith("23.11.1", StringComparison.Ordinal)));
+    Check("the AMD entry the action test needs is present", amdEntry is not null);
     if (amdEntry is not null)
     {
-        var (amdAction, amdText) = DriverAuditor.DetermineAction("23.11.1", amdEntry, true);
-        Check("AMD 23.11.1 requires Rollback", amdAction == DriverActionKind.Rollback && amdText.Contains("Roll back"), amdText);
-    }
-    else
-    {
-        Check("AMD entry exists", true);
+        var (amdAction, amdText) = DriverAuditor.DetermineAction("31.0.23013.1006", amdEntry, true);
+        Check("an older AMD WDDM build is told to Update, not Roll back",
+            amdAction == DriverActionKind.Update && amdText.Contains("Update"), amdText);
+        var (amdNewer, _) = DriverAuditor.DetermineAction("31.0.23013.1030", amdEntry, true);
+        Check("a newer AMD WDDM build is told to Roll back", amdNewer == DriverActionKind.Rollback);
     }
 
     // Synthetic profile audit: Bugged NVIDIA GPU
@@ -2243,72 +2248,163 @@ Console.WriteLine("Wave 8 P1: hostile and malformed input");
         string.Join("; ", pathAdv.Select(a => $"{a.DriverFile}:{a.IsBugged}")));
 }
 
-Console.WriteLine("Wave 8 P1: every one of the 77 catalog rules is reachable and fires");
+Console.WriteLine("Wave 13: the driver catalogue matches what Windows actually reports");
 {
     var all = Catalogs.BadDrivers;
     Check("catalog holds 77 entries", all.Count == 77, all.Count.ToString());
 
-    int reachable = 0, audited = 0, pciRules = 0;
-    var matcherMisses = new List<string>();
-    var auditMisses = new List<string>();
-    var nonPciRules = new List<string>();
-
-    foreach (var entry in all)
+    // Builds the identifier lists a bus enumerator would report for one catalogue pattern, so a rule
+    // is compared with something shaped the way Windows shapes it rather than with its own text.
+    static PnpNode NodeFrom(string form)
     {
-        // Derive a hardware id from the entry's own pattern (strip the trailing wildcard) WITHOUT
-        // re-homing it: 22 rules target USB / HDAUDIO / ACPI / ROOT / SWC nodes, not PCI.
-        string hwid = entry.HardwareIdPattern.TrimEnd('*');
-        if (hwid.Length == 0) hwid = @"PCI\VEN_0000&DEV_0000";
-        string version = entry.BuggedVersions[0];
-        string file = entry.DriverFile;
-        bool isPci = hwid.StartsWith("PCI", StringComparison.OrdinalIgnoreCase);
-        if (isPci) pciRules++; else nonPciRules.Add(entry.HardwareIdPattern);
+        string id = form.TrimEnd('*');
+        var hw = new List<string>();
+        var cid = new List<string>();
 
-        // 1. the rule's hardware matcher accepts its own trigger
-        bool hw = DriverAuditor.IsHardwareMatch(entry, hwid, file, null);
-        // 2. the rule's version matcher accepts its own bugged version
-        bool ver = DriverAuditor.IsVersionBugged(version, entry);
-        if (hw && ver) reachable++; else matcherMisses.Add($"{entry.DriverFile}/{entry.HardwareIdPattern} hw={hw} ver={ver}");
+        if (id.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase))
+        {
+            if (id.Contains("&CC_"))
+            {
+                hw.Add(id);
+                cid.Add(id);
+            }
+            else
+            {
+                // PCI reports the long forms as hardware ids and the bare VEN/DEV and CC forms as
+                // compatible ids, which is why a pattern with no wildcard still has something to match.
+                hw.Add(id + "&SUBSYS_00000000&REV_00");
+                hw.Add(id + "&SUBSYS_00000000");
+                cid.Add(id + "&REV_00");
+                cid.Add(id);
+            }
+        }
+        else
+        {
+            hw.Add(id);
+            cid.Add(id);
+        }
 
-        // 3. the whole audit path, driven through the same entry point the app uses
-        var gpu = new GpuInfo
-        {
-            Name = entry.DeviceName, Vendor = GpuVendor.Amd,
-            ClassKeyPath = @"HKLM\X\0000", ClassSubkey = "0000",
-            DriverVersion = version, DriverFile = file, InstanceId = hwid,
-        };
-        var profile = new SystemProfile
-        {
-            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
-            CpuName = "x", CpuVendor = "AMD",
-            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
-            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
-            Gpus = new[] { gpu }, Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
-            Devices = Array.Empty<PciDevice>(),
-        };
-        var adv = DriverAuditor.Audit(profile);
-        if (adv.Any(a => a.IsBugged)) audited++;
-        else auditMisses.Add($"{entry.DriverFile}/{entry.HardwareIdPattern}");
+        return new PnpNode { InstanceId = @"ROOT\SELFTEST\0000", HardwareIds = hw, CompatibleIds = cid };
     }
 
-    Check("every one of the 77 rules matches its own trigger (hardware + version)", reachable == 77,
-        $"{reachable}/77 :: {string.Join(" | ", matcherMisses.Take(4))}");
+    // ---- 1. every id of every row is reachable, including the ones after the first ----
+    var unreachable = new List<string>();
+    int ids = 0;
+    foreach (var entry in all)
+        foreach (string form in DriverMatcher.Forms(entry.HardwareIdPattern))
+        {
+            ids++;
+            if (!DriverAuditor.IsHardwareMatch(entry, NodeFrom(form)))
+                unreachable.Add($"{entry.DriverFile}/{form}");
+        }
+    Check("every id in every catalogue row matches a Windows-shaped identifier", unreachable.Count == 0,
+        $"{ids} ids :: {string.Join(" | ", unreachable.Take(4))}");
 
-    // The auditor itself is complete: given a device that matches, every rule fires.
-    Check("all 77 rules fire through Audit() when a matching device is present", audited == 77,
-        $"{audited}/77 :: {string.Join(" | ", auditMisses.Take(4))}");
+    // Six rows list two or three ids in one field; before the split, only the first could ever fire.
+    var multi = all.Where(e => e.HardwareIdPattern.Contains(';')).ToList();
+    int notFirst = multi.Sum(e => DriverMatcher.Forms(e.HardwareIdPattern).Count() - 1);
+    Check("six rows list several ids, and 9 of those ids are not the first", multi.Count == 6 && notFirst == 9,
+        $"{multi.Count} rows, {notFirst} secondary ids");
+    Check("a secondary id in a multi-id row matches", DriverAuditor.IsHardwareMatch(
+        all.First(e => e.HardwareIdPattern.Contains("DEV_125C")),
+        NodeFrom(@"PCI\VEN_8086&DEV_125C")));
 
-    // KNOWN PIPELINE GAP, locked in so it cannot regress silently: the audit is driven from
-    // profile.Gpus + profile.Devices, and PciScanner only ever emits PCI\ nodes. So the 22 rules
-    // for USB / HDAUDIO / ACPI / ROOT / SWC devices have nothing to match in a real scan. The
-    // auditor is not at fault; the detection pipeline never supplies those devices.
-    Check("exactly 55 rules target PCI devices", pciRules == 55, pciRules.ToString());
-    Check("exactly 22 rules target non-PCI devices", nonPciRules.Count == 22, nonPciRules.Count.ToString());
-    Check("every scanner-produced device is PCI (so non-PCI rules are unreachable in a real scan)",
-        DesktopDevices().All(d => d.InstanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)),
-        string.Join(",", DesktopDevices().Where(d => !d.InstanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)).Select(d => d.InstanceId)));
+    // ---- 2. every bracketed WDDM version is reachable from the string a machine reports ----
+    var wddmMisses = new List<string>();
+    int wddmForms = 0;
+    foreach (var entry in all)
+        foreach (string listed in entry.BuggedVersions)
+        {
+            if (!listed.Contains('(')) continue;
+            string wddm = DriverAuditor.VersionForms(listed).First(); // the bracketed build
+            wddmForms++;
+            if (!DriverAuditor.IsVersionBugged(wddm, entry))
+                wddmMisses.Add($"{entry.HardwareIdPattern}: listed '{listed}', installed '{wddm}'");
+        }
+    Check("the catalogue carries 33 bracketed WDDM versions", wddmForms == 33, wddmForms.ToString());
+    Check("every bracketed WDDM version is detected when it is the installed version", wddmMisses.Count == 0,
+        $"{wddmMisses.Count} missed :: {string.Join(" | ", wddmMisses.Take(3))}");
 
-    // The most-severe-wins rule: a device matching two entries reports the worse one.
+    // The other direction: an identical string is still exact, and a patched build is still clean.
+    Check("a listed version matches itself", all.All(e => e.BuggedVersions.All(v => DriverAuditor.IsVersionBugged(v, e))));
+    var inboxEntry = new BadDriverEntry
+    {
+        HardwareIdPattern = @"PCI\CC_010802", DriverFile = "stornvme.sys",
+        BuggedVersions = new List<string> { "10.0.19041.1" },
+    };
+    Check("a patched build of a listed version is not flagged", !DriverAuditor.IsVersionBugged("10.0.19041.3636", inboxEntry));
+
+    // ---- 3. a rule must not fire on a device that merely shares a number ----
+    var swcRule = all.First(e => e.HardwareIdPattern.StartsWith(@"SWC\VEN_10EC"));
+    var realtekNic = new PnpNode
+    {
+        InstanceId = @"PCI\VEN_10EC&DEV_8126&SUBSYS_7E611462&REV_01\01000000684CE00000",
+        HardwareIds = new[]
+        {
+            @"PCI\VEN_10EC&DEV_8126&SUBSYS_7E611462&REV_01",
+            @"PCI\VEN_10EC&DEV_8126&SUBSYS_7E611462",
+            @"PCI\VEN_10EC&DEV_8126&CC_020000",
+            @"PCI\VEN_10EC&DEV_8126&CC_0200",
+        },
+        CompatibleIds = new[]
+        {
+            @"PCI\VEN_10EC&DEV_8126&REV_01", @"PCI\VEN_10EC&DEV_8126",
+            @"PCI\VEN_10EC&CC_020000", @"PCI\VEN_10EC", @"PCI\CC_020000",
+        },
+    };
+    Check("a Realtek audio-component rule does not fire on the Realtek Ethernet card",
+        !DriverAuditor.IsHardwareMatch(swcRule, realtekNic));
+
+    var swcNode = new PnpNode
+    {
+        // The enumerator in the instance id is not the prefix of the hardware id: this is how a
+        // Software Component node really appears.
+        InstanceId = @"SWD\DRIVERENUM\{C3A63EDD-2D27-4B66-B155-5E94B43D926A}#REALTEKSRV&A&245D95D3&1",
+        HardwareIds = new[] { @"SWC\VEN_10EC&SID_0001" },
+        CompatibleIds = new[] { @"SWC\Generic", @"SWD\GenericRaw", @"SWD\Generic" },
+    };
+    Check("...and it does fire on the audio component it was written for", DriverAuditor.IsHardwareMatch(swcRule, swcNode));
+
+    var devRule = new BadDriverEntry
+    {
+        HardwareIdPattern = @"PCI\VEN_8086&DEV_A0F0", DriverFile = "x.sys",
+        BuggedVersions = new List<string> { "1.0.0.0" },
+    };
+    var boardIdClash = new PnpNode
+    {
+        InstanceId = @"PCI\VEN_1AF4&DEV_0001&SUBSYS_A0F00001&REV_00\4&1",
+        HardwareIds = new[] { @"PCI\VEN_1AF4&DEV_0001&SUBSYS_A0F00001&REV_00" },
+    };
+    Check("a rule for DEV_A0F0 does not fire on a board id that merely contains A0F0",
+        !DriverAuditor.IsHardwareMatch(devRule, boardIdClash));
+
+    // ---- 4. the scan supplies the whole tree, or the non-PCI rules stay unreachable ----
+    Check("exactly 55 rules target PCI devices",
+        all.Count(e => e.HardwareIdPattern.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)) == 55);
+    Check("exactly 22 rules target non-PCI devices",
+        all.Count(e => !e.HardwareIdPattern.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase)) == 22);
+
+    bool scanned = false;
+    int pciCount = 0, nodeCount = 0, nonPciNodes = 0;
+    var scannedNodes = new List<PnpNode>();
+    try
+    {
+        var devices = PciScanner.Scan(Array.Empty<GpuInfo>(), out _, out scannedNodes);
+        pciCount = devices.Count;
+        nodeCount = scannedNodes.Count;
+        nonPciNodes = scannedNodes.Count(n => !n.InstanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase));
+        scanned = nodeCount > 0;
+    }
+    catch { }
+
+    // Only meaningful when the tree could be read; the suite also runs where it cannot.
+    Check("the scan returns a node for every PCI device it lists", !scanned || nodeCount >= pciCount,
+        $"{nodeCount} nodes, {pciCount} PCI devices");
+    Check("...and it also returns the non-PCI nodes the catalogue needs", !scanned || nonPciNodes > 0,
+        $"non-PCI nodes: {nonPciNodes}");
+    Check("every scanned node carries hardware ids", !scanned || scannedNodes.All(n => n.HardwareIds.Count > 0));
+
+    // ---- 5. the most-severe-wins rule still holds ----
     var overlapping = all.Where(e => e.DriverFile == "nvlddmkm.sys" && e.HardwareIdPattern.Contains("DEV_1B80")).ToList();
     Check("the overlapping Pascal entries share a bugged version", overlapping.Count >= 2 &&
         overlapping.All(e => e.BuggedVersions.Contains("368.39")), overlapping.Count.ToString());

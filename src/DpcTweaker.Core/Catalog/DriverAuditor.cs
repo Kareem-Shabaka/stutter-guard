@@ -39,23 +39,38 @@ public static class DriverAuditor
         // 1. Audit GPUs
         foreach (var gpu in profile.Gpus)
         {
-            string hwid = gpu.InstanceId ?? "";
             string drvVer = gpu.DriverVersion ?? "";
             string drvFile = gpu.DriverFile is not null
                 ? Path.GetFileName(gpu.DriverFile)
                 : (gpu.ServiceName is not null ? gpu.ServiceName + ".sys" : "");
 
-            AuditTarget(catalog, gpu.Name, hwid, drvVer, drvFile, gpu.ServiceName, advisories, seenKeys);
+            AuditTarget(catalog, gpu.Name, new PnpNode { InstanceId = gpu.InstanceId ?? "" },
+                drvVer, drvFile, gpu.ServiceName, advisories, seenKeys);
         }
 
         // 2. Audit PCI Devices
         foreach (var dev in profile.Devices)
         {
-            string hwid = dev.InstanceId;
             string drvVer = dev.DriverVersion ?? "";
             string drvFile = dev.DriverFileName ?? (dev.Service is not null ? dev.Service + ".sys" : "");
 
-            AuditTarget(catalog, dev.Name, hwid, drvVer, drvFile, dev.Service, advisories, seenKeys);
+            AuditTarget(catalog, dev.Name, new PnpNode { InstanceId = dev.InstanceId },
+                drvVer, drvFile, dev.Service, advisories, seenKeys);
+        }
+
+        // 3. Audit every node, whichever bus enumerated it. Until the scan supplied these, a rule for a
+        //    USB audio interface, an audio processing component or a vendor root driver had nothing to
+        //    match: 22 of the 77 rules could not fire on any machine, and one of them targets a node
+        //    that is present on the author's own board.
+        foreach (var node in profile.PnpNodes)
+        {
+            // Reading a driver version costs a registry hit, so ask the cheap question first.
+            if (!catalog.Any(e => IsHardwareMatch(e, node))) continue;
+
+            string drvVer = node.DriverVersion ?? "";
+            string drvFile = node.DriverFileName ?? (node.Service is not null ? node.Service + ".sys" : "");
+
+            AuditTarget(catalog, node.Name, node, drvVer, drvFile, node.Service, advisories, seenKeys);
         }
 
         return advisories;
@@ -64,13 +79,14 @@ public static class DriverAuditor
     private static void AuditTarget(
         IReadOnlyList<BadDriverEntry> catalog,
         string deviceName,
-        string hwid,
+        PnpNode node,
         string drvVer,
         string drvFile,
         string? service,
         List<DriverAdvisory> advisories,
         HashSet<string> seenKeys)
     {
+        string hwid = node.InstanceId;
         // Several catalog entries can describe the same driver (a Pascal entry and a broader Pascal
         // one, say). Taking the first match made the reported advisory depend on file order and let
         // a Critical entry be shadowed by a High one, so the most severe match wins instead.
@@ -80,7 +96,7 @@ public static class DriverAuditor
 
         foreach (var entry in catalog)
         {
-            if (!IsHardwareMatch(entry, hwid, drvFile, service))
+            if (!IsHardwareMatch(entry, node))
                 continue;
 
             if (IsVersionBugged(drvVer, entry))
@@ -137,65 +153,42 @@ public static class DriverAuditor
         }
     }
 
-    public static bool IsHardwareMatch(BadDriverEntry entry, string hwid, string drvFile, string? service)
-    {
-        bool fileMatch = !string.IsNullOrEmpty(entry.DriverFile) &&
-                         (string.Equals(entry.DriverFile, drvFile, StringComparison.OrdinalIgnoreCase) ||
-                          (service is not null && string.Equals(entry.DriverFile, service + ".sys", StringComparison.OrdinalIgnoreCase)));
+    /// <summary>
+    /// Matches a rule against a device node: its hardware ids, its compatible ids and its instance id.
+    /// A node with no usable pattern in the rule falls back to the rule's driver file name.
+    /// </summary>
+    public static bool IsHardwareMatch(BadDriverEntry entry, PnpNode node) =>
+        HasPattern(entry)
+            ? DriverMatcher.MatchesAny(entry.HardwareIdPattern, node.HardwareIds, node.CompatibleIds, node.InstanceId)
+            : FileMatches(entry, node.DriverFileName, node.Service);
 
-        if (!fileMatch)
-        {
-            if (string.IsNullOrEmpty(entry.HardwareIdPattern) || entry.HardwareIdPattern == "*")
-                return false;
-            return MatchesHwidPattern(entry.HardwareIdPattern, hwid);
-        }
+    /// <summary>
+    /// The same test for a caller that holds only an instance id (a GpuInfo or a PciDevice). The
+    /// instance id is the last resort rather than the first: Windows never compares it when it picks
+    /// a driver, so a rule that matches only here is a rule that should be rewritten as an id.
+    /// </summary>
+    public static bool IsHardwareMatch(BadDriverEntry entry, string hwid, string drvFile, string? service) =>
+        HasPattern(entry)
+            ? (DriverMatcher.MatchesAny(entry.HardwareIdPattern, null, null, hwid) ||
+               DriverMatcher.MatchesAny(entry.HardwareIdPattern, new[] { hwid }, null, null))
+            : FileMatches(entry, drvFile, service);
 
-        if (string.IsNullOrEmpty(entry.HardwareIdPattern) || entry.HardwareIdPattern == "*")
-            return true;
+    private static bool HasPattern(BadDriverEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.HardwareIdPattern) && entry.HardwareIdPattern.Trim() != "*";
 
-        return MatchesHwidPattern(entry.HardwareIdPattern, hwid);
-    }
+    private static bool FileMatches(BadDriverEntry entry, string? drvFile, string? service) =>
+        !string.IsNullOrEmpty(entry.DriverFile) &&
+        (string.Equals(entry.DriverFile, drvFile, StringComparison.OrdinalIgnoreCase) ||
+         (service is not null && string.Equals(entry.DriverFile, service + ".sys", StringComparison.OrdinalIgnoreCase)));
 
-    public static bool MatchesHwidPattern(string pattern, string hwid)
-    {
-        if (string.IsNullOrWhiteSpace(hwid)) return false;
-
-        string cleanPattern = pattern.Trim();
-        if (cleanPattern == "*") return true;
-
-        try
-        {
-            if (GlobCatalog<object>.ToRegex(cleanPattern).IsMatch(hwid))
-                return true;
-        }
-        catch { }
-
-        string prefix = cleanPattern.TrimEnd('*');
-        if (hwid.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        var mVenDev = Regex.Match(cleanPattern, @"(VEN_[0-9A-F]{4}&DEV_[0-9A-F]{4})", RegexOptions.IgnoreCase);
-        if (mVenDev.Success)
-        {
-            // If pattern specifies both vendor and device, both must match
-            return hwid.Contains(mVenDev.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
-        }
-
-        var mDev = Regex.Match(cleanPattern, @"DEV_([0-9A-F]{4})", RegexOptions.IgnoreCase);
-        if (mDev.Success)
-        {
-            // If pattern specifies device, it must match
-            return hwid.Contains(mDev.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
-        }
-
-        var mVen = Regex.Match(cleanPattern, @"VEN_([0-9A-F]{4})", RegexOptions.IgnoreCase);
-        if (mVen.Success)
-        {
-            return hwid.Contains(mVen.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
+    /// <summary>
+    /// True when the rule's pattern equals one identifier, as an INF glob. Deliberately a comparison
+    /// and not a search: the start-with and contains fallbacks this replaces matched a Realtek audio
+    /// rule (SWC\VEN_10EC&amp;SID_0001) against a Realtek Ethernet card (PCI\VEN_10EC&amp;DEV_8126),
+    /// because the card's identifier happens to contain "10EC".
+    /// </summary>
+    public static bool MatchesHwidPattern(string pattern, string hwid) =>
+        !string.IsNullOrWhiteSpace(hwid) && DriverMatcher.MatchesAny(pattern, new[] { hwid }, null, null);
 
     internal static int SeverityRank(string? severity) => severity switch
     {
@@ -230,23 +223,63 @@ public static class DriverAuditor
         return true;
     }
 
+    /// <summary>
+    /// The version numbers one string holds, most-specific first.
+    /// <para>
+    /// AMD's catalogue rows store "23.9.1 (31.0.21029.1006)": the Adrenalin release name and, in
+    /// brackets, the WDDM version Windows actually reports. A user's machine only ever yields the
+    /// bracketed quad, so comparing the two strings whole could never match - 33 listed AMD variants
+    /// were unreachable, and an affected user was told their bugged driver was clean.
+    /// </para>
+    /// </summary>
+    public static IEnumerable<string> VersionForms(string? ver)
+    {
+        if (string.IsNullOrWhiteSpace(ver)) yield break;
+        string s = ver.Trim();
+
+        int open = s.IndexOf('(');
+        int close = s.IndexOf(')');
+        if (open > 0 && close > open)
+        {
+            string inner = s[(open + 1)..close].Trim();
+            if (inner.Length > 0) yield return inner;      // the WDDM build Windows reports
+            string head = s[..open].Trim();
+            if (head.Length > 0) yield return head;        // the marketing name
+        }
+
+        yield return s;
+    }
+
+    /// <summary>How many dotted numeric components a version string has.</summary>
+    public static int ComponentCount(string? ver) =>
+        Regex.Split(ver ?? "", @"[^\d]+").Count(x => x.Length > 0);
+
     public static bool IsVersionBugged(string installedVer, BadDriverEntry entry)
     {
         if (string.IsNullOrWhiteSpace(installedVer)) return false;
 
-        string normInstalled = NormalizeVersion(installedVer, entry.DriverFile);
+        var installedForms = VersionForms(installedVer).ToList();
+        if (installedForms.Count == 0) return false;
 
         foreach (var b in entry.BuggedVersions)
         {
-            string normBugged = NormalizeVersion(b, entry.DriverFile);
-            if (string.Equals(normInstalled, normBugged, StringComparison.OrdinalIgnoreCase))
-                return true;
+            foreach (var buggedForm in VersionForms(b))
+            {
+                string normBugged = NormalizeVersion(buggedForm, entry.DriverFile);
 
-            // Compare whole version components, not raw substrings: "31.0.15.3118".EndsWith("1.18")
-            // looked like a match even though 3118 is not 18. A vendor string with a suffix such as
-            // "23.11.1 (WHQL)" still matches, because the components line up.
-            if (MatchesVersionComponents(installedVer, b))
-                return true;
+                foreach (var installedForm in installedForms)
+                {
+                    if (string.Equals(NormalizeVersion(installedForm, entry.DriverFile), normBugged,
+                                      StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    // Compare whole version components, not raw substrings: "31.0.15.3118".EndsWith("1.18")
+                    // looked like a match even though 3118 is not 18. A vendor string with a suffix such as
+                    // "23.11.1 (WHQL)" still matches, because the components line up.
+                    if (MatchesVersionComponents(installedForm, buggedForm))
+                        return true;
+                }
+            }
         }
 
         return false;
@@ -291,8 +324,8 @@ public static class DriverAuditor
             return (DriverActionKind.ReconfigureOrRemove, $"Remove, disable, or replace with generic driver: {entry.RecommendedVersion}");
         }
 
-        var m = Regex.Match(entry.RecommendedVersion, @"\b\d+(?:\.\d+)+\b");
-        if (m.Success && TryCompareVersions(installedVer, m.Value, entry.DriverFile, out int cmp))
+        // Prefer a like-for-like comparison, then fall back to the first number in the text.
+        if (TryCompareLikeForLike(installedVer, entry, out int cmp))
         {
             if (cmp < 0)
             {
@@ -311,6 +344,41 @@ public static class DriverAuditor
         }
 
         return (DriverActionKind.Update, $"Update driver to {entry.RecommendedVersion}");
+    }
+
+    /// <summary>
+    /// Compares the installed version with the entry's recommended one using only forms that carry the
+    /// same number of components.
+    /// <para>
+    /// Without this, "23.12.1 (31.0.23013.1029)" sent the first number in the text (23.12.1) to be
+    /// compared against the WDDM quad the machine reports (31.0.23013.1006). 31 is greater than 23, so
+    /// an out-of-date AMD driver was reported as needing a rollback - the one instruction that would
+    /// make it worse. Counting components separates the two forms without a vendor-specific rule.
+    /// </para>
+    /// </summary>
+    public static bool TryCompareLikeForLike(string installedVer, BadDriverEntry entry, out int result)
+    {
+        result = 0;
+        if (string.IsNullOrWhiteSpace(installedVer) || string.IsNullOrWhiteSpace(entry.RecommendedVersion))
+            return false;
+
+        var targets = VersionForms(entry.RecommendedVersion).ToList();
+        var first = Regex.Match(entry.RecommendedVersion, @"\b\d+(?:\.\d+)+\b");
+        if (first.Success) targets.Add(first.Value);
+
+        foreach (var installed in VersionForms(installedVer))
+        {
+            int components = ComponentCount(installed);
+            if (components == 0) continue;
+
+            foreach (var target in targets)
+            {
+                if (ComponentCount(target) != components) continue;
+                if (TryCompareVersions(installed, target, entry.DriverFile, out result)) return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool TryCompareVersions(string v1, string v2, string? driverFile, out int result)

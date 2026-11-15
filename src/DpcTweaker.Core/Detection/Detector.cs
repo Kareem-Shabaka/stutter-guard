@@ -58,9 +58,10 @@ public static class Detector
         progress?.Invoke("Mapping PCI devices and what's plugged into them...");
         var warningsEarly = new List<string>();
         List<PciDevice> devices;
+    List<PnpNode> pnpNodes = new();
         Dictionary<Guid, int> classCounts = new();
         bool treeOk = true;
-        try { devices = PciScanner.Scan(gpus, out classCounts); }
+        try { devices = PciScanner.Scan(gpus, out classCounts, out pnpNodes); }
         catch (Exception ex) { treeOk = false; devices = new List<PciDevice>(); warningsEarly.Add("The device tree couldn't be read, so the Interrupts screen is empty: " + ex.Message); Log.Warn("PCI scan failed: " + ex); }
 
         progress?.Invoke("Reading network adapters and their driver properties...");
@@ -119,6 +120,7 @@ public static class Detector
             Model = haveWmi ? wmi.Str("model") ?? "" : "",
             Warnings = warnings,
             Devices = devices,
+        PnpNodes = pnpNodes,
             CpuSets = cpuSets,
             NetAdapters = nics,
             Services = services,

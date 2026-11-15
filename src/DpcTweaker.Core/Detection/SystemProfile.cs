@@ -78,6 +78,12 @@ public sealed class SystemProfile
     /// <summary>Every present PCI function, with what hangs off it (USB devices, audio endpoints, monitors).</summary>
     public IReadOnlyList<PciDevice> Devices { get; init; } = Array.Empty<PciDevice>();
 
+    /// <summary>
+    /// Every present device node with hardware ids, whichever bus enumerated it. The bad-driver
+    /// catalogue is graded against these, because 22 of its 77 rules target USB / HDAUDIO / ACPI /
+    /// ROOT / Software Component devices rather than PCI. Empty when the device tree could not be read.
+    /// </summary>
+    public IReadOnlyList<PnpNode> PnpNodes { get; init; } = Array.Empty<PnpNode>();
     /// <summary>CPU sets: Windows' preferred-core ranking (SchedulingClass) per logical CPU.</summary>
     public IReadOnlyList<CpuSetEntry> CpuSets { get; init; } = Array.Empty<CpuSetEntry>();
 

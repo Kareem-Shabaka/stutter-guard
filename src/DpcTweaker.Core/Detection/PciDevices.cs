@@ -155,6 +155,50 @@ public sealed class PciDevice
     public override string ToString() => $"{Name} [{ShortId}] {Kind}";
 }
 
+/// <summary>
+/// One present device node, whichever bus enumerated it, carrying the identifiers Windows itself
+/// compares when it chooses a driver.
+/// <para>
+/// <see cref="PciDevice"/> is the subset the interrupt engine pins; this is the whole tree, because
+/// 22 of the 77 bad-driver rules target USB, HDAUDIO, ACPI, ROOT and Software Component nodes. Note
+/// that the enumerator in the instance id is not the prefix of the hardware id: a Software Component
+/// node is reported as SWD\DRIVERENUM\... and carries the hardware id SWC\VEN_10EC&amp;SID_0001.
+/// </para>
+/// </summary>
+public sealed class PnpNode
+{
+    public required string InstanceId { get; init; }
+    public string Name { get; init; } = "";
+
+    /// <summary>DEVPKEY_Device_HardwareIds, verbatim. Never parsed: Microsoft's guidance is string comparison only.</summary>
+    public IReadOnlyList<string> HardwareIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>DEVPKEY_Device_CompatibleIds, verbatim. Holds the bare "PCI\VEN_x&amp;DEV_y" and "PCI\CC_cs" forms.</summary>
+    public IReadOnlyList<string> CompatibleIds { get; init; } = Array.Empty<string>();
+
+    public string? Service { get; init; }
+    /// <summary>"{class guid}\0001": the driver key under Control\Class.</summary>
+    public string? DriverKey { get; init; }
+    public Guid? ClassGuid { get; init; }
+    public bool Started { get; init; }
+
+    public string? ClassKey => DriverKey is null ? null : @"HKLM\SYSTEM\CurrentControlSet\Control\Class\" + DriverKey;
+    public string? DriverVersion => ClassKey is null ? null : RegistryOps.ReadString(ClassKey, "DriverVersion");
+
+    /// <summary>The .sys file the node's service ImagePath points at, or null.</summary>
+    public string? DriverFileName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Service)) return null;
+            string? img = RegistryOps.ReadString(@"HKLM\SYSTEM\CurrentControlSet\Services\" + Service, "ImagePath");
+            if (string.IsNullOrWhiteSpace(img)) return null;
+            img = img.Trim().Trim('"');
+            try { return System.IO.Path.GetFileName(img); }
+            catch { return null; }
+        }
+    }
+}
 /// <summary>Walks the live device tree once and builds the PCI device list.</summary>
 public static class PciScanner
 {
@@ -181,12 +225,16 @@ public static class PciScanner
         public List<int> Children = new();
     }
 
-    public static List<PciDevice> Scan(IReadOnlyList<GpuInfo> gpus) => Scan(gpus, out _);
+    public static List<PciDevice> Scan(IReadOnlyList<GpuInfo> gpus) => Scan(gpus, out _, out _);
 
     /// <param name="startedPerClass">How many running devices of each setup class the whole tree has (Bluetooth, Sensor, Image...).</param>
-    public static List<PciDevice> Scan(IReadOnlyList<GpuInfo> gpus, out Dictionary<Guid, int> startedPerClass)
+    public static List<PciDevice> Scan(IReadOnlyList<GpuInfo> gpus, out Dictionary<Guid, int> startedPerClass) => Scan(gpus, out startedPerClass, out _);
+
+    /// <param name="pnpNodes">Every node with hardware ids, whichever bus enumerated it.</param>
+    public static List<PciDevice> Scan(IReadOnlyList<GpuInfo> gpus, out Dictionary<Guid, int> startedPerClass, out List<PnpNode> pnpNodes)
     {
         startedPerClass = new Dictionary<Guid, int>();
+        pnpNodes = new List<PnpNode>();
         var nodes = new List<Node>();
         uint? root = CfgMgr.Root();
         if (root is null) return new List<PciDevice>();
@@ -269,6 +317,28 @@ public static class PciScanner
                 d.ExistingMask = m;
             }
         }
+        // Every node, not only PCI. The walk above already visited all of them; only the PCI ones were
+        // kept, which is why a rule for a USB audio interface or an audio processing component had
+        // nothing to match. Reading the ids here costs one property fetch per node and leaves the
+        // PciDevice list - and therefore the whole interrupt engine - untouched.
+        foreach (var n in nodes)
+        {
+            if (n.Id.Length == 0) continue;
+            var hw = CfgMgr.StringList(n.Inst, CfgMgr.HardwareIds);
+            if (hw.Length == 0) continue; // nothing to identify it by
+            pnpNodes.Add(new PnpNode
+            {
+                InstanceId = n.Id,
+                Name = CleanName(CfgMgr.String(n.Inst, CfgMgr.FriendlyName) ?? CfgMgr.String(n.Inst, CfgMgr.DeviceDesc) ?? n.Id),
+                HardwareIds = hw,
+                CompatibleIds = CfgMgr.StringList(n.Inst, CfgMgr.CompatibleIds),
+                Service = CfgMgr.String(n.Inst, CfgMgr.Service),
+                DriverKey = CfgMgr.String(n.Inst, CfgMgr.Driver),
+                ClassGuid = n.Class,
+                Started = (CfgMgr.Status(n.Inst).Status & CfgMgr.DN_STARTED) != 0,
+            });
+        }
+
         return list;
     }
 
