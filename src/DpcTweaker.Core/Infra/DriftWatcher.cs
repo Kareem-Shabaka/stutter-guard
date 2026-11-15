@@ -78,6 +78,15 @@ public static class DriftWatcher
     public const string StateKey = "drift.fingerprint";
 
     /// <summary>
+    /// Prefix on every fingerprint this build writes. A capture from an older build carried Windows'
+    /// inbox drivers - 48 entries on the author's machine where this build writes 4 - so it is not
+    /// comparable: comparing them would report every inbox driver as "changed" and blame a driver
+    /// update for what was a Windows patch. An unmarked fingerprint is therefore treated as no
+    /// baseline at all, which costs one attribution and invents nothing.
+    /// </summary>
+    public const string FingerprintVersion = "v2|";
+
+    /// <summary>
     /// Windows' own inbox drivers. They are the reason this fingerprint needed a filter.
     /// <para>
     /// Measured on the author's machine: 41 of 48 fingerprinted PCI devices carry one of these, all at
@@ -132,8 +141,9 @@ public static class DriftWatcher
             if (sb.Length > 0) sb.Append(';');
             sb.Append(d.InstanceId).Append('=').Append(version).Append('|').Append(date);
         }
-        return sb.ToString();
+        return sb.Length == 0 ? "" : FingerprintVersion + sb;
     }
+
 
     /// <summary>Records the driver set the tweaks were just written against.</summary>
     public static void Remember(TweakEngine engine)
@@ -184,7 +194,10 @@ public static class DriftWatcher
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrEmpty(fingerprint)) return map;
-        foreach (string part in fingerprint.Split(';', StringSplitOptions.RemoveEmptyEntries))
+
+        // An unmarked capture came from a build with a different rule set and is not comparable.
+        if (!fingerprint.StartsWith(FingerprintVersion, StringComparison.Ordinal)) return map;
+        foreach (string part in fingerprint[FingerprintVersion.Length..].Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             int eq = part.LastIndexOf('=');
             if (eq <= 0) continue;

@@ -2740,8 +2740,9 @@ Console.WriteLine("Wave 21: a Windows patch is not a driver update, and unread p
     // ---- the cause decision: inbox-only changes must NOT read as a driver update ----
     // ChangedDevices is driven by the fingerprint, which now cannot contain an inbox device, so the
     // only way to see 41 "changed devices" is a vendor install - which is what the headline claims.
-    string withVendor = "PCI\\VEN_1002&DEV_7550=x|y;PCI\\VEN_10EC&DEV_8126=a|b";
-    var changed = DriftWatcher.ChangedDevices(withVendor, "PCI\\VEN_1002&DEV_7550=x2|y;PCI\\VEN_10EC&DEV_8126=a|b", profile);
+    string withVendor = DriftWatcher.FingerprintVersion + "PCI\\VEN_1002&DEV_7550=x|y;PCI\\VEN_10EC&DEV_8126=a|b";
+    var changed = DriftWatcher.ChangedDevices(withVendor,
+        DriftWatcher.FingerprintVersion + "PCI\\VEN_1002&DEV_7550=x2|y;PCI\\VEN_10EC&DEV_8126=a|b", profile);
     Check("a vendor version bump is detected", changed.Count == 1, string.Join(",", changed));
     Check("an unchanged device is not reported", !changed.Any(c => c.Contains("10EC")));
 
@@ -2779,6 +2780,128 @@ Console.WriteLine("Wave 21: a Windows patch is not a driver update, and unread p
         if (protectedOnes.Count > 0) Console.WriteLine("        protected on this machine: " + string.Join(", ", protectedOnes));
     }
     catch (Exception ex) { Check("live sampler with names runs", false, ex.Message); }
+}
+Console.WriteLine("Wave 22: continuity - an older build's state is migrated or discarded, never misread");
+{
+    // A minimal profile: AppOptions.Load only reads IsLaptop for its defaults.
+    static SystemProfile MigrateProfile() => new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "x", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        Devices = Array.Empty<PciDevice>(),
+    };
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-migrate-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        // ---- 1. journal schema: v1 is brought to CurrentVersion and written back ----
+        string jf = Path.Combine(dir, "journal.json");
+        File.WriteAllText(jf, "{\"Version\":1,\"Originals\":[],\"Applied\":{},\"State\":{}}");
+        var j1 = new Journal(jf);
+        Check("a v1 journal loads without degrading", !j1.IsDegraded);
+        Check("CurrentVersion is 2", Journal.CurrentVersion == 2);
+        j1.Save();
+        string after = File.ReadAllText(jf);
+        Check("the saved journal carries the current version", after.Contains("\"Version\": 2") || after.Contains("\"Version\":2"), after.Substring(0, Math.Min(80, after.Length)));
+
+        // A journal already at the current version is left alone.
+        var data = new JournalData { Version = Journal.CurrentVersion };
+        Check("migrating a current journal is a no-op", !Journal.Migrate(data));
+        var old = new JournalData { Version = 1 };
+        Check("migrating a v1 journal reports a change", Journal.Migrate(old));
+        Check("...and lands on CurrentVersion", old.Version == Journal.CurrentVersion);
+        Check("...and a future version is not touched", !Journal.Migrate(new JournalData { Version = 99 }));
+
+        // ---- 2. options: an old numeric blob is read correctly, then rewritten by name ----
+        // This is the exact shape the shipped 1.2.0 binary wrote.
+        string legacy = "{\"PlanTarget\":1,\"PowerProfile\":1,\"ApplyOnBattery\":false,\"CState\":2," +
+                        "\"Preset\":2,\"TimerResolution\":5000,\"Msi\":1,\"Cleanup\":4," +
+                        "\"KeepValidPins\":true,\"HybridDevices\":1,\"UserChosen\":true}";
+        j1.SetState("options", legacy);
+        j1.Save();
+
+        var opts = AppOptions.Load(j1, MigrateProfile());
+        Check("a numeric-enum options blob is read, not defaulted away", opts.UserChosen);
+        Check("PlanTarget 1 is Balanced", opts.PlanTarget == PlanTargetKind.Balanced, opts.PlanTarget.ToString());
+        Check("CState 2 is Off", opts.CState == CStateMode.Off, opts.CState.ToString());
+        Check("Preset 2 is Costly", opts.Preset == TweakPreset.Costly, opts.Preset.ToString());
+        Check("Cleanup 4 is Workstation", opts.Cleanup == DpcTweaker.Core.Catalog.CleanupPreset.Workstation, opts.Cleanup.ToString());
+        Check("Msi 1 is All", opts.Msi == MsiMode.All, opts.Msi.ToString());
+        Check("HybridDevices 1 is PcoresWhenAvailable", opts.HybridDevices == HybridDevicePolicy.PcoresWhenAvailable, opts.HybridDevices.ToString());
+
+        // and it was rewritten in the new shape, so the old format does not survive
+        string rewritten = j1.GetState("options") ?? "";
+        Check("the options blob was rewritten with enum names", rewritten.Contains("\"Balanced\"") && rewritten.Contains("\"Costly\""), rewritten);
+
+        // round-trip: the new shape reads back identically
+        var again = AppOptions.Load(j1, MigrateProfile());
+        Check("the rewritten blob round-trips", again.PlanTarget == PlanTargetKind.Balanced && again.Preset == TweakPreset.Costly);
+
+        // a genuinely broken blob still falls back to defaults instead of throwing
+        j1.SetState("options", "{ not json at all");
+        j1.Save();
+        var broken = AppOptions.Load(j1, MigrateProfile());
+        Check("an unreadable options blob falls back to defaults", !broken.UserChosen);
+
+        // ---- 3. fingerprint: an unmarked (older-build) capture is not comparable ----
+        var profile = MigrateProfile();
+        string modern = DriftWatcher.Capture(profile);
+        Check("a capture from this build carries the version marker", modern.Length == 0 || modern.StartsWith(DriftWatcher.FingerprintVersion), modern);
+        Check("an empty machine captures nothing at all", modern.Length == 0);
+
+        // An old, unmarked fingerprint must not be read as a baseline.
+        string legacyFp = "PCI\\VEN_1002&DEV_1478=x|y;PCI\\VEN_1002&DEV_7550=a|b";
+        var noBaseline = DriftWatcher.ChangedDevices(legacyFp, modern, profile);
+        Check("an unmarked old fingerprint yields no changed devices", noBaseline.Count == 0, string.Join(",", noBaseline));
+
+        // ---- 4. benchmark: a result from an older schema is discarded ----
+        string oldBench = "{\"When\":\"2026-01-01T00:00:00\",\"SamplesPerCore\":1,\"IdleSeconds\":1," +
+                          "\"HighResolutionTimer\":true,\"Cores\":[{\"Cpu\":0,\"WakeMedianUs\":0,\"WakeP99Us\":0}]}";
+        j1.SetState("irq.bench", oldBench);
+        j1.Save();
+        // A legacy result (no SchemaVersion field) is judged by its contents rather than its age, because
+        // CoreScore has not gained a field since v0.7.0 - discarding a valid 2-minute benchmark would be
+        // a continuity loss for no correctness gain. Zero-filled values are the corruption case.
+        Check("a legacy benchmark with no measurements is discarded", BenchResult.Load(j1) is null);
+
+        string zeroBench = "{\"SchemaVersion\":2,\"When\":\"2026-01-01T00:00:00\",\"Cores\":[{\"Cpu\":0,\"WakeMedianUs\":0,\"WakeP99Us\":0}]}";
+        j1.SetState("irq.bench", zeroBench);
+        j1.Save();
+        Check("a benchmark whose measurements are all zero is discarded", BenchResult.Load(j1) is null);
+
+        // A legacy result with real numbers is accepted: this is the shape the 1.2.0 binary wrote.
+        string legacyGood = "{\"When\":\"2026-01-01T00:00:00\",\"Cores\":[{\"Cpu\":0,\"WakeMedianUs\":10.5,\"WakeP99Us\":510}]}";
+        j1.SetState("irq.bench", legacyGood);
+        j1.Save();
+        var fromLegacy = BenchResult.Load(j1);
+        Check("a legacy benchmark with real measurements is kept", fromLegacy is not null, "expected a result");
+        if (fromLegacy is not null)
+        {
+            fromLegacy.Save(j1);
+            Check("...and is re-stamped with the current schema", "SchemaVersion\":2" .Length > 0 && (j1.GetState("irq.bench") ?? "").Contains("\"SchemaVersion\":2"), j1.GetState("irq.bench") ?? "");
+        }
+
+        // A result from a FUTURE schema is refused rather than mixed with today's meaning.
+        j1.SetState("irq.bench", "{\"SchemaVersion\":99,\"Cores\":[{\"Cpu\":0,\"WakeMedianUs\":9,\"WakeP99Us\":40}]}");
+        j1.Save();
+        Check("a benchmark from an unknown future schema is discarded", BenchResult.Load(j1) is null);
+
+        string goodBench = "{\"SchemaVersion\":2,\"When\":\"2026-01-01T00:00:00\",\"Cores\":[{\"Cpu\":0,\"WakeMedianUs\":9.5,\"WakeP99Us\":40}]}";
+        j1.SetState("irq.bench", goodBench);
+        j1.Save();
+        var good = BenchResult.Load(j1);
+        Check("a current benchmark loads", good is not null && good.Cores.Count == 1);
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
 }
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 

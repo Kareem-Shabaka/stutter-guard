@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Model;
@@ -94,19 +95,56 @@ public sealed class AppOptions
         return o;
     }
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
+    /// <summary>
+    /// Enums go in by <b>name</b>. They used to go in as numbers, so reordering any member silently
+    /// turned an old file into a different setting - and two of these enums (MsiMode, HybridDevices)
+    /// have been edited five and eight times. No stored value has been misread yet, because every
+    /// edit so far appended rather than moved; this removes the chance.
+    /// </summary>
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = false,
+        // allowIntegerValues: false is the whole point. JsonStringEnumConverter accepts numbers by
+        // default, so a numeric blob deserialized "successfully" through the current reader and the
+        // migration below never ran - the old format would have survived forever, silently. Refusing
+        // integers forces a v1 file down the legacy path, where it is read correctly and rewritten.
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) },
+    };
+
+    /// <summary>How files written before names were used are read: by number, as they were written.</summary>
+    private static readonly JsonSerializerOptions JsonLegacy = new() { WriteIndented = false };
 
     public static AppOptions Load(Journal j, SystemProfile p)
     {
         string? s = j.GetState("options");
         if (s is not null)
         {
+            // Current shape first: enums by name.
             try
             {
                 var o = JsonSerializer.Deserialize<AppOptions>(s, Json);
                 if (o is not null && o.UserChosen) return o;
+                if (o is not null) return DefaultsFor(p);
             }
-            catch { /* fall back to defaults */ }
+            catch { /* not the current shape; try the one it was written in */ }
+
+            // A file from a build that wrote enums as numbers. Read it the way it was written, then
+            // save it back in the current shape so the old format does not survive the next write.
+            try
+            {
+                var legacy = JsonSerializer.Deserialize<AppOptions>(s, JsonLegacy);
+                if (legacy is not null)
+                {
+                    Log.Info("Options migrated from numeric enums to names.");
+                    if (legacy.UserChosen)
+                    {
+                        try { legacy.Save(j); } catch (Exception ex) { Log.Warn("Could not rewrite options: " + ex.Message); }
+                        return legacy;
+                    }
+                    return DefaultsFor(p);
+                }
+            }
+            catch { /* genuinely unreadable: defaults, which is what the old code did too */ }
         }
         return DefaultsFor(p);
     }

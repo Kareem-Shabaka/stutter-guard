@@ -33,6 +33,16 @@ public sealed class CoreScore
 
 public sealed class BenchResult
 {
+    /// <summary>
+    /// Schema of a stored result, so a file from another version is judged rather than guessed at.
+    /// 0 means the file predates the field: that is a v1 result, accepted only if it passes the
+    /// structural check below, and re-stamped on the next save. Any other value must match
+    /// <see cref="CurrentSchema"/> exactly.
+    /// </summary>
+    public int SchemaVersion { get; set; }
+
+    private const int CurrentSchema = 2;
+
     public DateTime When { get; set; }
     public int SamplesPerCore { get; set; }
     public int IdleSeconds { get; set; }
@@ -45,12 +55,25 @@ public sealed class BenchResult
     {
         string? s = j.GetState(StateKey);
         if (s is null) return null;
-        try { return JsonSerializer.Deserialize<BenchResult>(s); }
+        try
+        {
+            var b = JsonSerializer.Deserialize<BenchResult>(s);
+            if (b is null) return null;
+
+            // An older schema, or a result whose measurements are missing: either way it cannot rank
+            // cores, and ranking is the only thing it is for.
+            // 0 = written before the field existed: judge it by its contents below.
+            if (b.SchemaVersion != 0 && b.SchemaVersion != CurrentSchema) return null;
+            if (b.Cores.Count == 0) return null;
+            if (b.Cores.Any(c => c.WakeMedianUs <= 0 && c.WakeP99Us <= 0)) return null;
+            return b;
+        }
         catch { return null; }
     }
 
     public void Save(Journal j)
     {
+        SchemaVersion = CurrentSchema;
         j.SetState(StateKey, JsonSerializer.Serialize(this));
         j.Save();
     }

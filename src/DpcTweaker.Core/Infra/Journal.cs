@@ -29,6 +29,10 @@ public sealed class JournalEntry
 
 public sealed class JournalData
 {
+    /// <summary>
+    /// Schema of the file, so a newer build can migrate an older one instead of guessing.
+    /// <see cref="Migrate"/> is the only thing allowed to change it.
+    /// </summary>
     public int Version { get; set; } = 1;
     public List<JournalEntry> Originals { get; set; } = new();
     public Dictionary<string, DateTime> Applied { get; set; } = new();
@@ -105,6 +109,34 @@ public sealed class Journal
     /// </summary>
     public Action<Journal>? SidecarWriter { get; set; }
 
+    /// <summary>The schema this build writes. Bumped only when <see cref="Migrate"/> learns a new step.</summary>
+    public const int CurrentVersion = 2;
+
+    /// <summary>
+    /// Brings an older file up to <see cref="CurrentVersion"/>, in memory, before anything reads it.
+    /// <para>
+    /// Every version change so far has been additive, which is why no stored value had to be rewritten
+    /// - measured against history: the three enums in AppOptions are unchanged since v0.7.0, and
+    /// BenchResult gained no fields. That is luck, not design, so the mechanism exists now: a future
+    /// change that needs to rewrite data adds a case here instead of silently misreading a number.
+    /// </para>
+    /// </summary>
+    /// <returns>True when the data was changed and must be written back.</returns>
+    internal static bool Migrate(JournalData data)
+    {
+        if (data.Version >= CurrentVersion) return false;
+
+        int from = data.Version;
+
+        // v1 -> v2: nothing to rewrite. v1 had no marker on the pieces of State that describe their own
+        // shape, so those carry their own versions now (see DriftWatcher.FingerprintVersion and
+        // BenchResult.SchemaVersion) and an old one is discarded by its owner rather than migrated here.
+        data.Version = CurrentVersion;
+
+        Log.Info($"Journal schema migrated {from} -> {CurrentVersion}.");
+        return true;
+    }
+
     private static JournalData Load(string file, out bool degraded)
     {
         degraded = false;
@@ -138,6 +170,9 @@ public sealed class Journal
             if (data.Applied is null) { data.Applied = new(); repaired = true; }
             if (data.State is null) { data.State = new(); repaired = true; }
             if (repaired) Log.Warn("Journal had null collections; treated them as empty.");
+
+            // Before any reader sees it. An older build's file is upgraded here or not at all.
+            Migrate(data);
             return data;
         }
         catch (Exception ex)
