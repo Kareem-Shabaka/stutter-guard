@@ -7,22 +7,29 @@
 #
 #   certutil -hashfile StutterGuard.exe SHA256
 #
-# A file in this repository cannot describe a future release. The build job runs .NET SDK 10.0.x on a
-# GitHub runner, not in my working copy, so its bytes are not mine to predict - which is the whole reason
-# the checksum moved onto the release. Nothing below claims otherwise.
+# This file deliberately states no current hash. The build job runs .NET SDK 10.0.x on a GitHub runner,
+# not in the maintainer's working copy, so its bytes are not ours to predict; and a hash recorded here
+# goes stale the moment the next release is cut. That is exactly the failure this project has already
+# had once - a published checksum that described a file nobody could download.
 #
-# ---- Hashes of released assets (historical record only) ----
+# ---- Hashes of released assets (historical record, complete as of v1.2.0) ----
 01752CF8BCFAF8346516CFAC14DA0E1D2B468EBAACCC0923F0BAFBF39BC25B89  StutterGuard.exe  (v1.2.0)
-# v1.3.0 and later: see the .sha256 file attached to the release.
 #
-# ---- Reproducibility, measured on a local toolchain ----
+# ---- The reproducible-build claim, stated as measured ----
 #
-# Builds are reproducible in a fixed environment. Measured 2026-11-15 on .NET SDK 10.0.402, win-x64:
-# two clean publishes of one commit, into two different directories, produced the same 65,446,991 bytes
-# with SHA-256 E36FE73D9E6F4DEDC5D41FDD6215DC05776BC3F2D1C0809B7FD6054F6B1D5122. `build.cmd --verify-repro`
-# repeats that on any machine.
+# WHAT IS CLAIMED: two CLEAN publishes of one working tree, into two different directories, produce
+# byte-identical output. Measured on 2026-11-15, .NET SDK 10.0.402, win-x64, by `build.cmd --verify-repro`,
+# which deletes every obj/ and bin/ between the two publishes so they cannot share results.
 #
-# Scoped deliberately: a CLEAN build is reproducible against another CLEAN build. An incremental build of
-# the same source differs (measured: 65,446,984 bytes), a different SDK patch level differs, and a
-# different output path can differ. Reproducibility means one source tree and one toolchain give one
-# artifact - not that a released binary is the same as a build of your own.
+# WHAT IS NOT CLAIMED: that a release's bytes equal a build of your own. They do not have to, and the
+# absolute figure moves between working trees: cleaning and publishing commit c59b29b gave 65,446,991
+# bytes (E36FE73D...), and commit 0b14fea - whose only difference was markdown and an SVG - gave
+# 65,446,993 bytes (46C188BD...). That drift is not explained by anything this repository embeds, and
+# stating no absolute number is the honest response to it rather than publishing a figure that looks
+# authoritative and moves.
+#
+# WHAT IS ALSO MEASURED: an INCREMENTAL publish of the same source differs from a clean one
+# (65,446,984 against 65,446,991 bytes). Reproducibility is a property of a clean build.
+#
+# Run it yourself before publishing anything:
+#   build.cmd --verify-repro
