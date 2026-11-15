@@ -1,6 +1,6 @@
-# Stutter Guard v1.1.0 - SHA-256 checksums
+# Stutter Guard v1.2.0 - SHA-256 checksums
 #
 # Verify on Windows:
 #   certutil -hashfile StutterGuard.exe SHA256
 
-8AB189D0BAC802A27312BE870BF05428BDEA9F12FDC3FB77CB32B87D6C6C69EA  StutterGuard.exe
+836B9C394248A5DF13EB35095981518744D662E4866530982EB91EDFD9EFDAB7  StutterGuard.exe

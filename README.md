@@ -3,7 +3,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.0.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Version](https://img.shields.io/badge/Version-1.2.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%99%A5-ea4aaa.svg)](https://github.com/sponsors/Kareem-Shabaka)
 
 > **"Why does a high-end gaming PC running at 200+ average FPS still hitch, micro-stutter, or drop audio?"**  
@@ -13,6 +13,25 @@ Every optimization originates from verifiable latency profiling, and every claim
 
 ---
 
+## What's New in v1.2.0
+
+v1.2.0 is the release where the app stops being able to tell you something it cannot back up.
+
+| Change | Why it matters |
+| :--- | :--- |
+| **The driver advisory catalogue can match** | 22 of 77 rules targeted USB, HDAUDIO, ACPI, ROOT and Software Component nodes, and the scan only ever produced `PCI\` nodes - so they could not fire on any machine. Rules were also compared against device *instance* ids, a different string shape by definition, with a `Contains` fallback that made a Realtek audio rule fire on a Realtek Ethernet card. Every rule is now matched against the hardware ids and compatible ids Windows actually reports, and every node is scanned. |
+| **AMD rules are reachable** | Rows store `"23.9.1 (31.0.21029.1006)"` - release name plus the WDDM build - while a machine only ever reports `31.0.21029.1006`. Measured: 0 of 33 listed variants were detected, so a bugged AMD driver was reported as *clean*. Both forms are now compared, and an out-of-date AMD driver is no longer told to **roll back**. |
+| **Processes pinned onto interrupt cores are named** | The scheduler has no interrupt-load heuristic, so a process restricted to a core reserved for devices competes with every interrupt there (measured: 782 µs against 8.9 µs for a ready thread). A full mask is never reported, because it restricts nothing. |
+| **Microsoft's own budgets are quoted** | A "large DPC" is now stated against the documented 100 µs per DPC routine and 25 µs per ISR, and SMIs - the cause the OS cannot move - are named as the remaining candidate when DPCs survive a clean install. |
+| **The receive queue count and the interrupt mask agree** | RSS described LPs 20–23 while the mask confined every message to 20 and 22, so half the queues got their DPC on a different CPU from their ISR. |
+| **Defaults that contradicted the evidence** | Interrupt moderation was ticked on desktops and unticked on laptops - backwards, given the measured interrupt rate - and Flow Control off carried a cost of `"None."`. Both are now unticked with an honest price. |
+| **A preset that reverts** | Switching Everything → Safe now actually undoes what it drops, instead of only unticking boxes. |
+
+### Corrected in this release
+
+The previous README led with a **733 µs → 11.6 µs** improvement. That was the author's own post, and a same-box run shows a highest interrupt-to-process figure of about 320 µs - a different metric, measured differently. The measured pair this project stands behind is **782 µs → 8.9 µs**, under held synthetic load, with a control core.
+
+---
 ## What's New in v1.0.0
 
 v1.0.0 is the first release where every change is **provably reversible** and the app **repairs itself**
@@ -93,6 +112,7 @@ Imagine a high-performance turbocharged car running a restrictive factory econom
 ---
 
 ## Table of Contents
+- [What's New in v1.2.0](#whats-new-in-v120)
 - [What's New in v1.0.0](#whats-new-in-v100)
 - [The Driver Latency Advisory Engine](#-the-driver-latency-advisory-engine)
 - [How Stutter Guard Works: The Two-Step Solution](#️-how-stutter-guard-works-the-complete-two-step-solution)
