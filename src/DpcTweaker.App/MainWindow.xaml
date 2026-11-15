@@ -540,16 +540,18 @@
                     <TextBlock Text="{Binding Title}" Style="{StaticResource PageTitle}" />
                     <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" />
 
-                    <!-- Which cost tier ticks the rows below. This is the control that makes the
-                         Essential / Safe / Costly / Everything ladder reachable, and it rebuilds the
-                         list so a change is visible instead of silently ignored. -->
+                    <!-- The preset is a declared desired state, not a filter. The button below applies
+                         what the tier includes and puts back what it leaves out, so going from
+                         Everything down to Safe really undoes the costly tweaks; the confirmation
+                         states both counts first. "Apply selected" at the bottom is the narrower
+                         control: it only ever applies the ticked rows. -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Tweaks" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
                                   DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
                         <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
                                 Margin="10,0,0,0" Padding="14,4"
-                                ToolTip="Retick the rows below for the chosen tier. Nothing on your PC changes until you press Apply selected." />
+                                ToolTip="Makes this PC match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks before changing anything. Nothing changes until you confirm." />
                     </StackPanel>
                     <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
                     <!-- What the current ticks would actually do. A tick on an already-applied row
