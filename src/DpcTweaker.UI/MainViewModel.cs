@@ -43,8 +43,8 @@ public sealed class MainViewModel : ObservableObject
         Background = new BackgroundPageViewModel(this, Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Recommendations = new RecommendationsPageViewModel(this);
         Safety = new SafetyPageViewModel(this);
-        // Temporarily on this version: Gpu tab is omitted by default and only inserted if an AMD GPU is detected.
-        Pages = new ObservableCollection<PageViewModel> { Home, Power, Interrupts, Network, Background, Recommendations, Safety };
+        // Temporarily on this version: Gpu tab is omitted by default and only inserted (after Network) if an AMD GPU is detected.
+        Pages = new ObservableCollection<PageViewModel> { Home, Interrupts, Power, Network, Background, Recommendations, Safety };
         _selected = Home;
         RestartCommand = new RelayCommand(() =>
         {
