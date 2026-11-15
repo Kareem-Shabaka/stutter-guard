@@ -98,6 +98,18 @@ public static class TweakPresetSelector
         2 => "Unproven",
         _ => "Unclassified",
     };
+    /// <summary>
+    /// The tier's name alone, for a place where space is tight - the navigation rail, where every tab
+    /// shows its own tier. <see cref="Label"/> stays the picker's wording, which carries the reason.
+    /// </summary>
+    public static string ShortLabel(TweakPreset p) => p switch
+    {
+        TweakPreset.Essential => "Essential",
+        TweakPreset.Safe => "Safe",
+        TweakPreset.Costly => "Costly",
+        _ => "Everything",
+    };
+
     public static string Label(TweakPreset p) => p switch
     {
         TweakPreset.Essential => "Essential (free only)",

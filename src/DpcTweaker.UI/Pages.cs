@@ -27,6 +27,16 @@ public abstract class PageViewModel : ObservableObject
     /// <summary>A Segoe Fluent Icons / MDL2 glyph for the navigation rail.</summary>
     public string Icon { get; }
 
+    /// <summary>
+    /// Shown beside the page name in the navigation rail when the page owns a setting whose scope
+    /// the user would otherwise have to remember. Empty for pages that own nothing: "the user should
+    /// not have to remember information from one part of the interface to another" (NN/g heuristic 6),
+    /// and a tier that only appears once you are on the tab is exactly that kind of memory.
+    /// </summary>
+    public virtual string ScopeBadge => "";
+
+    public bool HasScopeBadge => ScopeBadge.Length > 0;
+
     public string Message
     {
         get => _message;
@@ -638,6 +648,33 @@ public class ModulePageViewModel : PageViewModel
     }
 
     public string Module => _module;
+
+    /// <summary>
+    /// This tab's tier, in the navigation rail. Each tab now chooses its own, so the rail has to say
+    /// which is which: otherwise the only way to know what Power is set to is to go and look at Power,
+    /// and a user comparing two tabs has to hold one of them in their head.
+    /// </summary>
+    public override string ScopeBadge => TweakPresetSelector.ShortLabel(_preset);
+
+    /// <summary>
+    /// One sentence stating what the tier control above it affects. Named explicitly because the same
+    /// control appears on every tab and used to mean "all of them".
+    /// </summary>
+    public string ScopeSentence =>
+        _main.Engine is null
+            ? $"Applies to **{_module}** only."
+            : OtherTabsAgree()
+                ? $"Applies to {_module} only. Every other tab is on the same tier, so this is effectively the whole app."
+                : $"Applies to {_module} only. Other tabs keep their own tier - the rail shows each one.";
+
+    private bool OtherTabsAgree()
+    {
+        var options = _main.Engine?.Options;
+        if (options is null) return true;
+        return _main.Pages.OfType<ModulePageViewModel>()
+            .Select(p => options.PresetFor(p.Module))
+            .Distinct().Count() == 1;
+    }
     public string Description { get; }
 
     /// <summary>Group headers and rows, in order.</summary>
@@ -769,6 +806,9 @@ public class ModulePageViewModel : PageViewModel
         // Record the choice and retick first: that is free, and it shows the new tier immediately.
         bool changed = engine.Options.PresetFor(_module) != chosen;
         if (changed) engine.SetOptions(engine.Options.With(o => o.SetPresetFor(_module, chosen)));
+        // The rail badge is the only place the change is visible without leaving this tab.
+        OnPropertyChanged(nameof(ScopeBadge));
+        OnPropertyChanged(nameof(ScopeSentence));
         _main.ReloadPages(carryTicks: false);
 
         // The plan is computed across every module page, because a preset spans all of them.
@@ -796,11 +836,11 @@ public class ModulePageViewModel : PageViewModel
         // broken button, and the transition already knows how to explain it.
         if (effective.IsNoOp)
         {
-            Message = PresetTransition.Describe(chosen, effective);
+            Message = PresetTransition.Describe(chosen, effective, _module);
             return;
         }
 
-        if (!_main.Ui.Confirm("Use this preset", PresetTransition.Describe(chosen, effective))) return;
+        if (!_main.Ui.Confirm("Use this preset", PresetTransition.Describe(chosen, effective, _module))) return;
 
         var toApply = effective.ToApply.Select(id => byId[id].Tweak).ToList();
         var toRevert = effective.ToRevert.Select(id => byId[id].Tweak).ToList();
@@ -863,6 +903,8 @@ public class ModulePageViewModel : PageViewModel
         // This tab's own tier: a choice made on Power must not rewrite Interrupts.
         var incoming = engine.Options.PresetFor(_module);
         bool presetChanged = incoming != _preset || !carryTicks;
+        OnPropertyChanged(nameof(ScopeBadge));
+        OnPropertyChanged(nameof(ScopeSentence));
         _loading = true;
         try
         {

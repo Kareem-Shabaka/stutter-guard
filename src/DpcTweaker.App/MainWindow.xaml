@@ -567,13 +567,14 @@
                          states both counts first. "Apply selected" at the bottom is the narrower
                          control: it only ever applies the ticked rows. -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBlock Text="Tweaks" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="Tweaks for this tab" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
                                   DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
                         <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
                                 Margin="10,0,0,0" Padding="14,4"
                                 ToolTip="Makes this PC match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks before changing anything. Nothing changes until you confirm." />
                     </StackPanel>
+                    <TextBlock Text="{Binding ScopeSentence}" Style="{StaticResource Secondary}" Margin="0,4,0,6" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
                     <!-- A tick shows what the preset includes. A ticked row that is already applied still
                          changes nothing when you press Apply selected, so the counts below remain the honest
@@ -629,13 +630,14 @@
 
                 <StackPanel Grid.Row="1">
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBlock Text="Tweaks" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="Tweaks for this tab" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
                                   DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
                         <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
                                 Margin="10,0,0,0" Padding="14,4"
                                 ToolTip="Makes this tab match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks first. Other tabs keep their own tier." />
                     </StackPanel>
+                    <TextBlock Text="{Binding ScopeSentence}" Style="{StaticResource Secondary}" Margin="0,4,0,6" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
                                Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
@@ -809,10 +811,25 @@
             <ListBox ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" BorderThickness="0" Background="Transparent">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Orientation="Horizontal" Margin="4,6">
-                            <TextBlock Text="{Binding Icon}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center" Margin="0,0,12,0" />
-                            <TextBlock Text="{Binding Title}" FontSize="14" VerticalAlignment="Center" />
-                        </StackPanel>
+                        <!-- A grid, not a StackPanel: the tier chip is right-aligned so every tab's
+                             tier lines up in one column. Reading down that column answers "what is
+                             each tab set to" without opening any of them - NN/g heuristic 6, which
+                             asks that a user not have to remember one part of the interface while
+                             looking at another. -->
+                        <Grid Margin="4,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{Binding Icon}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="16" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{Binding ScopeBadge}" FontSize="11"
+                                       VerticalAlignment="Center" Margin="8,0,2,0" Opacity="0.7"
+                                       ToolTip="This tab's tier. Each tab chooses its own."
+                                       Visibility="{Binding HasScopeBadge, Converter={StaticResource BoolToVis}}" />
+                        </Grid>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>

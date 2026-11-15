@@ -48,10 +48,16 @@ public static class PresetTransition
     }
 
     /// <summary>The confirmation text. Never apply or revert without showing this first.</summary>
-    public static string Describe(TweakPreset preset, TransitionPlan p)
+    /// <param name="scope">
+    /// The tab this applies to, so the confirmation names it. The same wording used to describe a
+    /// change to everything; with a tier per tab, "Switch to Safe" alone does not say of what.
+    /// Null means the whole app, which keeps the old wording.
+    /// </param>
+    public static string Describe(TweakPreset preset, TransitionPlan p, string? scope = null)
     {
         string name = TweakPresetSelector.Label(preset);
-        if (p.IsNoOp) return $"Nothing to change: the machine already matches \"{name}\".";
+        string of = string.IsNullOrWhiteSpace(scope) ? "the machine" : scope;
+        if (p.IsNoOp) return $"Nothing to change: {of} already matches \"{name}\".";
 
         var parts = new List<string>();
         if (p.ToApply.Count > 0) parts.Add($"apply {p.ToApply.Count}");
@@ -59,7 +65,7 @@ public static class PresetTransition
         string what = string.Join(" and ", parts);
 
         return p.ToRevert.Count > 0
-            ? $"Switch to \"{name}\": {what}.\n\nEverything put back is restored to the value it had before the app changed it, and the journal keeps that record either way."
-            : $"Switch to \"{name}\": {what}.";
+            ? $"Switch {of} to \"{name}\": {what}.\n\nEverything put back is restored to the value it had before the app changed it, and the journal keeps that record either way."
+            : $"Switch {of} to \"{name}\": {what}.";
     }
 }

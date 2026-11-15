@@ -2999,6 +2999,37 @@ Console.WriteLine("Wave 24: the tier is per tab, and an old single tier still me
         try { Directory.Delete(dir, true); } catch { }
     }
 }
+Console.WriteLine("Wave 25: the tier's scope is stated, not remembered");
+{
+    // NN/g heuristic 6: "the user should not have to remember information from one part of the
+    // interface to another". A tier that is per tab must therefore be readable without visiting the
+    // tab, and the confirmation must say what it is changing.
+    Check("every tier has a short name for the rail", Enum.GetValues<TweakPreset>().All(p =>
+    {
+        string s = TweakPresetSelector.ShortLabel(p);
+        return s.Length > 0 && s.Length < 12 && !s.Contains('(');
+    }));
+    Check("short names are distinct", Enum.GetValues<TweakPreset>()
+        .Select(TweakPresetSelector.ShortLabel).Distinct().Count() == Enum.GetValues<TweakPreset>().Length);
+    Check("the short name is the label's first word", Enum.GetValues<TweakPreset>().All(p =>
+        TweakPresetSelector.Label(p).StartsWith(TweakPresetSelector.ShortLabel(p), StringComparison.Ordinal)),
+        string.Join(" | ", Enum.GetValues<TweakPreset>().Select(p => TweakPresetSelector.Label(p))));
+
+    // The confirmation names the tab, so "Switch to Safe" is never ambiguous.
+    var plan = new TransitionPlan(new[] { "a" }, new[] { "b" });
+    string scoped = PresetTransition.Describe(TweakPreset.Safe, plan, "Interrupts");
+    Check("the confirmation names the tab it changes", scoped.Contains("Interrupts"), scoped);
+    Check("...and still names the tier", scoped.Contains("Safe"), scoped);
+    Check("...and still says what it will do", scoped.Contains("apply 1") && scoped.Contains("put back 1"), scoped);
+
+    // Without a scope it keeps the old whole-app wording, so no caller is forced to pass one.
+    string wholeApp = PresetTransition.Describe(TweakPreset.Safe, plan);
+    Check("no scope keeps the old wording", wholeApp.Contains("the machine"), wholeApp);
+
+    // A no-op now says WHICH thing already matches.
+    string noop = PresetTransition.Describe(TweakPreset.Safe, new TransitionPlan(Array.Empty<string>(), Array.Empty<string>()), "Power");
+    Check("a no-op names the tab too", noop.Contains("Power") && noop.Contains("already matches"), noop);
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");
