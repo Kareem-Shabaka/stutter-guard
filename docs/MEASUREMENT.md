@@ -98,6 +98,69 @@ Real-conditions wake latency after that change was **noisy and is not reported a
 instantaneous activity differed between runs. The controlled experiment is the rigorous number; these
 counters show that the placement actually changed.
 
+## Idle baseline: 3 h 51 min, no load
+
+A second condition, and a different one: no game, no benchmark, no synthetic load. Desktop idle, the
+three displays at 240 / 120 / 60 Hz, all tweaks applied as shipped. LatencyMon 7.31, all processors.
+
+| Reading | Value |
+| :--- | ---: |
+| Highest interrupt to process latency | 63.70 µs |
+| Average interrupt to process latency | 3.12 µs |
+| Highest interrupt to DPC latency | 29.60 µs |
+| Highest DPC routine execution time | **239.49 µs**, `amdkmdag.sys` |
+| Highest ISR routine execution time | 0.620 µs, `Wdf01000.sys` |
+| DPCs of 250 µs or longer | **0 of 2,775,336** |
+| Total ISR count | 297 |
+| Total time in DPCs | 0.000661 % of all 32 processors |
+
+### What it establishes
+
+**Interrupt routing is working, and this is the first direct evidence of it.** Every one of the 297
+interrupts recorded in nearly four hours was serviced on **CPU 18** - the first thread of the core the
+plan gives the USB input controller. Processors 0-15, the V-Cache CCD that the plan keeps free of
+devices, took **zero** interrupts, and so did 19 through 26. Fourteen of the 32 processors recorded no
+interrupt and no DPC at all.
+
+**Long GPU DPCs are isolated events here, not a background.** Nothing reached 250 µs in four hours, and
+the single longest routine was `amdkmdag` at 239.49 µs. That matters for diagnosis rather than for
+placement: a lone long call is a different problem from a steady stream of them, and moving a lone call
+to another core would still cost the same time.
+
+**The measurement instrument is the largest DPC consumer on the machine.** CPU 0 carried 2,724,862 of
+the 2,775,336 DPCs - 98.2 % - and its 2.64 s of total DPC time accounts for the 0.000595 % attributed to
+`rspLLL64.sys`, LatencyMon's own kernel library. That is the instrument, running at 0.5 ms timer
+resolution, not the system under test.
+
+**The GPU's peak landed where the plan put it.** CPU 16 is the core assigned to the Radeon RX 9070 XT,
+and that is where `amdkmdag`'s longest routine ran. Its 20,956 DPCs over 13,865 s is about 1.5 per
+second, consistent with a static desktop that is not presenting new frames.
+
+### What it does not establish
+
+**This is not a repeat of the earlier 803.89 µs reading, and the two must not be compared as before and
+after.** That run lasted 2:55 and recorded 13,691 hard pagefaults, about 78 per second; this one recorded
+4,231 in 3 h 51 min, about 0.31 per second. Those are different machine conditions - most likely a warm
+boot in the first case - so the honest statement is that an idle four-hour run peaked at 239.49 µs, not
+that a previously seen spike has been fixed.
+
+**The reported CPU speed is wrong in LatencyMon's own output.** It prints `430 MHz` for both WMI and the
+registry; this machine reports `4300` in both. Whether its microsecond conversion uses that figure is not
+verifiable from here, and it would scale every duration by ten if it did. The ISR reading argues that it
+does not: 0.620 µs is a plausible dispatcher ISR, while a tenth of that, 62 ns, is too fast for a driver
+routine carrying real work. The durations are therefore treated as approximately right, and the
+discrepancy is recorded here rather than dismissed.
+
+### Which hypothesis this rules out
+
+An earlier investigation ranked a compositor-cadence explanation (three refresh rates) against a
+mode-set or power-transition explanation, and said the discriminator was whether a long GPU DPC is **one
+of many** or **a lone event**. Over four idle hours there were zero DPCs above 250 µs. That is a lone
+event, so a steady composition-cadence background is not supported for long spikes. It does not clear
+that hypothesis for moderate ones: the run cannot see how many DPCs fell between 100 and 250 µs, because
+LatencyMon's buckets begin at 250.
+
+---
 ## Reproducing it
 
 ```powershell
