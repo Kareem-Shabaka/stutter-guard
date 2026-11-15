@@ -631,23 +631,43 @@
                                Text="Everything that runs on its own, in three parts: what Stutter Guard installs and keeps running, what is already running as a service, and what Windows fires on a schedule. Each part keeps its own Apply and Revert, so nothing here acts on another part's rows." />
                 </StackPanel>
 
-                <!-- Sections 1-3 share one scrolling region that holds all three, bounded by the
-                     star row below, so the page scrolls as a whole while each section keeps its own
-                     list. The section that is showing uses the space; the others sit above and below
-                     it in the same scroll surface. -->
+                <!-- Each section sits in its own outlined panel, so every setting visibly belongs to
+                     one category rather than three lists running into each other. The rows inside keep
+                     their own card styling; this is the outer boundary, matching the checklist pattern
+                     where a grouped list is one bordered unit. -->
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <TextBlock Text="Startup tasks" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,2" />
-                        <TextBlock Text="{Binding Startup.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                        <ItemsControl ItemsSource="{Binding Startup.Items}" />
 
-                        <TextBlock Text="Services" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,2" />
-                        <TextBlock Text="{Binding Services.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                        <ItemsControl ItemsSource="{Binding Services.Items}" />
+                        <!-- Section 1: what this app installs and keeps running -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Startup tasks" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Startup.Description}" Style="{StaticResource Secondary}"
+                                           TextWrapping="Wrap" Margin="0,2,0,10" />
+                                <ItemsControl ItemsSource="{Binding Startup.Items}" />
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock Text="Scheduled tasks" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,2" />
-                        <TextBlock Text="{Binding Scheduled.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                        <ItemsControl ItemsSource="{Binding Scheduled.Items}" />
+                        <!-- Section 2: what is already running on this PC -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Services" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Services.Description}" Style="{StaticResource Secondary}"
+                                           TextWrapping="Wrap" Margin="0,2,0,10" />
+                                <ItemsControl ItemsSource="{Binding Services.Items}" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Section 3: everything else that fires on its own schedule -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Scheduled tasks" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Scheduled.Description}" Style="{StaticResource Secondary}"
+                                           TextWrapping="Wrap" Margin="0,2,0,10" />
+                                <ItemsControl ItemsSource="{Binding Scheduled.Items}" />
+                            </StackPanel>
+                        </Border>
+
                     </StackPanel>
                 </ScrollViewer>
 
