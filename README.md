@@ -17,7 +17,7 @@ running on.
 latency, away from the cores your game uses. Then it records every change it made, so you can put all
 of it back.**
 
-![The Stutter Guard window: the Interrupts page showing which core each device owns](docs/images/app-214257.png)
+![The Stutter Guard window](docs/images/app-214731.png)
 
 ---
 

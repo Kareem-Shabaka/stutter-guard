@@ -2,25 +2,29 @@
 
 ## Present
 
-Three screenshots captured on the reference machine, named by capture time because their content was
-not described when they were added: `app-214238.png`, `app-214257.png`, `app-214312.png`.
+Three window crops from the reference machine, named by capture time because their content was never
+described to me and I cannot see images:
 
-They are **3833 x 2073 full-desktop captures**, not window crops. That matters: at the width a README
-renders (~900 px), a full-desktop capture scales down by 4x and the labels become unreadable, and the
-desktop background is visible. Worth re-capturing as window-only crops when convenient.
+| File | Size | Aspect | Referenced | Shows |
+|---|---|---|---|---|
+| `app-214731.png` | 1697 x 1046 | 1.62 | **yes, front-door figure** | unknown |
+| `app-214750.png` | 3819 x 1237 | 3.09 | no | unknown |
+| `app-214811.png` | 3353 x 1673 | 2.00 | no | unknown |
 
-| File | Referenced in README | Shows |
-|---|---|---|
-| `app-214257.png` | yes, as the front-door figure | assumed Interrupts page - **confirm** |
-| `app-214238.png` | no | unknown |
-| `app-214312.png` | no | unknown |
+`app-214731.png` is the front-door figure only because its aspect ratio is the most window-like of the
+three - that is an inference from dimensions, not a check.
 
-To finish this properly: say which file shows which screen, then rename them (`app-interrupts.png`,
-`app-home.png`, `app-check.png`) and reference the useful ones.
+**To finish:** name them and this becomes three useful figures instead of one. TheREADME has three natural
+slots:
 
-## How to capture a better one
+1. Front door - the Interrupts page with a plan visible (cores, devices, evidence chips).
+2. "The numbers" - the interrupt check results, the per-CPU counter table, which is the proof a move
+   happened.
+3. "Why interrupt placement works" - Home with its verdict line.
 
-1. Launch `StutterGuard.exe`, apply a plan, restart, open the screen you want.
-2. **Alt+PrintScreen** for the active window only - not PrintScreen, which takes the whole desktop.
-3. Save as PNG at native resolution.
-4. Drop it in this folder and reference it from `README.md`.
+Rename to `app-interrupts.png`, `app-check.png`, `app-home.png` and reference each in its section.
+
+## Capturing
+
+**Alt+PrintScreen** for the active window only, not PrintScreen. Save as PNG at native resolution, then
+crop to the window if needed. The labels are the point, and a downscaled capture loses them.
