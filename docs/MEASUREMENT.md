@@ -151,6 +151,24 @@ does not: 0.620 µs is a plausible dispatcher ISR, while a tenth of that, 62 ns,
 routine carrying real work. The durations are therefore treated as approximately right, and the
 discrepancy is recorded here rather than dismissed.
 
+### The same machine under load
+
+For completeness: the author reports gameplay is **equally clean**. No figures were supplied, so it is
+recorded here as an observation and not as a measurement; it is not entered in the table above and must
+not be quoted as one.
+
+Taken together, the two observations are the point. An earlier session recorded a single
+`amdkmdag` DPC of **803.89 µs** over a 2 min 55 s window. That window also logged **13,691 hard
+pagefaults - about 78 per second** - against **0.31 per second** in the idle run above, a factor of about
+250. A machine reading its own binaries from disk is a machine in startup churn, and a 2:55 sample sits
+almost entirely inside it. The parsimonious reading is that the 803.89 µs was a **startup transient**, not
+a property of the driver under load - and it is consistent with a power or mode transition rather than a
+steady background of long calls.
+
+**The condition neither observation covers is the minutes immediately after boot**, which is precisely where
+that transient came from. A single run covering the first ten minutes from a cold start would settle it:
+reproducing a DPC above 500 µs there would make the finding specific and explainable, and not reproducing
+it would leave the original sample as an unexplained outlier.
 ### Which hypothesis this rules out
 
 An earlier investigation ranked a compositor-cadence explanation (three refresh rates) against a
