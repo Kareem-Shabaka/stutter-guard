@@ -1,13 +1,21 @@
-# Stutter Guard v1.2.0 - SHA-256 checksums
+# Stutter Guard - SHA-256 checksums
 #
-# This is the hash of the file attached to the GitHub release, byte for byte.
+# Every release also carries StutterGuard.exe.sha256 next to the binary. That file is generated
+# on the build machine from the exact bytes uploaded, so it always matches the download. Prefer it.
+#
 # Verify a download on Windows:
 #   certutil -hashfile StutterGuard.exe SHA256
 #
-# A local 'dotnet publish' does NOT reproduce this value. The single-file bundle is not
-# reproducible: two consecutive builds of the same commit produced 65,460,090 and
-# 65,460,096 bytes with different hashes, and the published binary is a third value.
-# This file therefore verifies the download, not a build you made yourself. Do not
-# 'correct' it to a locally built hash - that would make every download look wrong.
-
+# ---- v1.2.0 (superseded when a newer release is published; each release carries its own .sha256) ----
 01752CF8BCFAF8346516CFAC14DA0E1D2B468EBAACCC0923F0BAFBF39BC25B89  StutterGuard.exe
+#
+# ---- What is measured, and what is not ----
+#
+# Builds are reproducible in a fixed environment. Measured 2026-11-15 on .NET SDK 10.0.402,
+# win-x64: two clean publishes of one commit, into two different directories, produced
+# 65,447,000 bytes with the same SHA-256 (851FA3465EA11D59B141C3FEF8266E9352BE30FEA8477EC80B7D6B4F403D8880).
+# `build.cmd --verify-repro` repeats that check on your machine.
+#
+# That does not mean your own build must equal a released hash: a different SDK patch level,
+# runtime pack or output path can change the bytes. So verify a download against the .sha256
+# published with that release, never against a hash you produced yourself.

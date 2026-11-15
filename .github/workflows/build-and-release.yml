@@ -44,11 +44,23 @@ jobs:
           path: publish/StutterGuard.exe
           if-no-files-found: error
 
+      # The checksum has to be produced by the same job that uploads the binary, from the file it
+      # is about to upload. A hand-maintained checksum in the repository drifts the moment a new
+      # release is cut, and then it describes a file nobody can download.
+      - name: Write the download checksum
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash publish/StutterGuard.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$h  StutterGuard.exe" | Set-Content -Path publish/StutterGuard.exe.sha256 -NoNewline
+          Get-Content publish/StutterGuard.exe.sha256
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/StutterGuard.exe
+          files: |
+            publish/StutterGuard.exe
+            publish/StutterGuard.exe.sha256
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
