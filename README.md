@@ -229,7 +229,6 @@ in the front door:
   tweak has to satisfy.
 - [SECURITY.md](SECURITY.md) - how to report a vulnerability privately, and what this app does and does
   not have access to.
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## License
 
