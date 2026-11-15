@@ -32,7 +32,7 @@ public sealed class MainViewModel : ObservableObject
             Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Interrupts = new ModulePageViewModel(this, "Interrupts", "Interrupts", "\uE950",
             "Every busy device gets its own core, away from the cores games use: the GPU first, then the USB controller with your mouse, your audio path, the network adapter (its receive queues on the same cores), then the other USB controllers. Plus MSI mode for devices still on a shared IRQ line. Takes effect after a restart; then run the check.",
-            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
+            Engine is null ? TweakPreset.Safe : Engine.Options.Preset, rowsFirst: true);
         Network = new ModulePageViewModel(this, "Network", "Network", "\uE839",
             "Power saving off on wired adapters: Energy-Efficient Ethernet, Green Ethernet and the vendor's own link power saving, plus Interrupt Moderation on desktops. Each change restarts the adapter once (2-5 seconds offline), no reboot.",
             Engine is null ? TweakPreset.Safe : Engine.Options.Preset);

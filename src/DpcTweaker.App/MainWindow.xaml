@@ -562,13 +562,21 @@
                     <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" />
                 </StackPanel>
 
-                <!-- Options first, then the list they generate. The actions stay pinned at the bottom
-                     so they are never scrolled away from the rows they act on. -->
+                <!-- Rows first or options first, per page, as two bound Grid rows: the order is
+                     data, so there is still one rendering path. Interrupts puts its rows first -
+                     it is the page whose checkbox list is the job, and three cards of reference
+                     above it pushed that list below the fold while the action bar stayed on
+                     screen. Power keeps its options first, because there they generate the list. -->
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <ContentControl Content="{Binding OptionsPanel}" Visibility="{Binding HasOptions, Converter={StaticResource BoolToVis}}" />
-                        <ItemsControl ItemsSource="{Binding Items}" />
-                    </StackPanel>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <ContentControl Grid.Row="{Binding OptionsRow}" Content="{Binding OptionsPanel}"
+                                        Visibility="{Binding HasOptions, Converter={StaticResource BoolToVis}}" />
+                        <ItemsControl Grid.Row="{Binding RowsRow}" ItemsSource="{Binding Items}" />
+                    </Grid>
                 </ScrollViewer>
 
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">

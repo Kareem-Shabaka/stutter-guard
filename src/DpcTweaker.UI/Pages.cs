@@ -627,13 +627,21 @@ public class ModulePageViewModel : PageViewModel
     /// </summary>
     private TweakPreset _preset = TweakPreset.Safe;
 
+    /// <summary>
+    /// True when the checkbox list belongs above the page's own options and reference cards.
+    /// Interrupts is the page where the rows are the job: three cards of reference sat above its
+    /// list, so the list began below the fold while the action bar stayed on screen.
+    /// </summary>
+    private readonly bool _rowsFirst;
+
     public ModulePageViewModel(MainViewModel main, string module, string title, string icon, string description,
-        TweakPreset preset = TweakPreset.Safe)
+        TweakPreset preset = TweakPreset.Safe, bool rowsFirst = false)
         : base(title, icon)
     {
         _main = main;
         _module = module;
         _preset = preset;
+        _rowsFirst = rowsFirst;
         Description = description;
         ApplySelectedCommand = new RelayCommand(() => _ = ApplySelectedAsync(), () => !Busy);
         RevertSelectedCommand = new RelayCommand(() => _ = RevertSelectedAsync(), () => !Busy);
@@ -676,6 +684,14 @@ public class ModulePageViewModel : PageViewModel
             .Distinct().Count() == 1;
     }
     public string Description { get; }
+
+    /// <summary>
+    /// Which of the two body rows each part occupies. Bound to Grid.Row, so the order is data and
+    /// there is still one rendering path rather than a second copy of the template.
+    /// </summary>
+    public int RowsRow => _rowsFirst ? 0 : 1;
+
+    public int OptionsRow => _rowsFirst ? 1 : 0;
 
     /// <summary>Group headers and rows, in order.</summary>
     public ObservableCollection<object> Items { get; } = new();
@@ -1054,6 +1070,7 @@ public sealed class Choice<T>
     public T Value { get; }
     public string Label { get; }
     public string Description { get; }
+
     public override string ToString() => Label;
 }
 
@@ -1477,3 +1494,4 @@ public sealed class BackgroundPageViewModel : ModulePageViewModel
     public override Task RefreshAsync() =>
         Task.WhenAll(Startup.RefreshAsync(), Services.RefreshAsync(), Scheduled.RefreshAsync());
 }
+

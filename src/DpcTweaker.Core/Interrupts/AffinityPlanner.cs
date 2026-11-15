@@ -649,7 +649,10 @@ public static class AffinityPlanner
                     if (!usedDevs.TryGetValue(coreFirst, out var kd)) usedDevs[coreFirst] = kd = new List<PciDevice>();
                     kd.Add(w.Device);
                 }
-                string keptReason = w.Reason + " Already pinned here, kept." +
+                // "Already pinned here, kept." was appended to every kept row: the row label already
+                // ends "(kept)" and the plan notes already count them, so it was one boolean stated
+                // three times across seven rows. The reason differs per device, so only it stays.
+                string keptReason = w.Reason +
                                     (hybrid ? " " + HybridNote(keptCpus, cores, pCoreIds) : "");
                 result.Add(new Assignment { Device = w.Device, Role = w.Role, Cpus = keptCpus, Kept = true, Rss = RssFor(w, keptCpus, cores), Reason = keptReason });
                 continue;

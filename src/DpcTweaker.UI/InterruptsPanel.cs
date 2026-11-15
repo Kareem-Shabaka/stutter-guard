@@ -34,7 +34,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         NotApplicableText = plan.NotApplicableReason ?? "";
         ReservedText = plan.Applicable ? $"Kept free of devices: CPUs {CpuTopology.FormatCpus(plan.ReservedCpus)}. {plan.ReservedReason}" : "";
         CandidatesText = plan.Applicable
-            ? "Cores that take devices, best first: " + string.Join(", ", plan.Candidates.Select(c => "CPU " + c.Cpu + (p.Cpu.IsHybrid ? (c.PerformanceCore ? " (P)" : " (E)") : ""))) +
+            ? "Cores that take devices, best first: " + string.Join(", ", plan.Candidates.Select(c => CoreLabel(c, p.Cpu.IsHybrid))) +
               ". Only the first thread of each core takes a device; its SMT sibling shares the same execution units."
             : "";
         RankingText = plan.RankingSource;
@@ -98,6 +98,14 @@ public sealed class InterruptOptionsViewModel : ObservableObject
 
         if (_main.LastCheck is { } last) ShowCheck(last);
     }
+
+    /// <summary>
+    /// "core 8 (CPU 16)": a core and the logical processor Windows numbers are two different things
+    /// on an SMT CPU - CPU 16 is the first thread of core 8 - so naming only the logical processor
+    /// made an eight-core list read as a CPU with cores numbered 16 to 30.
+    /// </summary>
+    private static string CoreLabel(RankedCore c, bool hybrid) =>
+        $"core {c.CoreId} (CPU {c.Cpu})" + (hybrid ? (c.PerformanceCore ? " (P-core)" : " (E-core)") : "");
 
     public const int Samples = 5000;
     public const int IdleSeconds = 30;
