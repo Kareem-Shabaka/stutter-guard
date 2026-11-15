@@ -337,7 +337,8 @@ public sealed class TweakEngine
         // servicing a device, so anything restricted there competes with every interrupt. Read-only and
         // unelevated; the unreadable count is reported rather than folded into a clean zero.
         IReadOnlyList<OverlappingProcess> overlap = Array.Empty<OverlappingProcess>();
-        int unreadable = 0;
+        int unreadable = 0, protectedCount = 0;
+        bool elevated = false;
         try
         {
             // Live pins, not the plan's intent: the plan is where devices would go, and the question is
@@ -345,7 +346,10 @@ public sealed class TweakEngine
             // defend, so the check is skipped rather than answered from a plan that is not in effect.
             var interruptCpus = ProcessOverlap.LiveCpus(Profile.Devices).ToList();
             if (interruptCpus.Count > 0)
-                overlap = ProcessOverlap.Sample(interruptCpus, Profile.Cpu.LogicalCount, out unreadable);
+            {
+                overlap = ProcessOverlap.Sample(interruptCpus, Profile.Cpu.LogicalCount, out unreadable, out protectedCount);
+                elevated = ProcessOverlap.IsElevated();
+            }
         }
         catch (Exception ex)
         {
@@ -375,8 +379,9 @@ public sealed class TweakEngine
             foreach (var a in Plan.Assignments)
                 foreach (int c in a.MaskCpus) Note(c, a.Device.Name);
 
+        var byCpu = devicesByCpu.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value);
         return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores, overlap, unreadable,
-            devicesByCpu.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value)));
+            byCpu, protectedCount, elevated));
     }
 
     /// <summary>

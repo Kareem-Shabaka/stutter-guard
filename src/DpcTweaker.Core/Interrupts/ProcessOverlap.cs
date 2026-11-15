@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 
 namespace DpcTweaker.Core.Interrupts;
 
@@ -103,10 +104,39 @@ public static class ProcessOverlap
     /// could not be read - protected and other-user processes answer ACCESS_DENIED without elevation,
     /// and a silent zero would look like a clean machine.
     /// </summary>
+    /// <summary>Idle and System are kernel pseudo-processes: no user-mode tool can read their affinity.</summary>
+    private static readonly int[] NeverReadable = { 0, 4 };
+
+    /// <summary>True when this process is running with administrative rights.</summary>
+    public static bool IsElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static IReadOnlyList<OverlappingProcess> Sample(
-        IReadOnlyCollection<int> interruptCpus, int logicalCount, out int unreadable)
+        IReadOnlyCollection<int> interruptCpus, int logicalCount, out int unreadable) =>
+        Sample(interruptCpus, logicalCount, out unreadable, out _);
+
+    /// <param name="protectedCount">
+    /// How many of <paramref name="unreadable"/> are Windows processes that no user-mode tool can read,
+    /// elevated or not - System, Idle and the protected-light ones. Telling an already-elevated user to
+    /// "run as administrator" was advice they had already followed: the app is manifest-elevated, and the
+    /// count they saw was entirely these. Measured on the author's machine, elevation dropped the total
+    /// from 87 to 15, and every one of the 15 was in this category.
+    /// </param>
+    public static IReadOnlyList<OverlappingProcess> Sample(
+        IReadOnlyCollection<int> interruptCpus, int logicalCount, out int unreadable, out int protectedCount)
     {
         unreadable = 0;
+        protectedCount = 0;
         var rows = new List<(int, string, ulong)>();
 
         // GetProcessAffinityMask answers for one processor group, so masks are only meaningful up to
@@ -123,6 +153,10 @@ public static class ProcessOverlap
             {
                 if (!GetProcessAffinityMask(p.Handle, out UIntPtr mask, out _))
                 {
+                    // Idle and System, plus everything Windows protects from user mode (System-owned
+                    // services running protected, audiodg, Defender's components). Elevation does not
+                    // change these, so they are counted apart from the ones a refusal actually explains.
+                    if (NeverReadable.Contains(p.Id) || p.SessionId == 0) protectedCount++;
                     unreadable++;
                     continue;
                 }
@@ -130,6 +164,7 @@ public static class ProcessOverlap
             }
             catch
             {
+                if (NeverReadable.Contains(p.Id) || p.SessionId == 0) protectedCount++;
                 unreadable++;
             }
             finally

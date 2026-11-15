@@ -55,7 +55,9 @@ public static class LatencyTriage
         IReadOnlyList<int>? gameCores = null,
         IReadOnlyList<OverlappingProcess>? overlapping = null,
         int unreadableProcesses = 0,
-        IReadOnlyDictionary<int, IReadOnlyList<string>>? devicesByCpu = null)
+        IReadOnlyDictionary<int, IReadOnlyList<string>>? devicesByCpu = null,
+        int protectedProcesses = 0,
+        bool elevated = false)
     {
         var findings = new List<TriageFinding>();
         var active = (displays ?? Array.Empty<DisplayInfo>()).Where(d => d.RefreshHz > 0).ToList();
@@ -173,18 +175,43 @@ public static class LatencyTriage
                     false));
         }
 
-        // A count of zero is only meaningful if everything was readable.
+        // A count of zero is only meaningful if everything was readable, and a refusal is only worth
+        // reporting if the user could do something about it.
         if (unreadableProcesses > 0)
         {
-            findings.Add(new TriageFinding(
-                TriageSeverity.Info,
-                $"{unreadableProcesses} process(es) could not be inspected for affinity masks",
-                "Those are protected or other-user processes, which answer access-denied without elevation.",
-                    "Run Stutter Guard as administrator and press the check again to include them - reading another account's " +
-                    "affinity needs elevation. The pins, the budgets and everything else above do not need it.\n\n" +
-                    "Why it is counted: these are protected or other-user processes, and a silent zero would look like a clean " +
-                    "machine when it is only an unread one.",
-                    false));
+            int explainable = Math.Max(0, unreadableProcesses - protectedProcesses);
+            string title;
+            string detail;
+            string guidance;
+
+            if (protectedProcesses >= unreadableProcesses)
+            {
+                // Every one of them is Windows itself. No user-mode tool reads these, elevated or not,
+                // so there is no action to offer and saying "run as administrator" would be false.
+                title = $"{protectedProcesses} Windows processes could not be read (protected by Windows)";
+                detail = "These are System, Idle and the services Windows marks protected. No user-mode tool can read their " +
+                         "affinity, and elevation does not change that.";
+                guidance = "Nothing to do. A program competes with interrupts through an affinity mask, and every process on " +
+                           "this PC that could carry one was read.";
+            }
+            else if (elevated)
+            {
+                title = $"{unreadableProcesses} process(es) could not be read, {protectedProcesses} of them protected by Windows";
+                detail = "Stutter Guard is already running as administrator, so these are refusals elevation cannot fix.";
+                guidance = "Nothing to do unless one of them is a program you recognise as heavy. In that case close it and run this " +
+                           "check again, so its affinity can be read.";
+            }
+            else
+            {
+                title = $"{unreadableProcesses} process(es) could not be inspected for affinity masks";
+                detail = $"{explainable} of them are other-account processes, which answer access-denied without elevation; " +
+                         $"{protectedProcesses} are Windows-internal and cannot be read by anything.";
+                guidance = "Run Stutter Guard as administrator and press the check again to include the other-account ones. The pins, " +
+                    "the budgets and everything else above do not need elevation.\n\n" +
+                    "Why it is counted: a silent zero would look like a clean machine when it is only an unread one.";
+            }
+
+            findings.Add(new TriageFinding(TriageSeverity.Info, title, detail, guidance, false));
         }
 
         return findings;

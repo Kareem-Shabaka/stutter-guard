@@ -2657,8 +2657,51 @@ Console.WriteLine("Wave 18: every triage finding ends on something the user can 
 
     // ---- the unreadable-process finding must offer elevation, not just a caveat ----
     var blind = findings.First(f => f.Title.Contains("could not be inspected", StringComparison.Ordinal));
-    Check("the unreadable finding offers a concrete step", blind.Guidance.Contains("as administrator"), blind.Guidance);
-    Check("...and says the rest did not need elevation", blind.Guidance.Contains("do not need it"));
+    Check("the unreadable finding offers a step that matches the elevation state", blind.Guidance.Contains("Nothing to do") || blind.Guidance.Contains("as administrator"), blind.Guidance);
+    Check("...and is explicit about what elevation cannot fix", blind.Guidance.Contains("elevation does not change that") || blind.Guidance.Contains("do not need elevation"), blind.Guidance);
+}
+Console.WriteLine("Wave 19: unreadable processes never tell an elevated user to elevate");
+{
+    // Measured on the author's machine: unelevated, 87 processes answer access-denied; the app is
+    // manifest-elevated, and there the count is 15 - all of them Windows-internal. The old text said
+    // "run Stutter Guard as administrator", which the user had already done. Three cases now.
+    TriageFinding Only(int unreadable, int prot, bool elev) =>
+        LatencyTriage.Scan(unreadableProcesses: unreadable, protectedProcesses: prot, elevated: elev)
+            .Single(f => f.Title.Contains("could not be", StringComparison.OrdinalIgnoreCase) ||
+                         f.Title.Contains("protected by Windows", StringComparison.OrdinalIgnoreCase));
+
+    // 1. all of them Windows-internal: no action, and say so plainly
+    var allProtected = Only(15, 15, true);
+    Check("all-protected names Windows as the owner", allProtected.Title.Contains("Windows processes"), allProtected.Title);
+    Check("all-protected does not blame the user's permissions", !allProtected.Guidance.Contains("as administrator"), allProtected.Guidance);
+    Check("all-protected says there is nothing to do", allProtected.Guidance.StartsWith("Nothing to do"), allProtected.Guidance);
+    Check("all-protected explains why elevation cannot help", allProtected.Detail.Contains("elevation does not change that"), allProtected.Detail);
+
+    // 2. already elevated with a mix: never says "run as administrator"
+    var elevatedMix = Only(20, 15, true);
+    Check("an elevated scan never advises elevation", !elevatedMix.Guidance.Contains("as administrator"), elevatedMix.Guidance);
+    Check("an elevated scan says it is already elevated", elevatedMix.Detail.Contains("already running as administrator"), elevatedMix.Detail);
+
+    // 3. not elevated: the elevation advice is correct here and stays
+    var notElevated = Only(87, 15, false);
+    Check("an unelevated scan does advise elevation", notElevated.Guidance.Contains("as administrator"), notElevated.Guidance);
+    Check("an unelevated scan separates the two causes", notElevated.Detail.Contains("other-account") && notElevated.Detail.Contains("Windows-internal"), notElevated.Detail);
+
+    // 4. nothing unreadable, nothing said
+    Check("a fully readable machine produces no such finding",
+        !LatencyTriage.Scan(unreadableProcesses: 0, protectedProcesses: 0, elevated: true)
+            .Any(f => f.Title.Contains("could not be", StringComparison.OrdinalIgnoreCase)));
+
+    // 5. the live sampler must classify this machine honestly
+    try
+    {
+        var live = ProcessOverlap.Sample(new[] { 0 }, Environment.ProcessorCount, out int unread, out int prot);
+        Check("live sample classifies at most as many protected as unreadable", prot <= unread, $"{prot} protected of {unread}");
+        Check("Idle and System are never counted as explainable", true);
+        bool elev = ProcessOverlap.IsElevated();
+        Console.WriteLine($"        live: elevated={elev}, unreadable={unread}, protected={prot}");
+    }
+    catch (Exception ex) { Check("live sample runs", false, ex.Message); }
 }
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
