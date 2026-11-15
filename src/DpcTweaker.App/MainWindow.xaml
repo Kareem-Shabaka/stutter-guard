@@ -160,7 +160,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="BulletLine">
-            <TextBlock Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" />
+            <TextBlock Text="{Binding StringFormat='&#x2022; {0}'}" TextWrapping="Wrap" Margin="0,2" />
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type ui:InterruptOptionsViewModel}">
@@ -175,7 +175,7 @@
                         <!-- When not benchmarked yet: Active calibration prompt -->
                         <StackPanel Visibility="{Binding NotHasBench, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <TextBlock Text="" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock Text="&#xE946;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <TextBlock Text="Step 1: Benchmark CPU Cores (Recommended)" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
                             </StackPanel>
                             <TextBlock Text="{Binding BenchStatus}" TextWrapping="Wrap" Margin="0,2,0,0" />
@@ -201,7 +201,7 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <TextBlock Text="&#xE13C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                                         <TextBlock Text="Cores Calibrated" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
                                     </StackPanel>
                                     <TextBlock Text="{Binding BenchStatus}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,2,0,0" />
@@ -404,7 +404,7 @@
                             <ItemsControl ItemsSource="{Binding Warnings}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" />
+                                        <TextBlock Text="{Binding StringFormat='&#x2022; {0}'}" TextWrapping="Wrap" Margin="0,2" />
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -560,29 +560,6 @@
                 <StackPanel Grid.Row="0">
                     <TextBlock Text="{Binding Title}" Style="{StaticResource PageTitle}" />
                     <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" />
-
-                    <!-- The preset is a declared desired state, not a filter. The button below applies
-                         what the tier includes and puts back what it leaves out, so going from
-                         Everything down to Safe really undoes the costly tweaks; the confirmation
-                         states both counts first. "Apply selected" at the bottom is the narrower
-                         control: it only ever applies the ticked rows. -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBlock Text="Tweaks for this tab" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
-                        <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
-                                  DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
-                        <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
-                                Margin="10,0,0,0" Padding="14,4"
-                                ToolTip="Makes this PC match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks before changing anything. Nothing changes until you confirm." />
-                    </StackPanel>
-                    <TextBlock Text="{Binding ScopeSentence}" Style="{StaticResource Secondary}" Margin="0,4,0,6" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
-                    <!-- A tick shows what the preset includes. A ticked row that is already applied still
-                         changes nothing when you press Apply selected, so the counts below remain the honest
-                         answer to "what will be used". -->
-                    <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
-                               Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
-                    <TextBlock Text="{Binding SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
-                               Visibility="{Binding HasSelectionPreview, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
 
                 <!-- Options first, then the list they generate. The actions stay pinned at the bottom
@@ -611,12 +588,10 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type ui:BackgroundPageViewModel}">
-            <!-- One page, three outlined sections, ONE toolbar. The toolbar sits above the scroller so
-                 the tier and the Apply button are never scrolled away from the lists they act on, and
-                 the tier is the tab's own - see AppOptions.PresetFor. -->
+            <!-- One page, three outlined sections. The tier control is in the shell bar above,
+                 shared with every other tab; this template no longer carries one. -->
             <Grid Margin="28,20,28,12">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -628,24 +603,7 @@
                     <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <StackPanel Grid.Row="1">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBlock Text="Tweaks for this tab" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
-                        <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
-                                  DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
-                        <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
-                                Margin="10,0,0,0" Padding="14,4"
-                                ToolTip="Makes this tab match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks first. Other tabs keep their own tier." />
-                    </StackPanel>
-                    <TextBlock Text="{Binding ScopeSentence}" Style="{StaticResource Secondary}" Margin="0,4,0,6" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
-                               Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
-                    <TextBlock Text="{Binding SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
-                               Visibility="{Binding HasSelectionPreview, Converter={StaticResource BoolToVis}}" />
-                </StackPanel>
-
-                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
 
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
@@ -678,7 +636,7 @@
                     </StackPanel>
                 </ScrollViewer>
 
-                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
                     <Button Content="Apply selected" Command="{Binding ApplySelectedCommand}" Padding="16,6" Margin="0,0,8,0"
                             Style="{DynamicResource AccentButtonStyle}"
                             ToolTip="Applies the ticked rows in all three sections that are not already on this PC." />
@@ -689,7 +647,7 @@
                     <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="14,6" />
                 </StackPanel>
 
-                <TextBlock Grid.Row="4" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,8,0,0"
+                <TextBlock Grid.Row="3" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,8,0,0"
                            Visibility="{Binding HasMessage, Converter={StaticResource BoolToVis}}" />
             </Grid>
         </DataTemplate>
@@ -766,12 +724,13 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Navigation -->
-        <DockPanel Grid.Column="0" Grid.Row="0" Margin="12,16,8,8" LastChildFill="True">
+        <DockPanel Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="12,16,8,8" LastChildFill="True">
             <StackPanel DockPanel.Dock="Top" Margin="8,0,0,16">
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
@@ -795,13 +754,13 @@
                     <TextBlock Text="Free &amp; open source. Help support ongoing development!" Opacity="0.75" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
                     <Button Command="{Binding OpenSupportCommand}" Padding="8,5" HorizontalAlignment="Stretch" Margin="0,0,0,6">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <TextBlock Text="♥" Foreground="#E91E63" Margin="0,0,6,0" FontWeight="Bold" />
+                            <TextBlock Text="&#x2665;" Foreground="#E91E63" Margin="0,0,6,0" FontWeight="Bold" />
                             <TextBlock Text="Support / Sponsor" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding OpenGitHubCommand}" Padding="8,4" HorizontalAlignment="Stretch">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <TextBlock Text="" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,6,0" FontSize="12" />
+                            <TextBlock Text="&#xE749;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,6,0" FontSize="12" />
                             <TextBlock Text="GitHub &amp; Updates" FontSize="12" />
                         </StackPanel>
                     </Button>
@@ -835,11 +794,35 @@
             </ListBox>
         </DockPanel>
 
+        <!-- The tier bar: ONE control for the whole application. It follows the selected tab, so
+             it still means the tier of this tab - the rail shows the tier of every other one, and
+             the sentence inside names the tab being edited. Two per-page copies had already drifted. -->
+        <Border Grid.Column="1" Grid.Row="0" Padding="28,10,28,8" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                Visibility="{Binding HasTierEditor, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="Tier for this tab" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <ComboBox ItemsSource="{Binding TierEditor.Presets}" SelectedItem="{Binding TierEditor.PresetChoice, Mode=TwoWay}"
+                              DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
+                    <Button Content="Apply this preset" Command="{Binding TierEditor.SetPresetCommand}"
+                            Margin="10,0,0,0" Padding="14,4"
+                            ToolTip="Makes this PC match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks before changing anything. Nothing changes until you confirm." />
+                </StackPanel>
+                <TextBlock Text="{Binding TierEditor.ScopeSentence}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,2" />
+                <TextBlock Text="{Binding TierEditor.PresetDescription}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,2" />
+                <TextBlock Text="{Binding TierEditor.SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Visibility="{Binding TierEditor.HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Text="{Binding TierEditor.SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,2,0,0"
+                           Visibility="{Binding TierEditor.HasSelectionPreview, Converter={StaticResource BoolToVis}}" />
+            </StackPanel>
+        </Border>
+
         <!-- Page -->
-        <ContentControl Grid.Column="1" Grid.Row="0" Content="{Binding SelectedPage}" />
+        <ContentControl Grid.Column="1" Grid.Row="1" Content="{Binding SelectedPage}" />
 
         <!-- Scan overlay -->
-        <Border Grid.Column="1" Grid.Row="0" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+        <Border Grid.Column="1" Grid.Row="1" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
                 Visibility="{Binding Loading, Converter={StaticResource BoolToVis}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="460">
                 <TextBlock Text="Scanning this PC" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center" />
@@ -850,7 +833,7 @@
         </Border>
 
         <!-- Status bar -->
-        <Border Grid.ColumnSpan="2" Grid.Row="1" Padding="16,6" BorderThickness="0,1,0,0"
+        <Border Grid.ColumnSpan="2" Grid.Row="2" Padding="16,6" BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}" VerticalAlignment="Center" />

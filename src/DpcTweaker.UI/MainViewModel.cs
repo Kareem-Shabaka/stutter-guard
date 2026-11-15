@@ -24,10 +24,10 @@ public sealed class MainViewModel : ObservableObject
     {
         Ui = ui;
         Home = new HomePageViewModel(this);
-        Power = new ModulePageViewModel(this, "Power", "Power plan", "",
+        Power = new ModulePageViewModel(this, "Power", "Power plan", "\uE945",
             "The tuned power plan: light C-states, EPP 0, minimum state 100%, and USB / PCIe / disk power saving off. On AMD dual-CCD and Intel hybrid CPUs you choose between Windows parking (Balanced) and managing cores yourself (Ultimate).",
             Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
-        Gpu = new ModulePageViewModel(this, "GPU", "GPU", "",
+        Gpu = new ModulePageViewModel(this, "GPU", "GPU", "\uE7F4",
             "Driver registry keys, each with its own checkbox. The app scans your installed driver file and greys out any key it never reads. A driver update removes these keys again.",
             Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Interrupts = new ModulePageViewModel(this, "Interrupts", "Interrupts", "\uE950",
@@ -81,9 +81,23 @@ public sealed class MainViewModel : ObservableObject
         get => _selected;
         set
         {
-            if (Set(ref _selected, value) && value is not null) _ = value.RefreshAsync();
+            if (!Set(ref _selected, value)) return;
+            // The tier control lives in the shell now, so it has to follow the tab that owns the
+            // tier: one control, and the tab it edits is the one on screen.
+            OnPropertyChanged(nameof(TierEditor));
+            OnPropertyChanged(nameof(HasTierEditor));
+            if (value is not null) _ = value.RefreshAsync();
         }
     }
+
+    /// <summary>
+    /// The selected page when it owns a cost tier, for the single tier control in the shell.
+    /// Null on Home, Recommendations and Safety: those pages have nothing to tier, and the bar
+    /// hides rather than showing a control that would do nothing.
+    /// </summary>
+    public ModulePageViewModel? TierEditor => SelectedPage as ModulePageViewModel;
+
+    public bool HasTierEditor => SelectedPage is ModulePageViewModel;
 
     public bool Loading
     {
@@ -151,7 +165,7 @@ public sealed class MainViewModel : ObservableObject
     public void OnDriftScanned(int driftedCount)
     {
         DriftedCount = driftedCount;
-        if (driftedCount > 0) StatusText = $"{driftedCount} tweak(s) drifted — see Home";
+        if (driftedCount > 0) StatusText = $"{driftedCount} tweak(s) drifted \u2014 see Home";
     }
 
     /// <summary>Exactly which applied tweaks were reset, for a caller that wants to list them.</summary>
@@ -274,7 +288,7 @@ public sealed class MainViewModel : ObservableObject
         // Derived, not sticky: reverting the last pending change clears the banner again.
         RestartNeeded = pending > 0 || _restartForced;
         DriftedCount = drifted;
-        StatusText = $"{applied} applied · {pending} pending restart · {drifted} drifted";
+        StatusText = $"{applied} applied \u00B7 {pending} pending restart \u00B7 {drifted} drifted";
     }
 
     /// <summary>A restore point before the first apply of each session.</summary>

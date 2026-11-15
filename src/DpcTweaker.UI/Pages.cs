@@ -76,7 +76,7 @@ public sealed class HomePageViewModel : PageViewModel
     private string _benchStatus = "";
     private bool _hasBench;
 
-    public HomePageViewModel(MainViewModel main) : base("Home", "")
+    public HomePageViewModel(MainViewModel main) : base("Home", "\uE80F")
     {
         _main = main;
         SaveReportCommand = new RelayCommand(SaveReport);
@@ -442,9 +442,9 @@ public sealed class HomePageViewModel : PageViewModel
             BenchStatus = "Saved: " + bench.Summary + ".";
             foreach (var c in bench.Cores.OrderBy(c => c.Cpu))
                 BenchLines.Add(new InfoLine("CPU " + c.Cpu,
-                    string.Format(CultureInfo.CurrentCulture, "wake-up late by {0:0.0} µs median, {1:0.0} µs p95, {2:0} µs max · workload {3:0.0} ms · Windows rank {4} · idle {5:0} interrupts/s{6}",
+                    string.Format(CultureInfo.CurrentCulture, "wake-up late by {0:0.0} \u00B5s median, {1:0.0} \u00B5s p95, {2:0} \u00B5s max \u00B7 workload {3:0.0} ms \u00B7 Windows rank {4} \u00B7 idle {5:0} interrupts/s{6}",
                         c.WakeMedianUs, c.WakeP95Us > 0 ? c.WakeP95Us : c.WakeP99Us, c.WakeMaxUs, c.SpeedMs, c.SchedulingClass, c.InterruptsPerSec,
-                        plan.ReservedCpus.Contains(c.Cpu) ? " · kept free" : c.InterruptsPerSec > 1000 ? " (mostly devices pinned there now; not scored)" : "")));
+                        plan.ReservedCpus.Contains(c.Cpu) ? " \u00B7 kept free" : c.InterruptsPerSec > 1000 ? " (mostly devices pinned there now; not scored)" : "")));
             HasBench = true;
         }
     }
@@ -662,7 +662,7 @@ public class ModulePageViewModel : PageViewModel
     /// </summary>
     public string ScopeSentence =>
         _main.Engine is null
-            ? $"Applies to **{_module}** only."
+            ? $"Applies to {_module} only."
             : OtherTabsAgree()
                 ? $"Applies to {_module} only. Every other tab is on the same tier, so this is effectively the whole app."
                 : $"Applies to {_module} only. Other tabs keep their own tier - the rail shows each one.";
@@ -736,7 +736,7 @@ public class ModulePageViewModel : PageViewModel
 
     /// <summary>
     /// What pressing <c>Apply selected</c> would actually do, computed from the rows as they stand.
-    /// A preset changes which rows are ticked, but a tick on a row that is already applied does nothing —
+    /// A preset changes which rows are ticked, but a tick on a row that is already applied does nothing  - 
     /// so the counts, not the ticks, are the honest answer to "what will be used".
     /// </summary>
     private string _selectionSummary = "";
@@ -1214,7 +1214,7 @@ public sealed class SafetyPageViewModel : PageViewModel
     private string _degradedText = "";
     private string _brokenCopy = "";
 
-    public SafetyPageViewModel(MainViewModel main) : base("Safety", "")
+    public SafetyPageViewModel(MainViewModel main) : base("Safety", "\uE72E")
     {
         _main = main;
         RestorePointCommand = new RelayCommand(() => _ = CreateRestorePointAsync(), () => !Busy);
