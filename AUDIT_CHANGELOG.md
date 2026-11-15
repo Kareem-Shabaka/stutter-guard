@@ -366,6 +366,51 @@ that tag; it needs its own version.
 
 ---
 
+## Wave 13 - the two months the changelog skipped, shipped as 1.1.0
+
+Eight commits landed between this section's predecessor and the 1.1.0 binary. Recorded here because
+the alternative is an audit trail that stops exactly where the work started.
+
+| # | Bug | Fix | Where |
+|---|---|---|---|
+| 13.1 | `REG_MULTI_SZ` elements containing a newline were split into several, so the journal held a before-state that was never on the machine and `undo-all.ps1` would write back corrupted data | A JSON array per value; the legacy form is still read | `Journal.cs` |
+| 13.2 | The write-ahead file reached the OS cache, not the disk: a power cut could lose the record while the registry change survived - precisely what the WAL exists to prevent | `fsync` before the rename | `Journal.cs` |
+| 13.3 | A second unreadable journal overwrote the first `.broken` copy in the same second, destroying the last resort | Collision-proof name | `Journal.cs` |
+| 13.4 | The generated Process Lasso catch-all subtracted only the GPU's core, emitting `*.*,0,18-31` over 7 of the 8 interrupt cores (measured: 782 us median wake latency against 8.9 us) | `AffinityPlan.DeviceCpus` added; `SplitFor` subtracts every device LP and refuses to emit a useless mask | `Interrupts/AffinityPlanner.cs`, `Reports/LassoRules.cs` |
+| 13.5 | Affinity syntax used commas where Bitsum needs semicolons - latent only while ranges stayed contiguous | `FormatCpus` separator | `Detection/CpuTopology.cs` |
+| 13.6 | The app told users to disable thread priority boosts, which are Microsoft's documented +6 mouse and +8 sound wake boosts | Stopped recommending it | `Reports/LassoRules.cs` |
+| 13.7 | No tweak declared what it costs, so no preset could be enforced in code | `TweakCost` on every tweak; Essential/Safe/Costly/Everything; community-only never selected below Everything | `Model/Tweak.cs`, `Model/TweakPreset.cs` |
+| 13.8 | "Use this preset" only ticked boxes, so `Everything -> Safe` left the costly tweaks applied | `PresetTransition`: revert wins over tick | `Model/PresetTransition.cs` |
+| 13.9 | Webhook summaries were base64 and contained replacement characters; the thing approved was not the thing sent | Plain text, a full preview, one payload sent once | `Reports/TelemetryClient.cs` |
+| 13.10 | The restore point was taken after reverts had already run | Taken before any change | `UI/MainViewModel.cs` |
+
+Shipped as **1.1.0**: 971 assertions at release. The instruments behind the numbers - `WakeProbe`,
+`SpinLoad`, the latency and cold-wake probes, the A/B harness - are in `tools/`.
+
+---
+
+## Wave 14 - the catalogue that could not match, and the defaults that contradicted the evidence
+
+| # | Bug | Fix | Where |
+|---|---|---|---|
+| 14.1 | Every AMD rule was unreachable. Rows store `"23.9.1 (31.0.21029.1006)"`; a machine reports `"31.0.21029.1006"`, and 7 components never equals 4 - measured 0 of 33 detected, so a bugged AMD driver reported as clean | `VersionForms` compares each form against each form | `Catalog/DriverAuditor.cs` |
+| 14.2 | Rules were INF identifiers compared with device *instance* ids, a different string shape by definition. Nothing matched exactly, and the `Contains` fallback fired on the wrong device: the Realtek audio-component rule matched the Realtek Ethernet card | `Catalog/DriverMatcher.cs`: anchored glob over hardware ids, compatible ids and the instance id | `Catalog/` |
+| 14.3 | Six rows list several ids with `;` and only the first could ever fire - 9 ids dead | Patterns split into their ids | `Catalog/DriverMatcher.cs` |
+| 14.4 | The scan emitted only `PCI\\` nodes, so 22 of 77 rules could not fire on any machine, including one for a node present on the author's own board | `PnpNode` for every node with hardware ids; audited after the PCI pass | `Detection/PciDevices.cs`, `SystemProfile.cs` |
+| 14.5 | The action was computed by comparing the first number in the recommended text (23.12.1) with the WDDM build the machine reports (31.0.23013.1006), so an out-of-date AMD driver was told to **roll back** | `TryCompareLikeForLike`: only forms with the same component count | `Catalog/DriverAuditor.cs` |
+| 14.6 | The reachability test fed each pattern back to itself and asserted 77/77 while a real scan reached 5 | Per-id Windows-shaped identifier lists, all 33 WDDM forms, all 9 secondary ids, two negative guards | `tests/` |
+| 14.7 | Interrupt moderation was ticked on desktops and unticked on laptops - backwards, since the measured cost is desktop interrupts (about 88k/s off against about 6k at Medium) | Unticked everywhere, price stated in its own Cost field | `Tweaks/Network.cs` |
+| 14.8 | Flow Control off was community-graded, given the cost `"None."`, and ticked by default | Unticked everywhere; the cost is now described | `Tweaks/Network.cs` |
+| 14.9 | `PP_MclkDpmDisabled` could only confirm its own registry value, so a card stuck at a low memory clock looked like a success | Says the tick proves the value is set and nothing more | `Tweaks/AmdGpu.cs` |
+| 14.10 | DPC durations were called "large" with no budget attached | Microsoft's documented 100 us per DPC and 25 us per ISR, quoted against every figure | `Diagnostics/LatencyTriage.cs` |
+| 14.11 | SMIs - the one cause the OS cannot move - had no mention anywhere | A finding that appears only when there is DPC trouble, and says the app cannot measure them | `Diagnostics/LatencyTriage.cs` |
+| 14.12 | The 5000 ms processor check interval governs core parking too, and was emitted on paths that leave parking on, deferring a parking decision by up to five seconds | `ParkingHeldOff` decides the target; stock 15 ms otherwise | `Tweaks/Power.cs` |
+| 14.13 | The parking setting read as a benefit claim when its basis is the cold-wake tail, and neither architecture's commitment was stated on the plan row | Basis and commitment stated on both | `Tweaks/Power.cs` |
+| 14.14 | RSS keywords described LPs 20-23 while the interrupt mask named only 20 and 22, so queues on 21/23 got their DPC on a different CPU from their ISR | `MaskCpus` is the RSS range; the mask, the display text and `DeviceCpus` all follow it; `Clamp` narrows a kept pin instead of widening it | `Interrupts/AffinityPlanner.cs`, `Tweaks/Interrupts.cs` |
+| 14.15 | The NIC asked for two cores without looking at how many device cores existed | Two only when the budget can spare a pair after GPU, input and audio | `Interrupts/AffinityPlanner.cs` |
+
+---
+
 ## Test growth
 
 | Stage | Tests |
@@ -381,6 +426,8 @@ that tag; it needs its own version.
 | After Wave 10 (28-CPU matrix) | 828 |
 | After Wave 11 (MPO removal) | 859 |
 | After Wave 12 (latency triage) | **888** |
+| After Wave 13 (post-1.0.0 fixes, shipped as 1.1.0) | 971 |
+| After Wave 14 (catalogue, defaults, budgets, parking coupling, RSS alignment) | **1022** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 
@@ -393,12 +440,13 @@ Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest
    `DpcTimerRes.exe` is therefore a managed twin built with the in-box `csc.exe`, functionally
    identical (P/Invoke to `ntdll`), 6.6 KB instead of 40 KB, and it needs the .NET Framework 4.x
    that ships with Windows. `timerres.c` remains the reference native implementation.
-2. **RSS placement is not guaranteed.** NDIS spreads queues over the *contiguous* range
-   `[*RssBaseProcNumber, *RssMaxProcNumber]`, so with 2 queues the first two LPs are always the
-   SMT siblings of one core. `ChooseQueues` sets the queue count to fill the span (4 queues → 2 per
-   core), which is the most the registry keywords can express. Per-LP verification would need
-   `Get-NetAdapterRss` data that this Realtek driver does not populate.
-3. **#3 and #11/#12 have no automated coverage** — they live in the WPF layer the self-test
+2. **RSS placement follows the interrupt mask, but NDIS still spreads queues over a contiguous range.**
+   The keywords cannot express a non-contiguous set, so the adapter's mask is the range its queues cover
+   (`Assignment.MaskCpus`), and `ChooseQueues` sizes the queue count to fill that span. A pin kept from
+   an earlier run is never widened to make the two agree: `AffinityPlanner.Clamp` narrows the range
+   instead, and if nothing fits, no keywords are written and the row says why. Per-queue verification
+   would still need `Get-NetAdapterRss` data that this Realtek driver does not populate.
+3. **#3 and #11/#12 have no automated coverage** - they live in the WPF layer the self-test
    project does not reference.
 4. **Two `bad_drivers.json` groups share a `driverFile` + `hardwareIdPattern`** with overlapping
    bugged versions (Pascal `DEV_1B80`, Ampere `DEV_2204`). Harmless now that the most severe match

@@ -9,7 +9,7 @@
 > **"Why does a high-end gaming PC running at 200+ average FPS still hitch, micro-stutter, or drop audio?"**  
 > Average FPS measures raw compute throughput when scenes are static. **1% Lows, frame pacing, and DPC kernel latency** dictate what happens during an aim flick, a rapid turn, or an intense multiplayer firefight. Stutter Guard is built from the ground up to eliminate micro-stutters and lock in real-time responsiveness.
 
-Every optimization originates from verifiable latency profiling (e.g., AMD Ryzen 9 9950X3D + Radeon RX 9070 XT: worst LatencyMon interrupt-to-process drop from **733 µs → 11.6 µs**). Zero snake oil. Zero black-box registry scripts. Every tweak in the application documents **what it does**, **why it works**, **what it costs**, **failure modes**, and **the empirical evidence**.
+Every optimization originates from verifiable latency profiling, and every claim here is graded by what backs it. Stutter Guard's interrupt-placement work came out of a measured case on the author's own machine (Ryzen 9 9950X3D + Radeon RX 9070 XT): with the plan applied, a ready thread on a CPU reserved for interrupts waited a median of **8.9 µs** instead of **782 µs** while synthetic load held the interrupt cores busy. That number is the author's own measurement, not a third-party one, and it reproduces only under that load condition - an idle-desktop LatencyMon run on the same box shows a highest interrupt-to-process figure of about **320 µs**, which is a different metric and is not what the 8.9 figure describes. Zero snake oil. Zero black-box registry scripts. Every tweak in the application documents **what it does**, **why it works**, **what it costs**, **failure modes**, and **the empirical evidence**.
 
 ---
 
