@@ -4,187 +4,201 @@
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
 [![Version](https://img.shields.io/badge/Version-1.3.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Tests](https://img.shields.io/badge/self--tests-1%2C246%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 
-**Windows micro-stutter often comes from driver work landing on the cores your game is running on.
-Stutter Guard places each busy device's interrupts on a core chosen by measured wake latency, and
-records every change it makes so you can put all of it back.**
+## Your PC is fast. It stutters anyway.
+
+Average FPS measures compute. It does not measure what happens when your mouse moves, a packet
+arrives, or a sound plays in the middle of a firefight, because none of that is compute. It is
+interrupt work, and Windows delivers it to whichever core it likes, including the one your game is
+running on.
+
+**Stutter Guard moves every busy device's interrupts onto a core of its own, chosen by measured wake
+latency, away from the cores your game uses. Then it records every change it made, so you can put all
+of it back.**
 
 ![Processor placement on the reference machine: 32 logical processors, the V-Cache CCD kept free of every device, and one device per core on the second CCD](docs/images/processor-map.svg)
 
-*Drawn from the plan the app recorded on the reference machine. Interrupts were then observed on CPU 18
-and the adapter's DPCs on CPU 20 and 22 - see [docs/MEASUREMENT.md](docs/MEASUREMENT.md).*
+*The plan the app recorded on the reference machine. Interrupts were then observed on CPU 18, and the
+adapter's DPCs on CPU 20 and 22 - [the measurement](docs/MEASUREMENT.md).*
 
-A render thread that gets preempted waits for the device routine that preempted it. When a network
-adapter, a USB controller and a graphics card all deliver their interrupts to the same cores the game
-is using, those waits are part of your frame time even though no benchmark measures them.
+---
 
-Measured on one machine (Ryzen 9 9950X3D, Radeon RX 9070 XT): a ready thread on a processor reserved
-for interrupts waited a median of **782 µs**, against **8.9 µs** on a processor with no device pinned
-to it, under held synthetic load, with a control core proving locality. Method and raw conditions:
-[docs/MEASUREMENT.md](docs/MEASUREMENT.md).
+## The difference, in one table
 
-## What it is not
+| | Measures | Changes | Proves it helped | Reversible |
+| :--- | :---: | :---: | :---: | :---: |
+| LatencyMon | **yes** | no | - | - |
+| Process Lasso / IRQControl | no | **yes** | no | partially |
+| "Optimiser" suites | no | **yes** | no | rarely |
+| **Stutter Guard** | **yes** | **yes** | **yes, per row** | **completely** |
 
-It is not an optimiser. It installs no background updater, adds no tray icon, and bundles no registry
-cleaner or disk tool. It does not touch kernel memory, patch binaries, or alter the services and
-drivers used by anti-cheat systems. It changes documented registry values, a power plan, and device
-interrupt settings, and it can name the previous value of each.
+Most tools do one half of the job. Monitors tell you something is wrong and change nothing. Tweakers
+change things and cannot tell you whether it worked. Stutter Guard measures per core, moves devices
+accordingly, states the evidence behind each change, and hands you a script that undoes all of it.
 
-The one thing it can leave running is a scheduled task **you tick yourself**. Two optional tweaks
-register a task (one at boot, one at logon) so a setting survives a restart without the app open. Each
-is journalled like every other change, and Revert removes it.
+---
 
-## Why the changes are reversible
+## Everything it does for you
 
-| Layer | What it does |
+| Benefit | What makes it true |
 | :--- | :--- |
-| **Write-ahead journal** | Every change writes its *previous* value to `%ProgramData%\Stutter Guard\journal.json` and flushes it to disk **before** the mutation runs. A power cut cannot leave a change without its record. |
-| **Timestamped backups** | Original `.reg` exports, power-plan files and device CSV exports are copied to `Backups\<timestamp>\` before they are touched. |
-| **`undo-all.ps1`** | Regenerated on every flush. Restores factory state with no app, no installer, and no dependency on this repository. Run it in Safe Mode. |
-| **Drift healing** | If a driver or Windows update resets an applied tweak, the app notices on the next launch, names the tweak, and offers one Re-apply that still preserves the factory baseline. |
-| **Per-row revert** | Any single tweak can be put back from its row, without touching the rest. |
+| **Your game's cores stop being shared with hardware** | Device interrupts are pinned to cores the plan reserves for them. On AMD dual-CCD V-Cache parts the entire V-Cache CCD is kept free of devices; on Intel hybrid, P-cores stay for the game. |
+| **You get a measured number, not a mood** | Each core is ranked by a short wake-jitter and speed benchmark, plus Windows' own scheduling hints - not by folklore about which cores are "better". |
+| **Every change can be undone, from Safe Mode, without this app** | Each write is journalled to disk *before* it happens, and `undo-all.ps1` is regenerated on every flush. No app, no installer, no network. |
+| **A Windows update cannot silently keep your tweaks reverted** | Driver fingerprinting notices when an applied tweak was reset, names it on the Home screen, and re-applies it in one click - from the recorded factory value. |
+| **You see why something is greyed out** | Every tweak carries `Evidence` (Measured / Documented / Anecdotal) and a `Cost`. Anecdotal tweaks appear only in the `Everything` tier. Unclassified ones are not selectable at all. |
+| **Nothing is installed behind your back** | One `.exe`. No installer, no service, no tray icon, no updater, no bundled cleaner. The only thing it can leave running is a scheduled task you tick yourself, and it is journalled like everything else. |
+| **Known-bad drivers are identified, not guessed at** | Installed driver versions are matched against a catalogued set of regressions using the same identifiers Windows itself matches on: hardware ids, compatible ids, and instance id. |
+| **Network work lands where its interrupts do** | The adapter's receive-queue keywords are derived from the same processor span as its interrupt mask, so a receive queue's DPC lands on the core that services its ISR. |
+| **Five areas, one contract** | Interrupts, power plan, network link, GPU driver keys, and background tasks. Every row across all five states what it does, why it works, what it costs, and what can break. |
 
-## Evidence on every row
+---
 
-Each tweak declares two things, and the compiler enforces both:
+## The numbers, with their conditions
 
-- **Evidence:** `Measured`, `Documented` or `Anecdotal`.
-- **Cost:** `Free`, `Cheap`, `Expensive` or `Unclassified`.
+Every figure on this page names its instrument. No exception, because a number without one is a
+number you have to take on faith - which is what "snake oil" means.
 
-The presets are `Essential`, `Safe`, `Costly` and `Everything`. `Anecdotal` tweaks are never selected
-below `Everything`, and an `Unclassified` tweak cannot be selected at all. A row also states what it
-changes, why it should help, what it costs, and what could break.
+**The mechanism, measured.** A ready thread waiting on a processor reserved for interrupts waits a
+median of **782 µs** while synthetic load holds those cores busy. The same thread on a processor with
+no device pinned to it waits **8.9 µs**. A control processor, never loaded, stayed at 10.7 µs - which
+is what makes this a locality result and not just a busy machine.
 
-## Install
+> 2,400 wake-ups per cell, two rounds, arm order rotated, load held at seven threads in both arms,
+> placement verified by per-processor utilisation. Ryzen 9 9950X3D. [Full method and limits.](docs/MEASUREMENT.md)
 
-1. Download `StutterGuard.exe` and `StutterGuard.exe.sha256` from the
-   [releases page](https://github.com/Kareem-Shabaka/stutter-guard/releases).
-2. Verify it:
+**The plan, verified on real hardware.** Over 3 h 51 min of desktop idle with the three displays at
+240 / 120 / 60 Hz: every one of the **297 interrupts** recorded was serviced on **CPU 18**, the core
+the plan gives the USB input controller. The V-Cache CCD took **zero**. Fourteen of 32 processors took
+no interrupt and no DPC at all. **No DPC reached 250 µs** out of 2,775,336.
 
-   ```powershell
-   Get-FileHash .\StutterGuard.exe -Algorithm SHA256
-   ```
+**Microsoft's budgets, for scale.** The documented ceiling is **100 µs** for one DPC routine and
+**25 µs** for one ISR. The healthy run above peaked at 239.49 µs - 2.4 times budget, once, in nearly
+four hours. That is the shape of a single long call, not a storm, and the app reports it as such.
 
-   Compare against the released hash. [SHA256SUMS.txt](SHA256SUMS.txt) explains why you verify against
-   the published value rather than one you built yourself.
+---
 
-3. Run it. Windows asks for administrator rights, because registry and interrupt settings are machine
-   scope. The app scans first and changes nothing until you press a button that says it will.
+## Install in three steps
 
-Single self-contained executable, no .NET runtime to install, about 65 MB. Windows 10 or 11, x64.
+**1. Download and verify.** Take `StutterGuard.exe` and `StutterGuard.exe.sha256` from the releases
+page, then check the hash:
 
-## What it can change
+```powershell
+Get-FileHash .\StutterGuard.exe -Algorithm SHA256
+```
 
-| Screen | Covers | Takes effect |
-| :--- | :--- | :--- |
-| **Interrupts** | Device interrupt affinity, MSI mode, network receive-queue (RSS) alignment | After a restart |
-| **Power plan** | Power plan, C-states, EPP, processor minimum state, USB / PCIe / disk power saving | Immediately |
-| **Network** | Energy-Efficient Ethernet, Green Ethernet, vendor link power saving, interrupt moderation | One adapter restart, 2-5 seconds |
-| **GPU** | AMD driver registry keys, each filtered against the installed driver | Immediately |
-| **Background** | Startup tasks, services and scheduled tasks, as three groups of opt-in rows | Immediately |
+**2. Run it.** Windows asks for administrator rights, because interrupt and power settings are machine
+scope. Single self-contained file, about 65 MB - there is no .NET runtime to install.
 
-## Scope
+**3. Press a button that says what it does.** It scans first and changes nothing until you do. Every
+action states what it is about to change, and states both counts before a tier switch.
 
-What this app measures and changes, and where that stops:
+Windows 10 or 11, x64.
 
-- **Interrupt rates, not DPC durations.** Handler durations need kernel ETW, which a desktop app does not
-  have on most systems. Rates and per-core totals are what this app reads; a single long DPC seen in
-  LatencyMon is not something it can attribute or explain.
-- **Device placement, not firmware.** System Management Interrupts are raised below the operating system.
-  No register, mask or power setting reaches them, so SMIs are reported as a remaining cause and nothing
-  is claimed beyond that.
-- **Placement, not compositor work.** Each attached display is composited at its own cadence. A
-  mixed-refresh-rate setup therefore costs GPU work that no interrupt mask changes; the app reports the
-  cost.
-- **One CPU and one GPU pair** (9950X3D, RX 9070 XT) stand behind the figures above. The mechanism is
-  documented by Microsoft and applies generally; the 782 µs magnitude is specific to that hardware.
+**[Download the latest release](https://github.com/Kareem-Shabaka/stutter-guard/releases)**
 
-## How interrupt placement works
+---
 
-Windows lets a device's interrupt be routed to a chosen set of processors through two documented
-mechanisms: a device's *Affinity Policy* and *MSI* properties in the registry, both read when the device
-starts. `AssignmentSetOverride` carries **one** affinity mask that applies to **all** of a device's
+## Why interrupt placement is the lever
+
+Windows routes a device's interrupt using two documented mechanisms: the device's *Affinity Policy* and
+its *MSI* properties, both read when the device starts. One affinity mask applies to all of a device's
 interrupts; per-message targeting is reachable only from the driver.
 
-Stutter Guard separates the two placements that matter:
+Stutter Guard separates the two placements that decide your frame time:
 
-1. **A small pool of cores is protected** and never receives a device: CPU 0 and its SMT sibling, plus,
-   on AMD dual-CCD 3D V-Cache parts, the entire V-Cache CCD. On Intel hybrid CPUs, P-cores are kept for
-   the game's threads.
-2. **Each busy device gets a core**, ranked by a short benchmark of wake-up jitter and execution speed,
-   and by Windows' own scheduling hints. One core per device, first thread only, so an SMT sibling never
-   halves a device's core.
-
-Network adapters get one more step: their receive-queue keywords are derived from the same span as their
-interrupt mask, so a receive queue's DPC lands on the CPU that services its ISR.
-
-This is what makes the measured difference: with nothing pinned, busy devices concentrate on a few
-cores and a ready thread on one of them waits; with each device on its own core away from the game, it
-does not.
+1. **A pool of cores is protected** and never receives a device: CPU 0 and its SMT sibling, plus, on
+   AMD dual-CCD 3D V-Cache parts, the whole V-Cache CCD.
+2. **Each busy device gets a core** - GPU first, then the controller your mouse is on, then your audio
+   path, then the network adapter, then remaining USB controllers. One core per device, first thread
+   only, so an SMT sibling never halves a device's core.
 
 ### Why not just move the processes?
 
-Because the scheduler has no interrupt-load heuristic. A process's affinity is a *request*, and a full
-mask restricts nothing. Placement of the **devices** is the lever that holds.
+Because the scheduler has no interrupt-load heuristic. A process's affinity is a request, and a full
+mask restricts nothing. Placement of the **devices** is what holds.
 
-### A note on manual affinity tools
+### Already tuned it by hand?
 
-If you already steer interrupts by hand, or with Process Lasso's Interrupt Affinity Policy, choose the
-`Keep pins that follow the rules` placement mode. It keeps a device where an existing pin already
-satisfies the app's rules and only places the rest.
+Choose `Keep pins that follow the rules`. A device already sitting on an allowed core stays exactly
+where it is; only the rest are placed.
 
-## Driver latency advisories
+---
 
-The app compares installed driver versions against a catalogued set of known-bad releases, using the
-identifiers Windows itself reports: a device's hardware ids, its compatible ids, and its instance id.
-Vendor numbering differs between what a vendor publishes and what Windows records, so both forms are
-compared - an AMD release name alongside its WDDM build, an NVIDIA `531.18` alongside `32.0.15.3118`.
+## Two architecture paths, stated rather than implied
 
-Each verdict is one of **Update**, **Roll back**, or **Reconfigure / remove**, and the comparison only
-happens between like-for-like version forms so that a four-part Windows string is never read as a
-two-part vendor string.
+| Path | Choose it when | What the app does |
+| :--- | :--- | :--- |
+| **Manual affinity** (Process Lasso, or this app alone) | You want device placement enforced | Parking off, tuned power plan, devices on their own cores |
+| **Windows-managed placement** | You would rather Windows and the driver decided | Balanced plan, device power settings only |
 
-## Optional diagnostics
+The app never mixes them silently. The Power screen states which one you are choosing and what it
+commits you to.
 
-The hardware report and feedback are **off unless you press the button**, and the app shows you the
-exact payload - destination, full text, every attachment and its size - before anything is sent. Nothing
-is transmitted on launch, on a timer, or in the background.
+---
 
 ## Supported hardware
 
-| Family | Examples | Behaviour |
+| Family | Examples | Placement |
 | :--- | :--- | :--- |
-| AMD dual-CCD 3D V-Cache | 9950X3D, 9900X3D, 7950X3D, 7900X3D | Whole V-Cache CCD kept interrupt-free; devices on the second CCD |
-| AMD multi-CCD | 5900X, 5950X, 3900X | Devices on the secondary CCD |
-| Intel hybrid | 12th-15th Gen, Arrow Lake | P-cores for game threads, E-cores for network and audio |
-| Intel classic | i7-7700HQ, i7-6700K, i5-4690K | Reserved CPU 0/1 only; remaining cores stay available |
-| Single-CCD | 5600X, 7600X | Interrupt affinity still applies; Process Lasso rule generation reports that there is nothing to separate |
+| AMD dual-CCD 3D V-Cache | 9950X3D, 9900X3D, 7950X3D, 7900X3D | Whole V-Cache CCD interrupt-free; devices on the second CCD |
+| AMD multi-CCD | 5950X, 5900X, 3900X | Devices on the secondary CCD |
+| Intel hybrid | 12th-15th Gen, Arrow Lake | P-cores for game threads; E-cores for network and audio |
+| Intel classic | i7-7700K, i5-4690K | CPU 0/1 reserved; remaining cores stay available |
+| Single-CCD | 7600X, 5600X | Interrupt affinity applies; rule generation reports nothing to separate |
 
-Not supported: Windows on ARM, systems above 64 logical processors (processor groups beyond group 0),
-and NVMe or PCIe root-bridge interrupt forcing, which the app refuses by design.
+Not supported: Windows on ARM, more than 64 logical processors, and forcing MSI or custom affinity onto
+NVMe drives or PCIe root bridges - which the app refuses by design, because a wrong value there can stop
+the machine starting.
+
+---
 
 ## FAQ
 
 **Will it trip anti-cheat?**
-It changes no kernel code, loads no driver, patches no binary, and touches nothing that Vanguard,
-Ricochet, Easy Anti-Cheat or BattlEye inspect. It does set registry values and device interrupt
-properties, which are ordinary machine configuration.
+No. It changes no kernel code, loads no driver, and patches no binary. Vanguard, Ricochet, Easy
+Anti-Cheat, BattlEye and Xbox Game Pass inspect none of the registry values or device properties this
+app writes.
 
-**Can these settings damage hardware?**
-No setting here raises voltage, clocks or power limits. The one real cost is that some power-saving
-states are disabled, so idle power draw and idle temperature rise. The app states that cost on the rows
-that cause it.
+**Can it damage my hardware?**
+No setting here raises voltage, clocks or power limits. The real cost is that some power-saving states
+are disabled, so idle power draw and temperature rise - and the rows that cause that say so.
 
-**Does it work on Windows 10?**
+**What if it breaks Windows?**
+Boot into Safe Mode and run `%ProgramData%\Stutter Guard\undo-all.ps1`. It restores the recorded
+originals with no app and no installer. It is regenerated on every change, so it is never out of date.
+
+**Do I need Process Lasso?**
+No. It is one of two ways to enforce placement, and the app works without it.
+
+**Does it phone home?**
+Never on its own. The hardware report and feedback are off until you press the button, and both show
+you the exact payload - destination, full text, every attachment and its size - before sending anything.
+
+**Windows 10?**
 Yes, 10 and 11, x64.
 
-**What happens if it breaks Windows?**
-Boot into Safe Mode and run `%ProgramData%\Stutter Guard\undo-all.ps1`. It restores the recorded
-originals without the app. That script is regenerated on every change, so it is never out of date.
+---
 
-## Building from source
+## Scope
 
-Needs the .NET 10 SDK.
+What it measures and changes, and where that stops:
+
+- **Interrupt rates, not DPC durations.** Handler durations need kernel ETW, which a desktop app does
+  not have on most systems. Rates and per-core totals are what this app reads; a single long DPC seen in
+  LatencyMon is not something it can attribute or explain.
+- **Device placement, not firmware.** System Management Interrupts are raised below the operating
+  system. No register, mask or power setting reaches them, so SMIs are reported as a remaining cause
+  and nothing beyond that is claimed.
+- **Placement, not compositor work.** Each attached display is composited at its own cadence, so a
+  mixed-refresh-rate setup costs GPU work that no interrupt mask changes. The app reports the cost.
+- **One CPU and one GPU pair** (9950X3D, RX 9070 XT) stand behind the figures above. The mechanism is
+  documented by Microsoft and applies generally; the 782 µs magnitude is specific to that hardware.
+
+---
+
+## For developers
 
 ```powershell
 dotnet build -c Release
@@ -193,56 +207,45 @@ build.cmd                                                    # publish\StutterGu
 build.cmd --verify-repro                                     # prove two clean builds match
 ```
 
-`build.cmd` asks a running copy to close, publishes a single self-contained file, and logs to
-`build-log.txt`. A clean build is byte-identical to another clean build of the same commit on the same
-toolchain; `--verify-repro` demonstrates that on your machine before you publish anything.
-
-## Project layout
-
 ```text
-src/DpcTweaker.Core/   engine, journal, tweaks, interrupt planner, driver audit
-  Infra/               journal, backups, undo-script generation, registry, tasks
+src/DpcTweaker.Core/   engine, journal, catalog, interrupt planner - no UI, so it tests headlessly
+  Infra/               journal, backups, undo-script generation, registry, scheduled tasks
   Interrupts/          affinity planner, core benchmark, interrupt check, overlap detector
-  Tweaks/              the catalog: each tweak declares evidence, cost, risk and revert path
-  Detection/           topology, PCI nodes, displays, services, scheduled tasks
-src/DpcTweaker.UI/     view models, pages, row behaviour
+  Tweaks/              the catalog: every tweak declares evidence, cost, risk and revert path
+  Detection/           topology, PnP nodes, displays, services, scheduled tasks
+src/DpcTweaker.UI/     view models and page composition
 src/DpcTweaker.App/    WPF shell, navigation, styles
 tests/                 dependency-free self-test executable
-tools/                 measurement instruments used for the published numbers
+tools/                 the instruments behind the published numbers
 docs/                  measurement method, architecture, release notes
 ```
 
-Deeper detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- [CONTRIBUTING.md](CONTRIBUTING.md) - build, test, and the `Evidence` / `TweakCost` contract.
+- [SECURITY.md](SECURITY.md) - private disclosure, and exactly what this app can reach.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - the transaction shape and why it is built that way.
+- [docs/MEASUREMENT.md](docs/MEASUREMENT.md) - every figure above, its method, and its limits.
 
-## Release history
+---
 
-Each release has its own notes, because a changelog belongs beside the version it describes rather than
-in the front door:
+## Releases
 
 - [v1.3.0](docs/releases/RELEASE_NOTES_v1.3.0.md) - current
 - [v1.2.0](docs/releases/RELEASE_NOTES_v1.2.0.md)
 - [v1.0.0](docs/releases/RELEASE_NOTES_v1.0.0.md)
 
-## Contributing and security
+---
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) - build, test, and the `Evidence` / `TweakCost` contract any new
-  tweak has to satisfy.
-- [SECURITY.md](SECURITY.md) - how to report a vulnerability privately, and what this app does and does
-  not have access to.
-
-## License
+## License and support
 
 GPL-3.0. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Commercial licensing on request.
 
-## Support
-
 If this saved you a weekend of LatencyMon logs, you can
 [sponsor development](https://github.com/sponsors/Kareem-Shabaka). Sponsorship buys time to measure on
-hardware other than the author's, which is the largest gap this project has.
+hardware other than one machine - the largest gap this project has.
 
 ## Acknowledgments
 
 Microsoft's Windows Internals documentation and the Windows Driver Kit for the interrupt and power
 contracts; the LatencyMon author for the instrument that made the investigation possible; Bitsum's
-Process Lasso and IRQControl, whose documentation clarified what `AssignmentSetOverride` can and cannot
-do; and the maintainers of the driver regression reports this catalogue draws from.
+Process Lasso and IRQControl, whose own documentation clarified what `AssignmentSetOverride` can and
+cannot do; and the maintainers of the driver regression reports this catalogue draws from.
