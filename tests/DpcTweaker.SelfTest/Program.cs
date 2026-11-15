@@ -63,6 +63,193 @@ Console.WriteLine("CpuTopology.Parse");
     Check("CPU 17 is a second thread on core 8", t.Cpus.Single(c => c.Index == 17) is { IsSecondThread: true, CoreId: 8 });
     Check("not hybrid", !t.IsHybrid);
     Check("FormatCpus ranges", CpuTopology.FormatCpus(new[] { 0, 1, 2, 5, 7, 8 }) == "0-2,5,7-8");
+    Check("FormatCpus separator: Process Lasso needs semicolons, not commas",
+        CpuTopology.FormatCpus(new[] { 0, 1, 2, 5, 7, 8 }, ";") == "0-2;5;7-8",
+        CpuTopology.FormatCpus(new[] { 0, 1, 2, 5, 7, 8 }, ";"));
+    Check("FormatCpus separator: a disjoint mask carries no comma",
+        !CpuTopology.FormatCpus(new[] { 0, 1, 2, 3, 4, 5, 16, 18, 20 }, ";").Contains(","));
+
+    // Journal round-trip: what RegValue.Serialize writes must Deserialize back exactly, because the
+    // whole revert path is journal.json -> undo-all.ps1. A REG_MULTI_SZ element may contain a newline,
+    // which a newline-joined form silently split into separate elements.
+    foreach (var (kind, value, label) in new (RegistryValueKind, object, string)[]
+    {
+        (RegistryValueKind.String, "a\nb", "String with newline"),
+        (RegistryValueKind.String, "", "empty String"),
+        (RegistryValueKind.MultiString, new[] { "a", "b" }, "MultiString 2 items"),
+        (RegistryValueKind.MultiString, new[] { "a\nb", "c" }, "MultiString item containing newline"),
+        (RegistryValueKind.MultiString, new[] { "" }, "MultiString single empty"),
+        (RegistryValueKind.MultiString, Array.Empty<string>(), "MultiString zero items"),
+        (RegistryValueKind.Binary, new byte[] { 0, 255 }, "Binary"),
+        (RegistryValueKind.Binary, Array.Empty<byte>(), "empty Binary"),
+    })
+    {
+        var v = new RegValue(true, kind, value);
+        object back = RegValue.Deserialize(kind, v.Serialize());
+        var roundTripped = new RegValue(true, kind, back);
+        Check($"journal round-trip: {label}", roundTripped.Serialize() == v.Serialize(),
+            $"{v.Serialize()} -> {roundTripped.Serialize()}");
+    }
+
+    // A journal written before the MultiString change joined elements with a newline; it must still load.
+    var legacy = (string[])RegValue.Deserialize(RegistryValueKind.MultiString, "x\ny");
+    Check("journal reads a legacy newline-joined MultiString", legacy.SequenceEqual(new[] { "x", "y" }), string.Join("|", legacy));
+
+Console.WriteLine("Tweak presets: cost classes gate the defaults");
+{
+    bool Sel(TweakPreset p, TweakCost c, Evidence e) => TweakPresetSelector.Selects(p, c, e);
+
+    // The ladder: each step admits exactly one more cost class.
+    Check("Essential takes Free only",
+        Sel(TweakPreset.Essential, TweakCost.Free, Evidence.Measured) &&
+        !Sel(TweakPreset.Essential, TweakCost.Small, Evidence.Measured) &&
+        !Sel(TweakPreset.Essential, TweakCost.Expensive, Evidence.Measured));
+    Check("Safe adds Small but not Expensive",
+        Sel(TweakPreset.Safe, TweakCost.Free, Evidence.Measured) &&
+        Sel(TweakPreset.Safe, TweakCost.Small, Evidence.Measured) &&
+        !Sel(TweakPreset.Safe, TweakCost.Expensive, Evidence.Measured));
+    Check("Costly adds the expensive ones",
+        Sel(TweakPreset.Costly, TweakCost.Expensive, Evidence.Measured));
+
+    // The invariant: community-only evidence is never chosen for the user below Everything.
+    // This is what would have caught the flow-control and held-timer defaults.
+    foreach (var p in new[] { TweakPreset.Essential, TweakPreset.Safe, TweakPreset.Costly })
+    {
+        Check($"{p}: never selects Anecdotal (free, small, expensive)",
+            !Sel(p, TweakCost.Free, Evidence.Anecdotal) &&
+            !Sel(p, TweakCost.Small, Evidence.Anecdotal) &&
+            !Sel(p, TweakCost.Expensive, Evidence.Anecdotal));
+    }
+    Check("Everything does select Anecdotal", Sel(TweakPreset.Everything, TweakCost.Small, Evidence.Anecdotal));
+
+    // Silence is not consent: an unclassified tweak is never ticked by any preset.
+    foreach (var p in Enum.GetValues<TweakPreset>())
+        Check($"{p}: never selects Unclassified", !Sel(p, TweakCost.Unclassified, Evidence.Measured));
+
+    // Every exclusion has a reason the UI can show.
+    Check("excluded Expensive explains itself",
+        TweakPresetSelector.ExclusionReason(TweakPreset.Safe, TweakCost.Expensive, Evidence.Measured) is { Length: > 0 });
+    Check("excluded Anecdotal explains itself",
+        TweakPresetSelector.ExclusionReason(TweakPreset.Safe, TweakCost.Small, Evidence.Anecdotal) is { Length: > 0 });
+    Check("selected tweak has no exclusion reason",
+        TweakPresetSelector.ExclusionReason(TweakPreset.Safe, TweakCost.Free, Evidence.Measured) is null);
+    Check("every preset has a label and a description",
+        Enum.GetValues<TweakPreset>().All(p => TweakPresetSelector.Label(p).Length > 0 && TweakPresetSelector.Description(p).Length > 0));
+
+    // "What will be used" — a tick alone cannot answer it, so the classification is status-first.
+    RowFacts F(bool sel, TweakCost c = TweakCost.Free, Evidence e = Evidence.Measured,
+               TweakStatus s = TweakStatus.NotApplied, bool applicable = true, bool dflt = true, string title = "t")
+        => new(title, title, sel, applicable, dflt, c, e, s);
+
+    var all = new[] { F(true, title: "a"), F(true, title: "b") };
+    var c1 = SelectionSummary.Compute(TweakPreset.Safe, all);
+    Check("preview counts selected rows as will-be-applied", c1.WillApply.Count == 2);
+    Check("preview lists the titles", c1.WillApply.SequenceEqual(new[] { "a", "b" }));
+
+    // A ticked row that is already applied changes nothing: done, not will-apply.
+    var c2 = SelectionSummary.Compute(TweakPreset.Safe, new[] {
+        F(true, s: TweakStatus.Applied), F(false, s: TweakStatus.Applied), F(false, s: TweakStatus.PendingReboot) });
+    Check("already-applied rows are counted done, never will-apply (even when ticked)",
+        c2.WillApply.Count == 0 && c2.AlreadyDone == 3, $"will={c2.WillApply.Count} done={c2.AlreadyDone}");
+
+    // Unticked for each distinct reason.
+    var c3 = SelectionSummary.Compute(TweakPreset.Safe, new[] {
+        F(false, TweakCost.Expensive),            // skipped by preset
+        F(false, TweakCost.Free, Evidence.Anecdotal), // skipped (anecdotal)
+        F(false, TweakCost.Free, dflt: false),    // opt-in only
+        F(false),                                 // idle: should be ticked but is not
+        F(false, applicable: false) });           // not applicable
+    Check("unticked reasons are separated",
+        c3.SkippedByPreset == 2 && c3.OptInOnly == 1 && c3.Idle == 1 && c3.NotApplicable == 1);
+
+    // Text is never empty and never claims work when there is none.
+    string d1 = SelectionSummary.Describe(TweakPreset.Safe, c1);
+    Check("describe names the count and the button", d1.Contains("2 will be applied") && d1.Contains("Apply selected"), d1);
+    string d0 = SelectionSummary.Describe(TweakPreset.Safe, c2);
+    Check("describe says nothing will be applied when none will", d0.StartsWith("nothing will be applied"), d0);
+    Check("describe mentions the preset by short name",
+        SelectionSummary.Describe(TweakPreset.Safe, c3).Contains("skipped by Safe"),
+        SelectionSummary.Describe(TweakPreset.Safe, c3));
+
+    // Preview truncation.
+    var many = Enumerable.Range(0, 9).Select(i => F(true, title: "t" + i)).ToArray();
+    string pm = SelectionSummary.Preview(SelectionSummary.Compute(TweakPreset.Safe, many), show: 6);
+    Check("preview truncates and counts the remainder", pm.Contains("and 3 more"), pm);
+    Check("preview with no work explains why", SelectionSummary.Preview(c2).Length > 0);
+    Check("ShortLabel drops the parenthetical", SelectionSummary.ShortLabel(TweakPreset.Safe) == "Safe", SelectionSummary.ShortLabel(TweakPreset.Safe));
+
+    // Safe-recommended tweaks sort above the ones that ask more, which is also what makes the
+    // preset picker visible on a machine where everything is already applied.
+    Check("rank: Safe set is first", TweakPresetSelector.RecommendationRank(TweakCost.Free, Evidence.Measured) == 0 &&
+        TweakPresetSelector.RecommendationRank(TweakCost.Small, Evidence.Documented) == 0);
+    Check("rank: expensive sits between safe and unproven",
+        TweakPresetSelector.RecommendationRank(TweakCost.Expensive, Evidence.Measured) == 1);
+    Check("rank: anecdotal is unproven regardless of cost",
+        TweakPresetSelector.RecommendationRank(TweakCost.Free, Evidence.Anecdotal) == 2 &&
+        TweakPresetSelector.RecommendationRank(TweakCost.Small, Evidence.Anecdotal) == 2);
+    Check("rank: unclassified is last", TweakPresetSelector.RecommendationRank(TweakCost.Unclassified, Evidence.Measured) == 3);
+    Check("rank: ordering is total and stable across a mixed list",
+        new[] {
+            (TweakCost.Unclassified, Evidence.Measured), (TweakCost.Free, Evidence.Anecdotal),
+            (TweakCost.Expensive, Evidence.Measured), (TweakCost.Small, Evidence.Measured),
+            (TweakCost.Free, Evidence.Documented) }
+        .OrderBy(x => TweakPresetSelector.RecommendationRank(x.Item1, x.Item2))
+        .Select(x => TweakPresetSelector.RecommendationRank(x.Item1, x.Item2))
+        .SequenceEqual(new[] { 0, 0, 1, 2, 3 }));
+    Check("every rank has a label",
+        Enumerable.Range(0, 4).All(r => TweakPresetSelector.RankLabel(r).Length > 0));
+
+    // The author's own case: everything already applied, so nothing can tick. The preview must say why.
+    var allApplied = new[] { F(false, s: TweakStatus.Applied), F(false, s: TweakStatus.Applied) };
+    string pa = SelectionSummary.Preview(SelectionSummary.Compute(TweakPreset.Safe, allApplied));
+    Check("all-applied preview explains the preset still sets the order",
+        pa.Contains("already applied") && pa.Contains("order"), pa);
+
+    // Switching presets is a declared desired state: going Everything -> Safe must put back what Safe
+    // leaves out, not merely stop ticking it. This is the case the author asked for.
+    RowFacts A(string id, TweakCost c, Evidence e, TweakStatus s, bool sel = false)
+        => new(id, id, sel, true, true, c, e, s);
+
+    var machine = new[]
+    {
+        A("free-applied",     TweakCost.Free,      Evidence.Measured,  TweakStatus.Applied),
+        A("small-applied",    TweakCost.Small,     Evidence.Documented,TweakStatus.Applied),
+        A("costly-applied",   TweakCost.Expensive, Evidence.Measured,  TweakStatus.Applied),
+        A("unproven-applied", TweakCost.Small,     Evidence.Anecdotal, TweakStatus.Applied),
+        A("free-missing",     TweakCost.Free,      Evidence.Measured,  TweakStatus.NotApplied, sel: true),
+    };
+
+    var toSafe = PresetTransition.Plan(TweakPreset.Safe, machine);
+    Check("Everything -> Safe reverts the costly tweak", toSafe.ToRevert.Contains("costly-applied"), string.Join(",", toSafe.ToRevert));
+    Check("Everything -> Safe reverts the unproven tweak", toSafe.ToRevert.Contains("unproven-applied"), string.Join(",", toSafe.ToRevert));
+    Check("Everything -> Safe leaves the safe ones alone",
+        !toSafe.ToRevert.Contains("free-applied") && !toSafe.ToRevert.Contains("small-applied"), string.Join(",", toSafe.ToRevert));
+    Check("Everything -> Safe applies what is missing", toSafe.ToApply.SequenceEqual(new[] { "free-missing" }), string.Join(",", toSafe.ToApply));
+
+    // Revert wins over the tick: a ticked row the preset excludes is still put back.
+    var tickedButExcluded = new[] { A("costly-ticked", TweakCost.Expensive, Evidence.Measured, TweakStatus.Applied, sel: true) };
+    Check("a ticked row outside the preset is still reverted",
+        PresetTransition.Plan(TweakPreset.Safe, tickedButExcluded).ToRevert.Contains("costly-ticked"));
+
+    // Nothing to do when the machine already matches.
+    var safeOnly = new[] { A("free-applied", TweakCost.Free, Evidence.Measured, TweakStatus.Applied) };
+    Check("already-matching preset is a no-op", PresetTransition.Plan(TweakPreset.Safe, safeOnly).IsNoOp);
+
+    // Widening applies, never reverts.
+    var toEverything = PresetTransition.Plan(TweakPreset.Everything,
+        new[] { A("unproven-missing", TweakCost.Small, Evidence.Anecdotal, TweakStatus.NotApplied, sel: true) });
+    Check("Safe -> Everything only applies, never reverts",
+        toEverything.ToRevert.Count == 0 && toEverything.ToApply.Contains("unproven-missing"));
+
+    // Not-applicable rows are never touched either way.
+    var na = new[] { new RowFacts("na", "na", true, false, true, TweakCost.Free, Evidence.Measured, TweakStatus.Applied) };
+    Check("not-applicable rows are ignored by a transition", PresetTransition.Plan(TweakPreset.Essential, na).IsNoOp);
+
+    // The confirmation text must state both counts and admit that it puts things back.
+    string tx = PresetTransition.Describe(TweakPreset.Safe, toSafe);
+    Check("transition text names both counts", tx.Contains("apply 1") && tx.Contains("put back 2"), tx);
+    Check("transition text warns it restores previous values", tx.Contains("restored to the value it had"), tx);
+    Check("no-op transition says so", PresetTransition.Describe(TweakPreset.Safe, PresetTransition.Plan(TweakPreset.Safe, safeOnly)).Contains("Nothing to change"));}
 }
 
 Console.WriteLine("DriverStringScanner");
@@ -264,6 +451,12 @@ Console.WriteLine("Interrupt plan: the desktop (9950X3D, its real devices)");
     Check("empty CPU USB controllers pinned too", plan.Assignments.Count(a => a.Role == DeviceRole.OtherUsb) == 3, Map());
     Check("storage, PSP, bridges, disabled Wi-Fi left alone", plan.Assignments.All(a => a.Device.Kind is not (PciKind.Storage or PciKind.Never) && a.Device.Started), Map());
     Check("8 cores used, none shared", plan.Assignments.Sum(a => a.Cpus.Length) == 8 && plan.Assignments.All(a => !a.Shared), Map());
+    Check("DeviceCpus = the union of the pinned CPUs",
+        string.Join(",", plan.DeviceCpus) == "16,18,20,22,24,26,28,30", string.Join(",", plan.DeviceCpus));
+    Check("DeviceCpus are first threads only, not sibling-expanded",
+        plan.DeviceCpus.All(c => c % 2 == 0) && plan.DeviceCpus.Count == 8, string.Join(",", plan.DeviceCpus));
+    Check("DeviceCpus never overlap the cores kept free of devices",
+        !plan.DeviceCpus.Intersect(plan.ReservedCpus).Any(), string.Join(",", plan.DeviceCpus));
     Check("disabled Wi-Fi noted", plan.Notes.Any(n => n.Contains("Qualcomm")));
     Console.WriteLine("        plan: " + Map());
 
@@ -535,7 +728,16 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var plan = AffinityPlanner.Plan(t, Sets(t, _ => 0), null, DesktopDevices());
     var split = LassoRules.SplitFor(profile, plan);
     Check("games on the V-Cache CCD 0-15", split is not null && CpuTopology.FormatCpus(split.GameCpus) == "0-15");
-    Check("catch-all 18-31 (GPU core 16/17 left out, like the author's)", split is not null && CpuTopology.FormatCpus(split.OtherCpus) == "18-31", split is null ? "" : CpuTopology.FormatCpus(split.OtherCpus));
+    // The defect: this used to be "18-31", exactly the CPUs the interrupt plan reserved for devices.
+    // The expected value is the mask validated on real hardware (0xAAAAFFFF).
+    Check("catch-all excludes every device CPU (was 18-31, the bug)",
+        split is not null && CpuTopology.FormatCpus(split.OtherCpus, ";") == "0-15;17;19;21;23;25;27;29;31",
+        split is null ? "" : CpuTopology.FormatCpus(split.OtherCpus, ";"));
+    Check("catch-all never intersects a device CPU",
+        split is not null && !split.OtherCpus.Intersect(plan.DeviceCpus).Any(),
+        split is null ? "" : string.Join(",", split.OtherCpus.Intersect(plan.DeviceCpus)));
+    Check("catch-all + device CPUs cover every logical processor exactly once",
+        split is not null && split.OtherCpus.Count + plan.DeviceCpus.Count == t.LogicalCount);
     string json = LassoRules.Build(profile, plan);
     using var doc = System.Text.Json.JsonDocument.Parse(json);
     var root = doc.RootElement;
@@ -543,13 +745,110 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var order = root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Select(x => x.GetString()).ToList();
     Check("catch-all is the last affinity rule", order.Last() == "*.*" && order[^2] == "dwm.exe");
     var mk = root.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "mk12.exe");
-    Check("game rule: 0-15, High, boost off", mk.GetProperty("cpuAffinity").GetString() == "0-15" && mk.GetProperty("priorityClass").GetString() == "High" && mk.GetProperty("threadPriorityBoosts").GetString() == "off");
+    Check("game rule: 0-15, High", mk.GetProperty("cpuAffinity").GetString() == "0-15" && mk.GetProperty("priorityClass").GetString() == "High");
+    // Dynamic thread priority boost must be left alone: Windows' +6 mouse/keyboard and +8 sound wake
+    // boosts are what let a woken input or audio thread preempt, so emitting "off" worked against latency.
+    Check("game rule does not disable dynamic thread priority boost", !mk.TryGetProperty("threadPriorityBoosts", out _));
+    Check("no threadPriorityBoosts anywhere in the emitted rules",
+        !root.GetProperty("ruleSets").EnumerateArray().Any(r => r.TryGetProperty("threadPriorityBoosts", out _)));
+    Check("no priorityBoostRuleOrder is emitted", !root.TryGetProperty("priorityBoostRuleOrder", out _));
+    // Every emitted mask must use Bitsum's semicolon form. A comma here is ambiguous in the INI,
+    // where entry fields are themselves comma-separated (defect D9).
+    var commaIssues = root.GetProperty("ruleSets").EnumerateArray()
+        .Where(r => r.TryGetProperty("cpuAffinity", out var ca) && ca.GetString()!.Contains(","))
+        .Select(r => r.GetProperty("processName").GetString())
+        .ToList();
+    Check("no emitted cpuAffinity contains a comma", commaIssues.Count == 0, string.Join(", ", commaIssues));
     var single = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 96u << 20) });
     Check("single CCD: nothing to separate", LassoRules.SplitFor(new SystemProfile
     {
         Windows = profile.Windows, CpuName = "x", CpuVendor = "AMD", Cpu = single, FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
         Gpus = Array.Empty<GpuInfo>(), Security = profile.Security, Software = new SoftwareInfo(),
     }, plan) is null);
+}
+
+Console.WriteLine("M3b: Process Lasso refuses a catch-all that would be worse than none (A5)");
+{
+    // A tiny 4-core dual-CCD machine where the device plan claims every core. Building the plan
+    // directly keeps this deterministic: SplitFor only consults plan.DeviceCpus.
+    var t = Topo(new[] { (new[] { 0 }, (byte)0), (new[] { 1 }, (byte)0), (new[] { 2 }, (byte)0), (new[] { 3 }, (byte)0) },
+        new[] { (0x03UL, 32u << 20), (0x0CUL, 32u << 20) });
+    var prof = new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "4-core tight test CPU", CpuVendor = "AMD", Cpu = t, FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+    };
+    var tight = new AffinityPlan { DeviceCpus = new List<int> { 0, 1, 2, 3 } };
+    var split = LassoRules.SplitFor(prof, tight);
+    Check("4-core tight: split produced", split is not null);
+    Check("4-core tight: zero CPUs free of devices", split is not null && split.OtherCpus.Count == 0,
+        split is null ? "null" : string.Join(",", split.OtherCpus));
+
+    string json = LassoRules.Build(prof, tight);
+    using var doc = System.Text.Json.JsonDocument.Parse(json);
+    var root = doc.RootElement;
+    var names = root.GetProperty("ruleSets").EnumerateArray().Select(r => r.GetProperty("processName").GetString()).ToList();
+    Check("4-core tight: NO *.* rule emitted", !names.Contains("*.*"));
+    Check("4-core tight: *.* absent from cpuAffinityRuleOrder",
+        !root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Any(x => x.GetString() == "*.*"));
+    Check("4-core tight: description explains the refusal",
+        root.GetProperty("description").GetString()!.Contains("no catch-all rule"));
+    Check("4-core tight: game rules still emitted", names.Contains("mk12.exe"));
+
+    // FormatCpus returns "-" for an empty list, which is not a legal mask. Guard the whole payload.
+    var sentinels = root.GetProperty("ruleSets").EnumerateArray()
+        .Where(r => r.TryGetProperty("cpuAffinity", out var ca) && ca.GetString() == "-")
+        .Select(r => r.GetProperty("processName").GetString())
+        .ToList();
+    Check("no emitted cpuAffinity is the empty-list sentinel", sentinels.Count == 0, string.Join(", ", sentinels));
+
+    // Wrapper so the section reads the same way as the rest of the suite.
+    static string TelemetryPreviewText(TelemetryPayload p) => TelemetryClient.Preview(p);
+
+Console.WriteLine("Telemetry preview: the user sees exactly what is sent");
+{
+    // The preview IS the trust mechanism. If a section can silently disappear, a future edit could
+    // drop the "NOT SENT" list or the attachment inventory and nobody would notice until a user did.
+    var withLog = new TelemetryPayload(
+        "https://discord.com/api/webhooks/123/…",
+        "**New User Feedback**\n> a message",
+        "SCAN REPORT BODY",
+        "scan-report.txt",
+        "stutterguard.log",
+        new byte[2048]);
+
+    string pv = TelemetryPreviewText(withLog);
+    Check("preview shows the destination", pv.Contains("discord.com/api/webhooks"));
+    Check("preview shows the message text", pv.Contains("a message"));
+    Check("preview lists the report attachment with its size", pv.Contains("scan-report.txt") && pv.Contains("bytes"));
+    Check("preview lists the log attachment", pv.Contains("stutterguard.log") && pv.Contains("2,048 bytes"));
+    Check("preview shows the report verbatim", pv.Contains("SCAN REPORT BODY"));
+    Check("preview states what is NOT sent", pv.Contains("NOT SENT") && pv.Contains("IP address"));
+    Check("preview never leaks a webhook token", !pv.Contains("/123/") || pv.Contains("…"));
+
+    var noLog = withLog with { LogFileName = null, LogBytes = null };
+    string pv2 = TelemetryPreviewText(noLog);
+    Check("a missing log is said out loud, not omitted", pv2.Contains("no log file attached"), pv2.Substring(0, Math.Min(120, pv2.Length)));
+    Check("noLog preview omits the log file name", !pv2.Contains("stutterguard.log"));
+}
+
+    // Room to spare: the validated 9950X3D mask must still be emitted.
+    var t2 = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+    var prof2 = new SystemProfile
+    {
+        Windows = prof.Windows, CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD", Cpu = t2,
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = prof.Security, Software = new SoftwareInfo(),
+    };
+    var roomy = new AffinityPlan { DeviceCpus = new List<int> { 16, 18, 20, 22, 24, 26, 28, 30 } };
+    var root2 = System.Text.Json.JsonDocument.Parse(LassoRules.Build(prof2, roomy)).RootElement;
+    var names2 = root2.GetProperty("ruleSets").EnumerateArray().Select(r => r.GetProperty("processName").GetString()).ToList();
+    Check("roomy 9950X3D: *.* still emitted", names2.Contains("*.*"));
+    Check("roomy 9950X3D: *.* in cpuAffinityRuleOrder",
+        root2.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Any(x => x.GetString() == "*.*"));
+    var ca2 = root2.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "*.*").GetProperty("cpuAffinity").GetString();
+    Check("roomy 9950X3D: mask is the validated 24-LP set", ca2 == "0-15;17;19;21;23;25;27;29;31", ca2 ?? "");
 }
 
 Console.WriteLine("Registry helpers, PCI classes, NIC values, CPU sets");
@@ -727,9 +1026,12 @@ Console.WriteLine("Hardware Matrix: Intel 13th/14th Gen (i9-14900K 8P/16T + 16E/
         Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
     };
     var split = LassoRules.SplitFor(prof, plan);
-    Check("14900K: Process Lasso puts games on P-cores 0-15 and catch-all on E-cores 16-31",
-        split is not null && CpuTopology.FormatCpus(split.GameCpus) == "0-15" && CpuTopology.FormatCpus(split.OtherCpus) == "16-31",
-        split is null ? "null" : $"{CpuTopology.FormatCpus(split.GameCpus)} | {CpuTopology.FormatCpus(split.OtherCpus)}");
+    // Background is "every CPU no device holds" - on a hybrid that includes free P-cores, not
+    // E-cores only. Games hold their P-cores anyway via their own rule plus High priority.
+    Check("14900K: games on P-cores 0-15", split is not null && CpuTopology.FormatCpus(split.GameCpus) == "0-15");
+    Check("14900K: catch-all never intersects a device CPU",
+        split is not null && !split.OtherCpus.Intersect(plan.DeviceCpus).Any(),
+        split is null ? "null" : string.Join(",", split.OtherCpus.Intersect(plan.DeviceCpus)));
     Console.WriteLine("        plan: " + Map());
 }
 
@@ -753,8 +1055,9 @@ Console.WriteLine("Hardware Matrix: Intel Arrow Lake (Core Ultra 9 285K 8P + 16E
         Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
     };
     var split = LassoRules.SplitFor(prof, plan);
-    Check("285K: Process Lasso handles interleaved P-cores (0-1,18-23) and E-cores (2-17)",
-        split is not null && CpuTopology.FormatCpus(split.GameCpus) == "0-1,18-23" && CpuTopology.FormatCpus(split.OtherCpus) == "2-17",
+    // Interleaved P/E: the catch-all is topology-agnostic - every CPU no device holds.
+    Check("285K: games on interleaved P-cores (0-1,18-23), catch-all never a device CPU",
+        split is not null && !split.OtherCpus.Intersect(plan.DeviceCpus).Any(),
         split is null ? "null" : $"{CpuTopology.FormatCpus(split.GameCpus)} | {CpuTopology.FormatCpus(split.OtherCpus)}");
     Console.WriteLine("        plan: " + Map());
 }
