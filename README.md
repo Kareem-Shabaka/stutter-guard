@@ -83,21 +83,21 @@ Single self-contained executable, no .NET runtime to install, about 65 MB. Windo
 | **GPU** | AMD driver registry keys, each filtered against the installed driver | Immediately |
 | **Background** | Startup tasks, services and scheduled tasks, as three groups of opt-in rows | Immediately |
 
-## What this app cannot do
+## Scope
 
-These are limits of the instrument, not of the effort behind it. Both matter to a buying decision.
+What this app measures and changes, and where that stops:
 
-- **It cannot measure DPC or ISR *durations*** without kernel ETW, which needs privileges a desktop app
-  does not have on most systems. It reports interrupt **rates**, and names a driver only when a
-  documented cause exists. A single very long DPC seen in LatencyMon will not be explained here.
-- **It cannot act on SMIs.** System Management Interrupts are raised by firmware outside the operating
-  system. No register, mask or power setting on this side reaches them, so the app names them as a
-  remaining cause rather than pretending to fix them.
-- **It cannot remove the cost of a mixed-refresh-rate setup.** Each attached display is composited at
-  its own cadence, and the graphics driver does work per screen. The app reports it; it cannot change
-  it.
-- **It has been measured on one machine.** The interrupt numbers above come from one CPU and one GPU.
-  The mechanism is documented by Microsoft, but the magnitude is not independently reproduced.
+- **Interrupt rates, not DPC durations.** Handler durations need kernel ETW, which a desktop app does not
+  have on most systems. Rates and per-core totals are what this app reads; a single long DPC seen in
+  LatencyMon is not something it can attribute or explain.
+- **Device placement, not firmware.** System Management Interrupts are raised below the operating system.
+  No register, mask or power setting reaches them, so SMIs are reported as a remaining cause and nothing
+  is claimed beyond that.
+- **Placement, not compositor work.** Each attached display is composited at its own cadence. A
+  mixed-refresh-rate setup therefore costs GPU work that no interrupt mask changes; the app reports the
+  cost.
+- **One CPU and one GPU pair** (9950X3D, RX 9070 XT) stand behind the figures above. The mechanism is
+  documented by Microsoft and applies generally; the 782 µs magnitude is specific to that hardware.
 
 ## How interrupt placement works
 
