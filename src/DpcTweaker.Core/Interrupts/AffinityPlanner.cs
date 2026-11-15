@@ -454,6 +454,22 @@ public static class AffinityPlanner
             };
             Add(d, DeviceRole.Rest, why);
         }
+        // The network adapter's second core is the first luxury, not a right. It buys two RSS cores so a
+        // queue batch and its interrupt share a core. On a small device pool that pair is better spent on the
+        // GPU, the mouse controller and audio, each of which the game feels directly.
+        int mandatoryCores = want.Where(w => w.Role is DeviceRole.Gpu or DeviceRole.Input or DeviceRole.Audio)
+                                  .Sum(w => w.Cores);
+        int nicIndex = want.FindIndex(w => w.Role == DeviceRole.Network);
+        if (nicIndex >= 0 && want[nicIndex].Cores > 1 && coreBudget - mandatoryCores < 2)
+        {
+            want[nicIndex] = want[nicIndex] with { Cores = 1 };
+            notes.Add($"{want[nicIndex].Device.Name} keeps one core: {coreBudget} device core(s) are free, and the GPU, the input controller and audio come first. One core still takes the adapter's interrupts off the game's cores.");
+        }
+
+        // Deferred on purpose: dropping an empty xHCI controller when the budget is spent frees a core, but
+        // it also changes which device gets one - on the reference machine it pushed the NIC onto a
+        // non-adjacent pair and the receive queues lost their cores. Doing it correctly means re-running the
+        // assignment against a smaller pool, not trimming the want list afterwards.
         // A second core for the shared root hub is a want, not a right: if spending it would push
         // another device onto a shared core, the controller keeps one and the note says why. The
         // warning above still stands, and moving the DAC is the fix that costs nothing.
