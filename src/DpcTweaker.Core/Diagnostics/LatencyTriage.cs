@@ -29,6 +29,16 @@ public static class LatencyTriage
     /// <summary>A game core spending this much of its time in DPCs means the pins are not holding.</summary>
     public const double GameCoreDpcWarning = 0.5;
 
+    /// <summary>
+    /// Microsoft's budget for one DPC routine. Its driver documentation ("Example 15: Measuring DPC/ISR
+    /// Time") says DPCs "should not run longer than 100 microseconds" and ISRs "should not run longer than
+    /// 25 microseconds". A duration with no budget attached is not a finding, so every DPC and ISR figure
+    /// this class reports is stated against these two numbers.
+    /// </summary>
+    public const double DpcBudgetUs = 100;
+
+    /// <summary>Microsoft's budget for one ISR. See <see cref="DpcBudgetUs"/>.</summary>
+    public const double IsrBudgetUs = 25;
     /// <summary>The worst core sitting above this suggests sustained DPC work, not a single spike.</summary>
     public const double SustainedDpcWarning = 1.5;
 
@@ -60,7 +70,8 @@ public static class LatencyTriage
                     list + ".",
                     "Windows composites every attached display, and the GPU driver services that work in its own DPC. " +
                     "Mixed refresh rates force it to wake for several cadences instead of one, which is a common cause of " +
-                    "large amdkmdag.sys DPC times. Set every display to the same refresh rate, or disconnect the ones you " +
+                    $"large amdkmdag.sys DPC times - well past Microsoft's {DpcBudgetUs:0} us budget for one DPC. " +
+                    "Set every display to the same refresh rate, or disconnect the ones you " +
                     "are not using while you play. No interrupt pin or registry value removes this cost.",
                     false));
             }
@@ -107,11 +118,28 @@ public static class LatencyTriage
                 findings.Add(new TriageFinding(
                     TriageSeverity.Medium,
                     $"Sustained DPC load on CPU {worst.Cpu}: {worst.DpcPercent:0.00} % of its time",
-                    $"{worst.DpcsPerSec:0} DPCs/s and {worst.InterruptsPerSec:0} interrupts/s measured over the sample.",
+                    $"{worst.DpcsPerSec:0} DPCs/s and {worst.InterruptsPerSec:0} interrupts/s measured over the sample. " +
+                    $"Microsoft's budget is {DpcBudgetUs:0} us for one DPC routine and {IsrBudgetUs:0} us for one ISR.",
                     "Sustained load is a different problem from one long DPC. Find which driver owns the hardware on " +
                     "that core; if it is the GPU, the display findings above are the cause.",
                     true));
             }
+        }
+
+        // ---- 5. the ceiling: the one cause Windows itself cannot move ----
+        // Offered only when there is DPC trouble to explain, so a healthy machine is not lectured.
+        if (findings.Any(f => f.Title.Contains("DPC", StringComparison.Ordinal)))
+        {
+            findings.Add(new TriageFinding(
+                TriageSeverity.Info,
+                "System Management Interrupts are outside Windows' control",
+                "Firmware raises an SMI straight to the processor, commonly for 100 us or more at a time. No register, " +
+                "driver, affinity mask or power setting can see one, move one or stop one, and Windows is not told it happened.",
+                "If large DPC times survive a clean install on the same board, an SMI is the remaining candidate. Firmware " +
+                "updates and turning off unused board features (legacy USB, serial ports, unused controllers) are the only " +
+                "levers a user has. This app cannot measure SMIs, so it cannot tell you whether yours are the cause - it can " +
+                "only name the possibility.",
+                false));
         }
 
         return findings;

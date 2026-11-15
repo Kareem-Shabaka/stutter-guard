@@ -74,7 +74,7 @@ public static class AmdGpuKeys
             "VRAM clock locked",
             "Locks the memory clock at one speed, so it never switches.",
             "Mortal Kombat 1 1% lows better on top of the two display keys (RX 9070 XT, Oct 15 2026).",
-            "Clearly more idle power and heat. After a reboot, check in Adrenalin that the memory clock still reaches full speed in a game.",
+            "Clearly more idle power and heat. The tick on this screen only proves the registry value is set: nothing in this app can read the memory clock, so check in Adrenalin after a reboot that it still reaches full speed in a game. A card stuck at a low memory clock looks exactly like a working tweak here.",
             Evidence.Measured, Risk.Medium, TweakCost.Expensive),
     };
 

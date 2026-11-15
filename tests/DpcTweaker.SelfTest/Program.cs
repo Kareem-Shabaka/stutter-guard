@@ -3399,6 +3399,25 @@ Console.WriteLine("MPO: the tweak is gone, the override is offered for removal")
 }
 // ================================================================ latency triage (costs tweaks cannot fix)
 
+Console.WriteLine("Network: the weak defaults stay unticked, and the price is stated");
+{
+    var nicRules = DpcTweaker.Core.Tweaks.NetworkModule.Rules;
+    var flow = nicRules.Single(r => r.Id == "flow-control");
+    var mod = nicRules.Single(r => r.Id == "interrupt-moderation");
+
+    Check("flow control is not ticked on a desktop", !flow.OnForDesktop);
+    Check("flow control is not ticked on a laptop", !flow.OnForLaptop);
+    Check("flow control is graded community evidence only", flow.Evidence == DpcTweaker.Core.Model.Evidence.Anecdotal);
+    Check("flow control no longer claims its cost is nothing", !flow.Cost.Contains("None", StringComparison.Ordinal), flow.Cost);
+    Check("flow control is still selectable at Everything", TweakPresetSelector.Selects(TweakPreset.Everything, flow.CostClass, flow.Evidence));
+    Check("...and still excluded below Everything", !TweakPresetSelector.Selects(TweakPreset.Costly, flow.CostClass, flow.Evidence));
+
+    Check("interrupt moderation is not ticked on a desktop", !mod.OnForDesktop);
+    Check("interrupt moderation is not ticked on a laptop", !mod.OnForLaptop);
+    Check("interrupt moderation states the interrupt-rate price", mod.Cost.Contains("88k", StringComparison.Ordinal) || mod.Cost.Contains("88,000", StringComparison.Ordinal), mod.Cost);
+    Check("interrupt moderation is still selectable at Everything", TweakPresetSelector.Selects(TweakPreset.Everything, mod.CostClass, mod.Evidence));
+}
+
 Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove");
 {
     static DisplayInfo Disp(string dev, int w, int h, int hz, bool primary = false) =>
@@ -3466,9 +3485,33 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
     Check("sustained load is Medium", sus?.Severity == TriageSeverity.Medium);
     Check("sustained load names the worst CPU", sus is not null && sus.Title.Contains("CPU 5"), sus?.Title ?? "");
 
+    // ---- Microsoft's budget, and the ceiling nobody can move ----
+    Check("the DPC budget is the documented 100 us", LatencyTriage.DpcBudgetUs == 100, LatencyTriage.DpcBudgetUs.ToString());
+    Check("the ISR budget is the documented 25 us", LatencyTriage.IsrBudgetUs == 25, LatencyTriage.IsrBudgetUs.ToString());
+    Check("a large DPC is stated against the budget, not just called large",
+        mix is not null && mix.Guidance.Contains("100 us budget"), mix?.Guidance ?? "");
+    Check("sustained DPC load is stated against the budget",
+        sus is not null && sus.Detail.Contains("100 us for one DPC routine") && sus.Detail.Contains("25 us for one ISR"),
+        sus?.Detail ?? "");
+
+    // An SMI cannot be moved by affinity, so it must never be offered as something the app can fix.
+    var smi = hot.FirstOrDefault(x => x.Title.Contains("System Management Interrupts"));
+    Check("DPC trouble also names SMIs as the ceiling", smi is not null,
+        string.Join(" | ", hot.Select(x => x.Title)));
+    Check("the SMI finding says affinity cannot fix it", smi is { AffinityCanFix: false });
+    Check("the SMI finding admits the app cannot measure it", smi is not null && smi.Guidance.Contains("cannot measure"),
+        smi?.Guidance ?? "");
+    Check("the SMI finding is Info, not a warning about this machine", smi?.Severity == TriageSeverity.Info,
+        smi?.Severity.ToString() ?? "none");
+    Check("a healthy machine is not lectured about SMIs",
+        !LatencyTriage.Scan(new[] { Disp("DISPLAY1", 1920, 1080, 240, true) }, ratesCalm, new[] { 0, 1, 2, 3 })
+            .Any(x => x.Title.Contains("System Management Interrupts")));
+
+
     // ---- no counters available: display findings still work ----
     var noCounters = LatencyTriage.Scan(mixed, null, new[] { 0, 1 });
     Check("display findings survive a missing counter sample", noCounters.Count >= 2, noCounters.Count.ToString());
+    Check("mixed refresh alone (no DPC counters) does not raise the SMI card", !noCounters.Any(x => x.Title.Contains("System Management Interrupts")));
 
     // ---- ordering ----
     var ordered = LatencyTriage.Ordered(f);
