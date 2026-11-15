@@ -444,7 +444,13 @@
                                           Visibility="{Binding HasTriage, Converter={StaticResource BoolToVis}}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border BorderThickness="3,0,0,0" BorderBrush="#C0453B" Padding="10,4,0,10" Margin="0,0,0,10">
+                                        <!-- A finding is a note, not an alarm: these name costs the app
+                                             cannot remove, so nothing here is urgent and nothing is
+                                             actionable. Severity lives in the wording; a coloured bar on
+                                             every finding made an informational list look like a fault
+                                             report. A hairline divider separates them instead. -->
+                                        <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                                Padding="0,10,0,2" Margin="0,0,0,10">
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Margin="0,2,0,0" />
