@@ -132,10 +132,45 @@ the 2,775,336 DPCs - 98.2 % - and its 2.64 s of total DPC time accounts for the 
 `rspLLL64.sys`, LatencyMon's own kernel library. That is the instrument, running at 0.5 ms timer
 resolution, not the system under test.
 
-**The GPU's peak landed where the plan put it.** CPU 16 is the core assigned to the Radeon RX 9070 XT,
-and that is where `amdkmdag`'s longest routine ran. Its 20,956 DPCs over 13,865 s is about 1.5 per
-second, consistent with a static desktop that is not presenting new frames.
+**The GPU peak landed where the plan put it, and the per-driver figures say more than the CPU totals do.**
+CPU 16 is the core assigned to the Radeon RX 9070 XT, and `amdkmdag` is the driver whose longest routine
+ran there. From the Drivers tab: **7,914 DPCs, longest 239.49 µs, 200.20 ms in total** - an average of
+**25.3 µs** per call, so the maximum sits about 9.5 times above the mean of its own distribution. Over
+13,865 s that is 0.57 calls per second, which is what a static desktop presenting no new frames looks
+like.
 
+### Per-driver figures
+
+Read from the Drivers tab, highest execution first. This is the only place in LatencyMon where a
+per-driver duration exists.
+
+| Driver | DPCs | Longest | Total | Average |
+| :--- | ---: | ---: | ---: | ---: |
+| `amdkmdag.sys` (Radeon) | 7,914 | **239.49 µs** | 200.20 ms | 25.3 µs |
+| `ndis.sys` (network) | 349 | 133.73 µs | 1.61 ms | 4.6 µs |
+| `ntoskrnl.exe` (kernel) | 19,531 | 84.60 µs | 56.05 ms | 2.9 µs |
+| `tcpip.sys` | 212 | 80.05 µs | 2.42 ms | 11.4 µs |
+| `Wdf01000.sys` (KMDF) | 297 | 30.19 µs | 1.51 ms | 5.1 µs |
+| `rspLLL64.sys` (LatencyMon) | **2,723,956** | 4.53 µs | **2,638.73 ms** | 0.97 µs |
+
+Two things fall out of it.
+
+**A second routing proof, and this one is per driver.** `ndis.sys` recorded its longest DPCs on **CPU 20
+(133.73 µs) and CPU 22 (68.20 µs)** - the two processors the plan assigns to the network adapter for
+its receive queues. The adapter's DPCs are therefore landing on exactly the cores its interrupt mask
+names, which is what the RSS-alignment work exists to achieve. The CPUs tab names the driver behind each
+processor's worst DPC, and on the network cores that driver is the network stack.
+
+**The longest DPC exceeded Microsoft's budget.** The app quotes 100 µs per DPC routine as the documented
+ceiling, and 239.49 µs is 2.4 times it - once, in nearly four hours. That is not a storm and it is not
+dismissable: it is one call that ran long, while the mean of 25.3 µs is what the driver spends the rest
+of the time doing.
+
+**The sibling of the GPU's core is not idle.** CPU 17 is the second thread of the same physical core as
+CPU 16, and it carried 5,190 DPCs attributed to `ntoskrnl.exe`, peaking at 84.60 µs. The plan pins
+devices to a core's first thread only, so nothing the plan controls is running there - but the kernel's
+own DPCs are not under the plan's control, and they share that core's execution units with the GPU's
+interrupt work. Claim the mechanism the plan actually controls; do not claim a core is quiet.
 ### What it does not establish
 
 **This is not a repeat of the earlier 803.89 µs reading, and the two must not be compared as before and
