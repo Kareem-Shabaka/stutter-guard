@@ -6,18 +6,18 @@
 [![Version](https://img.shields.io/badge/Version-1.3.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Tests](https://img.shields.io/badge/self--tests-1%2C246%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 
-## Your PC is fast. It stutters anyway.
+## Average FPS is not the number that decides whether a game feels smooth.
 
-Average FPS measures compute. It does not measure what happens when your mouse moves, a packet
-arrives, or a sound plays in the middle of a firefight, because none of that is compute. It is
-interrupt work, and Windows delivers it to whichever core it likes, including the one your game is
-running on.
+It measures compute. It does not measure what happens when your mouse moves, a packet arrives, or a
+sound plays mid-fight, because none of that is compute. It is interrupt work, and Windows delivers it
+to whichever core it likes - including the one your game is on. That is where a good average and a bad
+frame time come from the same machine.
 
 **Stutter Guard moves every busy device's interrupts onto a core of its own, chosen by measured wake
 latency, away from the cores your game uses. Then it records every change it made, so you can put all
 of it back.**
 
-![The Stutter Guard window](docs/images/app-214731.png)
+![The Stutter Guard window](docs/images/app-214811.png)
 
 ---
 
@@ -69,6 +69,12 @@ is what makes this a locality result and not just a busy machine.
 240 / 120 / 60 Hz: every one of the **297 interrupts** recorded was serviced on **CPU 18**, the core
 the plan gives the USB input controller. The V-Cache CCD took **zero**. Fourteen of 32 processors took
 no interrupt and no DPC at all. **No DPC reached 250 µs** out of 2,775,336.
+
+![A LatencyMon report from the reference machine after four hours of idle: 63.70 µs highest interrupt-to-process latency, 239.49 µs highest DPC](docs/images/app-214731.png)
+
+*The result that plan produces. That is the target rather than the problem: the case this app is for is
+the one where a ready thread on a busy core waits 782 µs instead of 8.9 µs - a factor of about 90,
+measured, with the method below.*
 
 **Microsoft's budgets, for scale.** The documented ceiling is **100 µs** for one DPC routine and
 **25 µs** for one ISR. The healthy run above peaked at 239.49 µs - 2.4 times budget, once, in nearly

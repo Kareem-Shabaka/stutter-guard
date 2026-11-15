@@ -1,30 +1,38 @@
 # Images used by the top-level README
 
-## Present
-
-Three window crops from the reference machine, named by capture time because their content was never
-described to me and I cannot see images:
-
-| File | Size | Aspect | Referenced | Shows |
+| File | Size | Aspect | Shows | Where referenced |
 |---|---|---|---|---|
-| `app-214731.png` | 1697 x 1046 | 1.62 | **yes, front-door figure** | unknown |
-| `app-214750.png` | 3819 x 1237 | 3.09 | no | unknown |
-| `app-214811.png` | 3353 x 1673 | 2.00 | no | unknown |
+| `app-214731.png` | 1697 x 1046 | 1.62 | **LatencyMon Main tab, clean 3 h 51 min run** - confirmed by the author | `## The numbers` |
+| `app-214811.png` | 3353 x 1673 | 2.00 | unknown - **currently the front-door figure** | front door |
+| `app-214750.png` | 3819 x 1237 | 3.09 | unknown - wide strip, likely a scrolled page or the check table | not used |
 
-`app-214731.png` is the front-door figure only because its aspect ratio is the most window-like of the
-three - that is an inference from dimensions, not a check.
+## The mistake this set already caused
 
-**To finish:** name them and this becomes three useful figures instead of one. TheREADME has three natural
-slots:
+The LatencyMon capture was first used as the **front-door hero**, under the headline "Your PC is fast.
+It stutters anyway." A clean report with a green verdict, directly beneath a claim that the machine
+stutters, made the page refute itself - and it showed a competitor's tool as the product's hero image.
+
+Two things followed from that:
+
+1. The headline asserts nothing about the reader's machine. It states a fact about *measurement*:
+   average FPS is not the number that decides whether a game feels smooth. That claim cannot be
+   contradicted by a screenshot.
+2. A clean LatencyMon report is **evidence**, not a hook. It belongs under `## The numbers`, captioned
+   as the target the plan produces - with the caveat that the problem case is three orders of magnitude
+   worse, which is the point being made.
+
+## To finish
+
+Name `app-214811.png` and `app-214750.png` and this becomes three useful figures:
 
 1. Front door - the Interrupts page with a plan visible (cores, devices, evidence chips).
-2. "The numbers" - the interrupt check results, the per-CPU counter table, which is the proof a move
-   happened.
-3. "Why interrupt placement works" - Home with its verdict line.
+2. "The numbers" - already filled by the LatencyMon report.
+3. "Why interrupt placement is the lever" - Home with its verdict line, or the check results table.
 
-Rename to `app-interrupts.png`, `app-check.png`, `app-home.png` and reference each in its section.
+Rename to `app-interrupts.png` / `app-check.png` / `app-home.png` once known, and reference each in its
+section.
 
 ## Capturing
 
-**Alt+PrintScreen** for the active window only, not PrintScreen. Save as PNG at native resolution, then
-crop to the window if needed. The labels are the point, and a downscaled capture loses them.
+**Alt+PrintScreen** for the active window only, not PrintScreen. PNG at native resolution. The labels are
+the point; a downscaled capture loses them.
