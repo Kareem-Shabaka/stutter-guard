@@ -36,19 +36,15 @@ public sealed class MainViewModel : ObservableObject
         Network = new ModulePageViewModel(this, "Network", "Network", "\uE839",
             "Power saving off on wired adapters: Energy-Efficient Ethernet, Green Ethernet and the vendor's own link power saving, plus Interrupt Moderation on desktops. Each change restarts the adapter once (2-5 seconds offline), no reboot.",
             Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
-        BootTasks = new ModulePageViewModel(this, "Boot tasks", "Boot tasks", "",
-            "Scheduled tasks in the \\Stutter Guard\\ folder of Task Scheduler: device power saving off at every boot, and the system timer held at 0.5 ms from every logon.",
-            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
-        Services = new ModulePageViewModel(this, "Services", "Services", "\uE912",
-            "Every installed service with what it does and what you lose without it. A preset lists only what it would change; nothing changes until you press Apply selected, and each row has its own Revert. Windows, security and game services are locked.",
-            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
-        Tasks = new ModulePageViewModel(this, "Tasks", "Scheduled tasks", "\uE823",
-            "Every scheduled task, read as administrator. The preset only disables (never deletes) telemetry, background updaters and optional maintenance. Tasks your apps need are left alone.",
-            Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
+        // One page, three groups: startup tasks, services and scheduled tasks are the same user
+        // concern - things that run on their own - and three top-level tabs made the rail longer
+        // without making anything easier to find. Rows keep their own module ("Boot tasks",
+        // "Services", "Tasks") so the undo script, the journal and every tweak id are untouched.
+        Background = new BackgroundPageViewModel(this, Engine is null ? TweakPreset.Safe : Engine.Options.Preset);
         Recommendations = new RecommendationsPageViewModel(this);
         Safety = new SafetyPageViewModel(this);
         // Temporarily on this version: Gpu tab is omitted by default and only inserted if an AMD GPU is detected.
-        Pages = new ObservableCollection<PageViewModel> { Home, Power, Interrupts, Network, BootTasks, Services, Tasks, Recommendations, Safety };
+        Pages = new ObservableCollection<PageViewModel> { Home, Power, Interrupts, Network, Background, Recommendations, Safety };
         _selected = Home;
         RestartCommand = new RelayCommand(() =>
         {
@@ -66,13 +62,11 @@ public sealed class MainViewModel : ObservableObject
     public ModulePageViewModel Interrupts { get; }
     public ModulePageViewModel Network { get; }
     public ModulePageViewModel Gpu { get; }
-    public ModulePageViewModel Services { get; }
-    public ModulePageViewModel Tasks { get; }
+    public BackgroundPageViewModel Background { get; }
     public RecommendationsPageViewModel Recommendations { get; }
 
     /// <summary>The last interrupt check, kept across page rebuilds.</summary>
     public CheckResult? LastCheck { get; set; }
-    public ModulePageViewModel BootTasks { get; }
     public SafetyPageViewModel Safety { get; }
     public ObservableCollection<PageViewModel> Pages { get; }
 
@@ -208,18 +202,13 @@ public sealed class MainViewModel : ObservableObject
         if (e is null) return;
         Home.LoadBench();
         Power.OptionsPanel = new PowerOptionsViewModel(this, e.Options, e.Profile);
-        BootTasks.OptionsPanel = new TimerOptionsViewModel(this, e.Options);
         Interrupts.OptionsPanel = new InterruptOptionsViewModel(this, e);
         Network.OptionsPanel = new NetworkSummaryViewModel(e.Profile);
         Power.Load(e, carryTicks);
         Interrupts.Load(e, carryTicks);
         Network.Load(e, carryTicks);
-        Services.Load(e, carryTicks);
-        Tasks.Load(e, carryTicks);
-        Services.OptionsPanel = new CleanupPanelViewModel(this, e, tasks: false);
-        Tasks.OptionsPanel = new CleanupPanelViewModel(this, e, tasks: true);
+        Background.Load(e, carryTicks);
         Recommendations.Load(e);
-        BootTasks.Load(e, carryTicks);
 
         // Temporarily on this version: only show the GPU tab if an AMD GPU is detected (until NVIDIA tweaks land)
         bool hasAmdGpu = e.Profile.Gpus.Any(g => g.Vendor == GpuVendor.Amd);

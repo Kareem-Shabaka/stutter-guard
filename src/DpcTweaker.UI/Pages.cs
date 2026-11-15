@@ -1370,3 +1370,63 @@ public sealed class SafetyPageViewModel : PageViewModel
         await RefreshAsync();
     }
 }
+/// <summary>
+/// One page for everything that runs on its own: boot tasks, services and scheduled tasks. Three
+/// sections, because they answer three different questions - "what does this app install", "what is
+/// running", "what else fires on its own" - and one page, because a user looking for background
+/// activity should not have to guess which of three tabs owns it.
+/// <para>
+/// The page wraps three child pages rather than concatenating their rows, so each keeps its own
+/// options panel, its own service/task catalogs and its own Apply/Revert scope. Rows keep their
+/// original module name, so tweak ids, the journal and undo-all.ps1 are untouched.
+/// </para>
+/// </summary>
+public sealed class BackgroundPageViewModel : PageViewModel
+{
+    public BackgroundPageViewModel(MainViewModel main, TweakPreset preset)
+        : base("Background", "\uE823")
+    {
+        Startup = new ModulePageViewModel(main, "Boot tasks", "Startup tasks", "\uE823",
+            "Scheduled tasks in the \\Stutter Guard\\ folder of Task Scheduler: device power saving off at every boot, and the system timer held at 0.5 ms from every logon.",
+            preset);
+        Services = new ModulePageViewModel(main, "Services", "Services", "\uE912",
+            "Every installed service with what it does and what you lose without it. A preset lists only what it would change; nothing changes until you press Apply selected, and each row has its own Revert. Windows, security and game services are locked.",
+            preset);
+        Scheduled = new ModulePageViewModel(main, "Tasks", "Scheduled tasks", "\uE823",
+            "Every scheduled task, read as administrator. The preset only disables (never deletes) telemetry, background updaters and optional maintenance. Tasks your apps need are left alone.",
+            preset);
+    }
+
+    /// <summary>What this app installs itself, and keeps alive across reboots.</summary>
+    public ModulePageViewModel Startup { get; }
+
+    /// <summary>What is already running on this PC, and what stopping it would cost.</summary>
+    public ModulePageViewModel Services { get; }
+
+    /// <summary>Everything else that fires on its own schedule.</summary>
+    public ModulePageViewModel Scheduled { get; }
+
+    public DescriptionText StartupDescription => new(Startup.Description);
+    public DescriptionText ServicesDescription => new(Services.Description);
+    public DescriptionText ScheduledDescription => new(Scheduled.Description);
+
+    /// <summary>Fills all three sections. Each child keeps its own ticks and its own options panel.</summary>
+    public void Load(TweakEngine engine, bool carryTicks = true)
+    {
+        Startup.Load(engine, carryTicks);
+        Services.Load(engine, carryTicks);
+        Scheduled.Load(engine, carryTicks);
+    }
+
+    public override Task RefreshAsync() =>
+        Task.WhenAll(Startup.RefreshAsync(), Services.RefreshAsync(), Scheduled.RefreshAsync());
+}
+
+/// <summary>
+/// Wraps a plain string so a section header can show a page's own description without inventing a
+/// second template. Empty descriptions render as nothing.
+/// </summary>
+public sealed record DescriptionText(string Text)
+{
+    public bool HasText => !string.IsNullOrWhiteSpace(Text);
+}

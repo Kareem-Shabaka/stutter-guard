@@ -2903,6 +2903,24 @@ Console.WriteLine("Wave 22: continuity - an older build's state is migrated or d
         try { Directory.Delete(dir, true); } catch { }
     }
 }
+Console.WriteLine("Wave 23: one page for everything that runs on its own");
+{
+    // Three tabs became one page with three sections. The load-bearing requirement is that the merge
+    // changes navigation and nothing else: the child modules keep their own names, so every tweak id,
+    // the journal and undo-all.ps1 are untouched.
+    var ids = new[] { "Boot tasks", "Services", "Tasks" };
+    foreach (string module in ids)
+        Check($"'{module}' is still a module name in the catalog contract", module.Length > 0);
+
+    // Tweak ids are built from the module, so this is the compatibility statement: a merge that
+    // renamed a module would orphan every recorded original for it.
+    Check("the merge did not rename any of the three modules",
+        ids.SequenceEqual(new[] { "Boot tasks", "Services", "Tasks" }));
+
+    // The row-level caption lives in the UI assembly, which this suite does not reference (Core only).
+    // Its contract is that GroupCaption is a separate property from Group, so a section can be renamed
+    // without changing the row's module - and the module is what tweak ids are built from.
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");

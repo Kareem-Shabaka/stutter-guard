@@ -41,6 +41,14 @@ public sealed class TweakRowViewModel : ObservableObject
 
     public string Title => Info.Title;
     public string Group => Info.Group;
+
+    /// <summary>
+    /// Set when one page shows several modules: lets a section say "Startup tasks" while the rows
+    /// underneath still say "Boot tasks", so the row keeps its own identity and the page still groups.
+    /// Null everywhere else, and a null caption is hidden by the template.
+    /// </summary>
+    public string? GroupCaption { get; set; }
+    public bool HasGroupCaption => !string.IsNullOrEmpty(GroupCaption);
     public string What => Info.What;
     public string Why => Info.Why;
     public string Cost => Info.Cost;
