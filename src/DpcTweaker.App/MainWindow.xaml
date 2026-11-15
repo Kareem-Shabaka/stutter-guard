@@ -610,15 +610,12 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type ui:BackgroundPageViewModel}">
-            <!-- One scroller for the whole page, holding three lists. It must not be one scroller
-                 per section reached through a ContentControl: the child ModulePageViewModels are
-                 Grids with a Height="*" row wrapping their own ScrollViewer, and a star row inside a
-                 scroller measures against infinite height - so the inner scroller grows to content
-                 height instead of scrolling, and the page stops scrolling entirely. That is exactly
-                 what happened when this page first wrapped the children directly. -->
-            <!-- The lists bind to each section's Items, so no child template is instantiated here. -->
+            <!-- One page, three outlined sections, ONE toolbar. The toolbar sits above the scroller so
+                 the tier and the Apply button are never scrolled away from the lists they act on, and
+                 the tier is the tab's own - see AppOptions.PresetFor. -->
             <Grid Margin="28,20,28,12">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -627,18 +624,28 @@
 
                 <StackPanel Grid.Row="0">
                     <TextBlock Text="Background" Style="{StaticResource PageTitle}" />
-                    <TextBlock Style="{StaticResource Secondary}" Margin="0,0,0,12" TextWrapping="Wrap"
-                               Text="Everything that runs on its own, in three parts: what Stutter Guard installs and keeps running, what is already running as a service, and what Windows fires on a schedule. Each part keeps its own Apply and Revert, so nothing here acts on another part's rows." />
+                    <TextBlock Text="{Binding Description}" Style="{StaticResource Secondary}" Margin="0,0,0,12" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <!-- Each section sits in its own outlined panel, so every setting visibly belongs to
-                     one category rather than three lists running into each other. The rows inside keep
-                     their own card styling; this is the outer boundary, matching the checklist pattern
-                     where a grouped list is one bordered unit. -->
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel Grid.Row="1">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Tweaks" Style="{StaticResource Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding PresetChoice}"
+                                  DisplayMemberPath="Label" MinWidth="300" HorizontalAlignment="Left" />
+                        <Button Content="Apply this preset" Command="{Binding SetPresetCommand}"
+                                Margin="10,0,0,0" Padding="14,4"
+                                ToolTip="Makes this tab match the chosen tier: applies what the tier includes and puts back what it leaves out. It states both counts and asks first. Other tabs keep their own tier." />
+                    </StackPanel>
+                    <TextBlock Text="{Binding PresetDescription}" Style="{StaticResource Secondary}" Margin="0,0,0,6" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding SelectionSummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,2"
+                               Visibility="{Binding HasSelectionSummary, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock Text="{Binding SelectionPreview}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Visibility="{Binding HasSelectionPreview, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
 
-                        <!-- Section 1: what this app installs and keeps running -->
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Startup tasks" FontSize="16" FontWeight="SemiBold" />
@@ -648,7 +655,6 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Section 2: what is already running on this PC -->
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Services" FontSize="16" FontWeight="SemiBold" />
@@ -658,7 +664,6 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Section 3: everything else that fires on its own schedule -->
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Scheduled tasks" FontSize="16" FontWeight="SemiBold" />
@@ -671,10 +676,19 @@
                     </StackPanel>
                 </ScrollViewer>
 
-                <!-- Each section's own last-action message, collected: with one page there is one
-                     place to look, not three boxes to scroll to. -->
-                <TextBlock Grid.Row="3" Text="{Binding PerSectionMessage}" TextWrapping="Wrap" Margin="0,8,0,0"
-                           Visibility="{Binding HasSectionMessage, Converter={StaticResource BoolToVis}}" />
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button Content="Apply selected" Command="{Binding ApplySelectedCommand}" Padding="16,6" Margin="0,0,8,0"
+                            Style="{DynamicResource AccentButtonStyle}"
+                            ToolTip="Applies the ticked rows in all three sections that are not already on this PC." />
+                    <Button Content="Revert selected" Command="{Binding RevertSelectedCommand}" Padding="14,6" Margin="0,0,8,0"
+                            ToolTip="Puts back the previous value of each ticked row, in all three sections." />
+                    <Button Content="Select all" Command="{Binding SelectAllCommand}" Padding="14,6" Margin="0,0,8,0" />
+                    <Button Content="Select none" Command="{Binding SelectNoneCommand}" Padding="14,6" Margin="0,0,8,0" />
+                    <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="14,6" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="4" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Visibility="{Binding HasMessage, Converter={StaticResource BoolToVis}}" />
             </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type ui:SafetyPageViewModel}">

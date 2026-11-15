@@ -43,10 +43,37 @@ public sealed class AppOptions
     public CStateMode CState { get; set; } = CStateMode.Light;
 
     /// <summary>
-    /// Which cost tier of tweaks is pre-selected. Community-only tweaks are never pre-selected below
-    /// TweakPreset.Everything; see TweakPresetSelector.
+    /// The tier used for any tab that has no entry of its own in <see cref="Presets"/>. Kept so an
+    /// existing file still means what it meant: one value applied everywhere. New choices go into
+    /// <see cref="Presets"/> per tab.
     /// </summary>
     public TweakPreset Preset { get; set; } = TweakPreset.Safe;
+
+    /// <summary>
+    /// The tier for each tab, by module name ("Power", "Interrupts", "Network", "GPU", "Background").
+    /// <para>
+    /// A preset used to be one global value shown on every page, so a user who wanted Power at Safe and
+    /// Interrupts at Costly had to accept one for both - and had to walk the tabs to see what a change
+    /// had done. Per tab means the choice is made and read where it applies. An absent key falls back to
+    /// <see cref="Preset"/>, which is what makes an older file load as "one tier everywhere".
+    /// </para>
+    /// </summary>
+    public Dictionary<string, TweakPreset> Presets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The tier for one tab: its own choice, else the global default.</summary>
+    public TweakPreset PresetFor(string module) =>
+        Presets.TryGetValue(module, out var p) ? p : Preset;
+
+    /// <summary>Records a tab's own tier. A no-op copy is avoided so With() stays cheap.</summary>
+    public void SetPresetFor(string module, TweakPreset value)
+    {
+        Presets ??= new(StringComparer.OrdinalIgnoreCase);
+        Presets[module] = value;
+    }
+
+    /// <summary>Every tier in use, one entry per tab, for a summary that covers all of them.</summary>
+    public IReadOnlyList<(string Module, TweakPreset Preset)> PresetsByTab(params string[] modules) =>
+        modules.Select(m => (m, PresetFor(m))).ToList();
 
     /// <summary>Timer resolution in 100-ns units (5000 = 0.5 ms, 5070 = 0.507 ms).</summary>
     public uint TimerResolution { get; set; } = 5000;

@@ -2921,6 +2921,84 @@ Console.WriteLine("Wave 23: one page for everything that runs on its own");
     // Its contract is that GroupCaption is a separate property from Group, so a section can be renamed
     // without changing the row's module - and the module is what tweak ids are built from.
 }
+Console.WriteLine("Wave 24: the tier is per tab, and an old single tier still means one tier everywhere");
+{
+    // AppOptions.Load only reads IsLaptop for its defaults.
+    static SystemProfile TabProfile() => new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "x", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        Devices = Array.Empty<PciDevice>(),
+    };
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-pertab-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        // ---- a fresh options object: every tab falls back to the global default ----
+        var o = new AppOptions();
+        Check("with no per-tab entries every tab reads the global tier",
+            o.PresetFor("Power") == o.Preset && o.PresetFor("Interrupts") == o.Preset &&
+            o.PresetFor("Network") == o.Preset && o.PresetFor("Background") == o.Preset);
+
+        // ---- choosing a tier on one tab must not move another ----
+        o.SetPresetFor("Interrupts", TweakPreset.Costly);
+        Check("Power keeps Safe when Interrupts is set to Costly", o.PresetFor("Power") == TweakPreset.Safe, o.PresetFor("Power").ToString());
+        Check("Interrupts is Costly", o.PresetFor("Interrupts") == TweakPreset.Costly);
+        Check("Network is untouched", o.PresetFor("Network") == TweakPreset.Safe);
+        Check("the global tier is untouched by a per-tab choice", o.Preset == TweakPreset.Safe);
+
+        // module names are case-insensitive, like the rest of the app's keys
+        Check("a module name is matched case-insensitively", o.PresetFor("interrupts") == TweakPreset.Costly);
+
+        // ---- it survives the round trip through the journal, by NAME not number ----
+        string jf = Path.Combine(dir, "journal.json");
+        var j = new Journal(jf);
+        o.UserChosen = true;
+        o.Save(j);
+        string blob = j.GetState("options") ?? "";
+        Check("the per-tab map is written with enum names", blob.Contains("\"Interrupts\"") && blob.Contains("\"Costly\""), blob);
+        var back = AppOptions.Load(j, TabProfile());
+        Check("the per-tab choice round-trips", back.PresetFor("Interrupts") == TweakPreset.Costly, back.PresetFor("Interrupts").ToString());
+        Check("the other tabs round-trip as the global default", back.PresetFor("Power") == TweakPreset.Safe);
+
+        // ---- continuity: a file written before per-tab tiers existed ----
+        // This is the exact shape shipped before this change: one "Preset", no "Presets".
+        const string legacy = "{\"PlanTarget\":\"TunedUltimate\",\"PowerProfile\":\"Full\",\"ApplyOnBattery\":false," +
+                              "\"CState\":\"Light\",\"Preset\":\"Costly\",\"TimerResolution\":5000,\"Msi\":\"Safe\"," +
+                              "\"Cleanup\":\"Safe\",\"KeepValidPins\":true,\"HybridDevices\":\"EcoresForNetAudio\",\"UserChosen\":true}";
+        j.SetState("options", legacy);
+        j.Save();
+        var fromLegacy = AppOptions.Load(j, TabProfile());
+        Check("a pre-per-tab file still loads", fromLegacy.UserChosen);
+        Check("...and its single tier applies to EVERY tab",
+            fromLegacy.PresetFor("Power") == TweakPreset.Costly &&
+            fromLegacy.PresetFor("Interrupts") == TweakPreset.Costly &&
+            fromLegacy.PresetFor("Network") == TweakPreset.Costly &&
+            fromLegacy.PresetFor("Background") == TweakPreset.Costly,
+            fromLegacy.PresetFor("Power").ToString());
+        Check("...with an empty per-tab map, so nothing was invented", fromLegacy.Presets.Count == 0, fromLegacy.Presets.Count.ToString());
+
+        // ---- a numeric-enum file (two formats back) still reads, per-tab map absent ----
+        const string older = "{\"PlanTarget\":1,\"PowerProfile\":1,\"ApplyOnBattery\":false,\"CState\":2,\"Preset\":2," +
+                             "\"TimerResolution\":5000,\"Msi\":1,\"Cleanup\":4,\"KeepValidPins\":true,\"HybridDevices\":1,\"UserChosen\":true}";
+        j.SetState("options", older);
+        j.Save();
+        var fromOlder = AppOptions.Load(j, TabProfile());
+        Check("a numeric-enum file still reads, and its tier reaches every tab",
+            fromOlder.Preset == TweakPreset.Costly && fromOlder.PresetFor("Network") == TweakPreset.Costly,
+            fromOlder.Preset.ToString());
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");

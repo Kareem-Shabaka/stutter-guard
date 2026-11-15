@@ -507,8 +507,16 @@ public sealed class HomePageViewModel : PageViewModel
         int failed = list.Count(r => r.Status == TweakStatus.Failed);
         int waiting = list.Count(r => r.Status == TweakStatus.NotApplied);
 
-        string tier = TweakPresetSelector.Label(_main.Engine?.Options.Preset ?? TweakPreset.Safe);
-        var line = new List<string> { $"Tuned to {tier}: {applied} of {list.Count} tweaks applied" };
+        // Tiers are per tab now, so the headline names one only when every tab agrees. Otherwise it
+        // says so and stops: listing five tiers in the first sentence would bury the numbers after it.
+        var options = _main.Engine?.Options;
+        string[] tabs = { "Power", "Interrupts", "Network", "GPU", "Background" };
+        var tiers = tabs.Select(t => options?.PresetFor(t) ?? TweakPreset.Safe).Distinct().ToList();
+        string tierText = tiers.Count == 1
+            ? "Tuned to " + TweakPresetSelector.Label(tiers[0])
+            : $"{tiers.Count} different tiers across {tabs.Length} tabs";
+
+        var line = new List<string> { $"{tierText}: {applied} of {list.Count} tweaks applied" };
 
         // What needs the user, if anything, in the order it matters.
         if (pending > 0) line.Add($"{pending} waiting on a restart");
@@ -598,7 +606,7 @@ public sealed class HomePageViewModel : PageViewModel
 }
 
 /// <summary>A module screen: the tweak rows with apply / revert, plus an optional options panel.</summary>
-public sealed class ModulePageViewModel : PageViewModel
+public class ModulePageViewModel : PageViewModel
 {
     private readonly MainViewModel _main;
     private readonly string _module;
@@ -759,8 +767,8 @@ public sealed class ModulePageViewModel : PageViewModel
         var chosen = PresetChoice.Value;
 
         // Record the choice and retick first: that is free, and it shows the new tier immediately.
-        bool changed = engine.Options.Preset != chosen;
-        if (changed) engine.SetOptions(engine.Options.With(o => o.Preset = chosen));
+        bool changed = engine.Options.PresetFor(_module) != chosen;
+        if (changed) engine.SetOptions(engine.Options.With(o => o.SetPresetFor(_module, chosen)));
         _main.ReloadPages(carryTicks: false);
 
         // The plan is computed across every module page, because a preset spans all of them.
@@ -852,7 +860,8 @@ public sealed class ModulePageViewModel : PageViewModel
     /// </param>
     public void Load(TweakEngine engine, bool carryTicks = true)
     {
-        var incoming = engine.Options.Preset;
+        // This tab's own tier: a choice made on Power must not rewrite Interrupts.
+        var incoming = engine.Options.PresetFor(_module);
         bool presetChanged = incoming != _preset || !carryTicks;
         _loading = true;
         try
@@ -1373,30 +1382,25 @@ public sealed class SafetyPageViewModel : PageViewModel
     }
 }
 /// <summary>
-/// One page for everything that runs on its own: boot tasks, services and scheduled tasks. Three
-/// sections, because they answer three different questions - "what does this app install", "what is
-/// running", "what else fires on its own" - and one page, because a user looking for background
-/// activity should not have to guess which of three tabs owns it.
-/// <para>
-/// The page wraps three child pages rather than concatenating their rows, so each keeps its own
-/// options panel, its own service/task catalogs and its own Apply/Revert scope. Rows keep their
-/// original module name, so tweak ids, the journal and undo-all.ps1 are untouched.
-/// </para>
+/// <summary>
+/// One page for everything that runs on its own: startup tasks, services and scheduled tasks. One
+/// page because a user looking for background activity should not have to guess which of three tabs
+/// owns it, and one toolbar because the tier is a choice about the tab, not about a section.
 /// </summary>
-public sealed class BackgroundPageViewModel : PageViewModel
+public sealed class BackgroundPageViewModel : ModulePageViewModel
 {
+    private readonly MainViewModel _main;
+
     public BackgroundPageViewModel(MainViewModel main, TweakPreset preset)
-        : base("Background", "\uE823")
+        : base(main, "Background", "Background", "\uE823",
+               "Everything that runs on its own: what Stutter Guard installs and keeps running, what is already " +
+               "running as a service, and what Windows fires on a schedule. One tier and one Apply cover all three.",
+               preset)
     {
-        Startup = new ModulePageViewModel(main, "Boot tasks", "Startup tasks", "\uE823",
-            "Scheduled tasks in the \\Stutter Guard\\ folder of Task Scheduler: device power saving off at every boot, and the system timer held at 0.5 ms from every logon.",
-            preset);
-        Services = new ModulePageViewModel(main, "Services", "Services", "\uE912",
-            "Every installed service with what it does and what you lose without it. A preset lists only what it would change; nothing changes until you press Apply selected, and each row has its own Revert. Windows, security and game services are locked.",
-            preset);
-        Scheduled = new ModulePageViewModel(main, "Tasks", "Scheduled tasks", "\uE823",
-            "Every scheduled task, read as administrator. The preset only disables (never deletes) telemetry, background updaters and optional maintenance. Tasks your apps need are left alone.",
-            preset);
+        _main = main;
+        Startup = new ModulePageViewModel(main, "Boot tasks", "Startup tasks", "\uE823", "", preset);
+        Services = new ModulePageViewModel(main, "Services", "Services", "\uE912", "", preset);
+        Scheduled = new ModulePageViewModel(main, "Tasks", "Scheduled tasks", "\uE823", "", preset);
     }
 
     /// <summary>What this app installs itself, and keeps alive across reboots.</summary>
@@ -1408,40 +1412,26 @@ public sealed class BackgroundPageViewModel : PageViewModel
     /// <summary>Everything else that fires on its own schedule.</summary>
     public ModulePageViewModel Scheduled { get; }
 
+    /// <summary>All three sections' rows, so one Apply covers the tab.</summary>
+    public IEnumerable<TweakRowViewModel> AllRows =>
+        Startup.Rows.Concat(Services.Rows).Concat(Scheduled.Rows);
+
     /// <summary>
-    /// The three sections report their own results. One page means one place to look, so their
-    /// last action messages are collected here instead of each section keeping a box the user has to
-    /// scroll to and find.
+    /// Rebuilds the three sections and then this page's own row list, so the toolbar's Apply, Revert,
+    /// Select all and the per-tab tier act on the whole tab rather than on one section.
     /// </summary>
-    public string PerSectionMessage
+    public new void Load(TweakEngine engine, bool carryTicks = true)
     {
-        get
-        {
-            var parts = new[] { Startup.Message, Services.Message, Scheduled.Message }
-                .Where(m => !string.IsNullOrWhiteSpace(m)).ToList();
-            return string.Join(" ", parts);
-        }
-    }
-
-    public bool HasSectionMessage => PerSectionMessage.Length > 0;
-
-    /// <summary>Fills all three sections. Each child keeps its own ticks and its own options panel.</summary>
-    public void Load(TweakEngine engine, bool carryTicks = true)
-    {
+        base.Load(engine, carryTicks);
         Startup.Load(engine, carryTicks);
         Services.Load(engine, carryTicks);
         Scheduled.Load(engine, carryTicks);
+
+        // The page's own Rows list is what the base toolbar operates on.
+        Rows.Clear();
+        foreach (var r in AllRows) Rows.Add(r);
     }
 
     public override Task RefreshAsync() =>
         Task.WhenAll(Startup.RefreshAsync(), Services.RefreshAsync(), Scheduled.RefreshAsync());
-}
-
-/// <summary>
-/// Wraps a plain string so a section header can show a page's own description without inventing a
-/// second template. Empty descriptions render as nothing.
-/// </summary>
-public sealed record DescriptionText(string Text)
-{
-    public bool HasText => !string.IsNullOrWhiteSpace(Text);
 }
