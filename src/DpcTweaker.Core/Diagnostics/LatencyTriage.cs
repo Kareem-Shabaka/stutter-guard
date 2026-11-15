@@ -69,7 +69,7 @@ public static class LatencyTriage
             if (hz.Count > 1)
             {
                 string list = string.Join(", ",
-                    active.OrderBy(d => d.RefreshHz).Select(d => $"{d.Device} {d.Mode}{(d.Primary ? " (primary)" : "")}"));
+                    active.OrderBy(d => d.RefreshHz).Select(d => $"{d.Label} {d.Mode}{(d.Primary ? " (primary)" : "")}"));
                 findings.Add(new TriageFinding(
                     TriageSeverity.High,
                     $"{hz.Count} different refresh rates across {active.Count} displays ({string.Join(" / ", hz)} Hz)",

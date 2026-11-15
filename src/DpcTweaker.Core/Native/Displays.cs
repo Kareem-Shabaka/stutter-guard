@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 
 namespace DpcTweaker.Core.Native;
@@ -6,6 +7,20 @@ namespace DpcTweaker.Core.Native;
 public sealed record DisplayInfo(string Device, string Adapter, int Width, int Height, int RefreshHz, bool Primary)
 {
     public string Mode => $"{Width}x{Height} @ {RefreshHz} Hz";
+
+    /// <summary>
+    /// "Display 2" - Windows enumerates these as \\.\DISPLAY2 and Settings calls them Display 2, so the
+    /// number is the user's own name for the screen. Printing the raw device path put "\\.\DISPLAY2"
+    /// in front of them, which is a Win32 detail they never chose and cannot act on.
+    /// </summary>
+    public string Label
+    {
+        get
+        {
+            var m = Regex.Match(Device ?? "", @"DISPLAY(\d+)$", RegexOptions.IgnoreCase);
+            return m.Success ? "Display " + m.Groups[1].Value : "A display";
+        }
+    }
 }
 
 /// <summary>

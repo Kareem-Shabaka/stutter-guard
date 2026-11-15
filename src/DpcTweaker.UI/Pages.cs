@@ -199,7 +199,7 @@ public sealed class HomePageViewModel : PageViewModel
             OnPropertyChanged(nameof(HasTriage));
             TriageMessage = found.Count == 0
                 ? "Nothing found that would cost DPC latency on this machine."
-                : $"{found.Count} finding(s). The ones marked as needing a manual fix cannot be removed by interrupt pinning.";
+                : $"{found.Count} cost(s) found. Each one is a property of this machine; none is something Stutter Guard changes.";
         }
         catch (Exception ex)
         {
