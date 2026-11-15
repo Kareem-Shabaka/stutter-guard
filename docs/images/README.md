@@ -2,28 +2,25 @@
 
 ## Present
 
-`processor-map.svg` - the processor placement diagram, drawn from the plan the app recorded on the
-reference machine. It is a diagram, not a screenshot: it exists because the claim it illustrates is about
-*which core owns which device*, and that is a fact about the plan, not about a UI. Regenerate it from the
-journal if the placement changes.
+Three screenshots captured on the reference machine, named by capture time because their content was
+not described when they were added: `app-214238.png`, `app-214257.png`, `app-214312.png`.
 
-## Wanted: one screenshot of the app
+They are **3833 x 2073 full-desktop captures**, not window crops. That matters: at the width a README
+renders (~900 px), a full-desktop capture scales down by 4x and the labels become unreadable, and the
+desktop background is visible. Worth re-capturing as window-only crops when convenient.
 
-The README would carry one screenshot of the Interrupts screen with a completed plan. It is not there yet,
-so the README does not reference it - a reference to a missing file shows a broken image on the front door.
+| File | Referenced in README | Shows |
+|---|---|---|
+| `app-214257.png` | yes, as the front-door figure | assumed Interrupts page - **confirm** |
+| `app-214238.png` | no | unknown |
+| `app-214312.png` | no | unknown |
 
-To add it:
+To finish this properly: say which file shows which screen, then rename them (`app-interrupts.png`,
+`app-home.png`, `app-check.png`) and reference the useful ones.
 
-1. Launch `StutterGuard.exe`, apply a plan, restart, open **Interrupts**.
-2. Capture **the window only** - native resolution, no desktop, no browser chrome. The labels are the point.
-3. Save as `docs/images/interrupts.png`.
-4. Add this line to `README.md`, immediately below the processor-map figure and its caption:
+## How to capture a better one
 
-   ```markdown
-   ![Stutter Guard: the Interrupts screen, showing which core each device owns](docs/images/interrupts.png)
-   ```
-
-5. Confirm it renders: `README.md` in the GitHub web view, not a local editor.
-
-Same rules for any further images: Home with its verdict line, and the interrupt check results with the
-per-CPU counters - that second one is the evidence a move actually happened.
+1. Launch `StutterGuard.exe`, apply a plan, restart, open the screen you want.
+2. **Alt+PrintScreen** for the active window only - not PrintScreen, which takes the whole desktop.
+3. Save as PNG at native resolution.
+4. Drop it in this folder and reference it from `README.md`.

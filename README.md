@@ -17,10 +17,7 @@ running on.
 latency, away from the cores your game uses. Then it records every change it made, so you can put all
 of it back.**
 
-![Processor placement on the reference machine: 32 logical processors, the V-Cache CCD kept free of every device, and one device per core on the second CCD](docs/images/processor-map.svg)
-
-*The plan the app recorded on the reference machine. Interrupts were then observed on CPU 18, and the
-adapter's DPCs on CPU 20 and 22 - [the measurement](docs/MEASUREMENT.md).*
+![The Stutter Guard window: the Interrupts page showing which core each device owns](docs/images/app-214257.png)
 
 ---
 
