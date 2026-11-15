@@ -1,6 +1,13 @@
 # Stutter Guard v1.2.0 - SHA-256 checksums
 #
-# Verify on Windows:
+# This is the hash of the file attached to the GitHub release, byte for byte.
+# Verify a download on Windows:
 #   certutil -hashfile StutterGuard.exe SHA256
+#
+# A local 'dotnet publish' does NOT reproduce this value. The single-file bundle is not
+# reproducible: two consecutive builds of the same commit produced 65,460,090 and
+# 65,460,096 bytes with different hashes, and the published binary is a third value.
+# This file therefore verifies the download, not a build you made yourself. Do not
+# 'correct' it to a locally built hash - that would make every download look wrong.
 
-836B9C394248A5DF13EB35095981518744D662E4866530982EB91EDFD9EFDAB7  StutterGuard.exe
+01752CF8BCFAF8346516CFAC14DA0E1D2B468EBAACCC0923F0BAFBF39BC25B89  StutterGuard.exe

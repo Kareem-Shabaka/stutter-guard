@@ -366,9 +366,9 @@ that tag; it needs its own version.
 
 ---
 
-## Wave 13 - the two months the changelog skipped, shipped as 1.1.0
+## Wave 13 - the two months the changelog skipped, built as 1.1.0 and never released
 
-Eight commits landed between this section's predecessor and the 1.1.0 binary. Recorded here because
+Eight commits landed between this section's predecessor and the 1.1.0 binary - which was version-stamped and built locally, but never tagged, never pushed and never published as a release, so no user ever held it. Recorded here because
 the alternative is an audit trail that stops exactly where the work started.
 
 | # | Bug | Fix | Where |
@@ -426,7 +426,7 @@ Shipped as **1.1.0**: 971 assertions at release. The instruments behind the numb
 | After Wave 10 (28-CPU matrix) | 828 |
 | After Wave 11 (MPO removal) | 859 |
 | After Wave 12 (latency triage) | **888** |
-| After Wave 13 (post-1.0.0 fixes, shipped as 1.1.0) | 971 |
+| After Wave 13 (post-1.0.0 fixes, built as 1.1.0; first released in 1.2.0) | 971 |
 | After Wave 14 (catalogue, defaults, budgets, parking coupling, RSS alignment) | **1022** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.

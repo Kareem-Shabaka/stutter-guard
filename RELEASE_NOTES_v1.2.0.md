@@ -96,7 +96,7 @@ text and `DeviceCpus` now all follow one range.
 
 ## Also in this release
 
-- The changelog was eight commits behind the shipped 1.1.0 binary. Waves 13 and 14 record
+- The changelog was eight commits behind the binary. Waves 13 and 14 record
   all of it.
 - `PresetTransition` moved out of `SelectionSummary.cs` into its own file; switching a
   preset down now really reverts what it drops.
