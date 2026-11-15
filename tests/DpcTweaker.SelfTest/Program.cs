@@ -2428,6 +2428,78 @@ Console.WriteLine("Wave 13: the driver catalogue matches what Windows actually r
     Check("the overlapping Pascal entries share a bugged version", overlapping.Count >= 2 &&
         overlapping.All(e => e.BuggedVersions.Contains("368.39")), overlapping.Count.ToString());
 }
+Console.WriteLine("Wave 15: a process restricted onto an interrupt core is named, a full mask never is");
+{
+    // 8 logical processors: interrupt cores 4 and 6, everything else reserved for the game.
+    var interrupt = new[] { 4, 6 };
+    const int logical = 8;
+    ulong bit(int c) => 1UL << c;
+
+    // ---- the trap: a full mask intersects every interrupt core trivially ----
+    // Counting intersections without first asking whether the mask restricts anything would report
+    // every process on the machine, and the finding would be worthless.
+    Check("a full mask is not a restriction",
+        !ProcessOverlap.IsRestricted(ProcessOverlap.FullMask(logical), logical));
+    Check("a single-core mask is a restriction", ProcessOverlap.IsRestricted(bit(2), logical));
+    Check("a zero mask is not a restriction", !ProcessOverlap.IsRestricted(0, logical));
+    Check("a full mask overlapping an interrupt core is never reported",
+        ProcessOverlap.Find(new[] { (1, "game", ProcessOverlap.FullMask(logical)) }, interrupt, logical).Count == 0);
+
+    // ---- the finding: a restricted mask that really does name an interrupt core ----
+    var found = ProcessOverlap.Find(new[]
+    {
+        (10, "game", ProcessOverlap.FullMask(logical)),
+        (20, "launcher", bit(4) | bit(5)),          // overlaps CPU 4
+        (30, "capture", bit(6)),                    // overlaps CPU 6
+        (40, "browser", bit(0) | bit(2)),           // restricted, but nowhere near
+        (50, "encoder", bit(4) | bit(6) | bit(7)),  // overlaps both
+    }, interrupt, logical);
+
+    Check("only the processes restricted onto an interrupt core are reported", found.Count == 3, found.Count.ToString());
+    Check("a full mask is left out of the report", !found.Any(f => f.Pid == 10));
+    Check("a restricted mask elsewhere is left out of the report", !found.Any(f => f.Pid == 40));
+    Check("the report names which interrupt cores each process covers",
+        found.Single(f => f.Pid == 20).OverlapCpus.SequenceEqual(new[] { 4 }) &&
+        found.Single(f => f.Pid == 50).OverlapCpus.SequenceEqual(new[] { 4, 6 }));
+    Check("the report is ordered by pid", found.Select(f => f.Pid).SequenceEqual(new[] { 20, 30, 50 }));
+
+    // ---- degenerate inputs must not throw or invent findings ----
+    Check("no interrupt cores means nothing to overlap",
+        ProcessOverlap.Find(new[] { (1, "x", bit(4)) }, Array.Empty<int>(), logical).Count == 0);
+    Check("an empty process list is fine",
+        ProcessOverlap.Find(Array.Empty<(int, string, ulong)>(), interrupt, logical).Count == 0);
+    Check("a mask for a processor past the group is ignored rather than shifted",
+        ProcessOverlap.Find(new[] { (1, "x", bit(4) | (1UL << 63)) }, new[] { 4, 70 }, logical).Count == 1);
+
+    // ---- the finding itself, through the rule engine ----
+    var withOverlap = LatencyTriage.Scan(overlapping: found);
+    Check("the overlap appears in triage", withOverlap.Any(f => f.Title.Contains("restricted onto the interrupt cores")));
+    Check("the overlap is High severity",
+        withOverlap.Single(f => f.Title.Contains("restricted onto")).Severity == TriageSeverity.High);
+    Check("the overlap says this app cannot fix it",
+        !withOverlap.Single(f => f.Title.Contains("restricted onto")).AffinityCanFix);
+    Check("the overlap names the process and the core",
+        withOverlap.Single(f => f.Title.Contains("restricted onto")).Title.Contains("CPU 4") &&
+        withOverlap.Single(f => f.Title.Contains("restricted onto")).Detail.Contains("launcher"));
+
+    var unreadable = LatencyTriage.Scan(overlapping: found, unreadableProcesses: 7);
+    Check("unreadable processes are disclosed as a limit, not hidden", unreadable.Any(f => f.Title.Contains("could not be inspected")));
+    Check("the disclosure does not dress itself up as a fault",
+        unreadable.Single(f => f.Title.Contains("could not be inspected")).Severity == TriageSeverity.Info);
+    Check("no overlap and nothing unreadable adds no finding", LatencyTriage.Scan().Count(f => f.Title.Contains("restricted onto") || f.Title.Contains("could not be inspected")) == 0);
+
+    // ---- the live sampler must not throw on this machine, whatever it finds ----
+    try
+    {
+        var live = ProcessOverlap.Sample(new[] { 0 }, Environment.ProcessorCount, out int blind);
+        Check("the live overlap sampler runs without throwing", live is not null);
+        Check("the live sampler reports a count rather than pretending silence", blind >= 0);
+    }
+    catch (Exception ex)
+    {
+        Check("the live overlap sampler runs without throwing", false, ex.Message);
+    }
+}
 // ================================================================ Wave 8, Part 2: 12-topology matrix
 
 Console.WriteLine("Wave 8 P2: 12-topology hardware simulation matrix");

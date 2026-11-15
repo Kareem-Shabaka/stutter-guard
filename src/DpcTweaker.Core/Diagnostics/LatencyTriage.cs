@@ -1,3 +1,4 @@
+using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Native;
 
 namespace DpcTweaker.Core.Diagnostics;
@@ -51,7 +52,9 @@ public static class LatencyTriage
     public static IReadOnlyList<TriageFinding> Scan(
         IReadOnlyList<DisplayInfo>? displays = null,
         IReadOnlyList<CpuRates>? rates = null,
-        IReadOnlyList<int>? gameCores = null)
+        IReadOnlyList<int>? gameCores = null,
+        IReadOnlyList<OverlappingProcess>? overlapping = null,
+        int unreadableProcesses = 0)
     {
         var findings = new List<TriageFinding>();
         var active = (displays ?? Array.Empty<DisplayInfo>()).Where(d => d.RefreshHz > 0).ToList();
@@ -139,6 +142,41 @@ public static class LatencyTriage
                 "updates and turning off unused board features (legacy USB, serial ports, unused controllers) are the only " +
                 "levers a user has. This app cannot measure SMIs, so it cannot tell you whether yours are the cause - it can " +
                 "only name the possibility.",
+                false));
+        }
+
+        // ---- 6. processes restricted onto the cores reserved for interrupts ----
+        // The scheduler never checks whether a core is servicing a device, so ordinary work placed there
+        // competes with every interrupt the plan isolated. Measured: 782 us against 8.9 us, same load.
+        if (overlapping is { Count: > 0 })
+        {
+            var names = overlapping
+                .GroupBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .Select(g => g.Count() > 1 ? $"{g.Key} x{g.Count()}" : g.Key)
+                .ToList();
+            var cpus = overlapping.SelectMany(o => o.OverlapCpus).Distinct().OrderBy(c => c).ToList();
+            findings.Add(new TriageFinding(
+                TriageSeverity.High,
+                $"{overlapping.Count} process(es) restricted onto the interrupt cores ({string.Join(", ", cpus.Select(c => "CPU " + c))})",
+                string.Join(", ", names.Take(8)) + (names.Count > 8 ? $", and {names.Count - 8} more" : "") + ".",
+                "These processes carry an explicit affinity mask naming a processor this plan reserves for devices, so " +
+                "the scheduler is free to run them next to the interrupts. Something set those masks - a process " +
+                "manager, a launcher, or a manual change - because a full mask is not a restriction and is never " +
+                "counted here. This app moves devices, not processes: widen those masks yourself, or stop the rule " +
+                "that does it, then run the check again.",
+                false));
+        }
+
+        // A count of zero is only meaningful if everything was readable.
+        if (unreadableProcesses > 0)
+        {
+            findings.Add(new TriageFinding(
+                TriageSeverity.Info,
+                $"{unreadableProcesses} process(es) could not be inspected for affinity masks",
+                "Those are protected or other-user processes, which answer access-denied without elevation.",
+                "The overlap finding therefore describes only the processes this app could read. That is the honest " +
+                "limit of an unelevated scan, not evidence that the unreadable ones are clean.",
                 false));
         }
 

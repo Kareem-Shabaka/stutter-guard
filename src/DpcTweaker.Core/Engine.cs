@@ -332,7 +332,27 @@ public sealed class TweakEngine
         }
 
         var gameCores = Plan.Applicable ? Plan.ReservedCpus : new List<int>();
-        return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores));
+
+        // Processes pinned onto the cores the plan reserves: the scheduler has no way to know a core is
+        // servicing a device, so anything restricted there competes with every interrupt. Read-only and
+        // unelevated; the unreadable count is reported rather than folded into a clean zero.
+        IReadOnlyList<OverlappingProcess> overlap = Array.Empty<OverlappingProcess>();
+        int unreadable = 0;
+        try
+        {
+            // Live pins, not the plan's intent: the plan is where devices would go, and the question is
+            // where interrupts land now. On a machine with nothing pinned there is no interrupt core to
+            // defend, so the check is skipped rather than answered from a plan that is not in effect.
+            var interruptCpus = ProcessOverlap.LiveCpus(Profile.Devices).ToList();
+            if (interruptCpus.Count > 0)
+                overlap = ProcessOverlap.Sample(interruptCpus, Profile.Cpu.LogicalCount, out unreadable);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Process overlap check failed: " + ex.Message);
+        }
+
+        return LatencyTriage.Ordered(LatencyTriage.Scan(displays, rates, gameCores, overlap, unreadable));
     }
 
     /// <summary>
