@@ -228,7 +228,7 @@ and pay a cache-missing memory round trip on every interrupt.
 `AffinityPlanner` now keeps L3-less cores out of the candidate pool whenever L3-backed cores exist
 (`AffinityPlanner.cs:185`) and says so in the plan notes.
 
-**A bug in my own first attempt**, caught by the new Lunar Lake fixture: the pre-existing
+**A bug in the first implementation**, caught by the new Lunar Lake fixture: the pre-existing
 starvation fallback (`free.Count < 2`) rebuilt the free list from *all* cores, silently undoing the
 exclusion on a 4-P-core Lunar Lake — every device landed on LP-E. The fallback now relaxes the
 *reservation* first while keeping the L3 rule, and only drops the rule when no L3-backed core is
@@ -396,7 +396,7 @@ Shipped as **1.1.0**: 971 assertions at release. The instruments behind the numb
 | 14.1 | Every AMD rule was unreachable. Rows store `"23.9.1 (31.0.21029.1006)"`; a machine reports `"31.0.21029.1006"`, and 7 components never equals 4 - measured 0 of 33 detected, so a bugged AMD driver reported as clean | `VersionForms` compares each form against each form | `Catalog/DriverAuditor.cs` |
 | 14.2 | Rules were INF identifiers compared with device *instance* ids, a different string shape by definition. Nothing matched exactly, and the `Contains` fallback fired on the wrong device: the Realtek audio-component rule matched the Realtek Ethernet card | `Catalog/DriverMatcher.cs`: anchored glob over hardware ids, compatible ids and the instance id | `Catalog/` |
 | 14.3 | Six rows list several ids with `;` and only the first could ever fire - 9 ids dead | Patterns split into their ids | `Catalog/DriverMatcher.cs` |
-| 14.4 | The scan emitted only `PCI\\` nodes, so 22 of 77 rules could not fire on any machine, including one for a node present on the author's own board | `PnpNode` for every node with hardware ids; audited after the PCI pass | `Detection/PciDevices.cs`, `SystemProfile.cs` |
+| 14.4 | The scan emitted only `PCI\\` nodes, so 22 of 77 rules could not fire on any machine, including one for a node present on a reference board | `PnpNode` for every node with hardware ids; audited after the PCI pass | `Detection/PciDevices.cs`, `SystemProfile.cs` |
 | 14.5 | The action was computed by comparing the first number in the recommended text (23.12.1) with the WDDM build the machine reports (31.0.23013.1006), so an out-of-date AMD driver was told to **roll back** | `TryCompareLikeForLike`: only forms with the same component count | `Catalog/DriverAuditor.cs` |
 | 14.6 | The reachability test fed each pattern back to itself and asserted 77/77 while a real scan reached 5 | Per-id Windows-shaped identifier lists, all 33 WDDM forms, all 9 secondary ids, two negative guards | `tests/` |
 | 14.7 | Interrupt moderation was ticked on desktops and unticked on laptops - backwards, since the measured cost is desktop interrupts (about 88k/s off against about 6k at Medium) | Unticked everywhere, price stated in its own Cost field | `Tweaks/Network.cs` |
@@ -433,21 +433,35 @@ Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest
 
 ---
 
-## Known limitations
+## Design notes
 
-1. **`timerres.c` vs the shipped binary.** No C/C++ compiler exists on this machine (no VS, no
-   LLVM, no MSYS2/MinGW, no zig; `winget install zig.zig` could not reach a source). The shipped
-   `DpcTimerRes.exe` is therefore a managed twin built with the in-box `csc.exe`, functionally
-   identical (P/Invoke to `ntdll`), 6.6 KB instead of 40 KB, and it needs the .NET Framework 4.x
-   that ships with Windows. `timerres.c` remains the reference native implementation.
-2. **RSS placement follows the interrupt mask, but NDIS still spreads queues over a contiguous range.**
-   The keywords cannot express a non-contiguous set, so the adapter's mask is the range its queues cover
-   (`Assignment.MaskCpus`), and `ChooseQueues` sizes the queue count to fill that span. A pin kept from
-   an earlier run is never widened to make the two agree: `AffinityPlanner.Clamp` narrows the range
-   instead, and if nothing fits, no keywords are written and the row says why. Per-queue verification
-   would still need `Get-NetAdapterRss` data that this Realtek driver does not populate.
-3. **#3 and #11/#12 have no automated coverage** - they live in the WPF layer the self-test
-   project does not reference.
-4. **Two `bad_drivers.json` groups share a `driverFile` + `hardwareIdPattern`** with overlapping
-   bugged versions (Pascal `DEV_1B80`, Ampere `DEV_2204`). Harmless now that the most severe match
-   wins, but the duplicate content should be merged.
+Constraints a maintainer needs before touching the parts below. These are properties of the
+implementation, not defects waiting to be closed.
+
+### `DpcTimerRes.exe` is a managed twin
+
+`timerres.c` is the reference implementation. The shipped `DpcTimerRes.exe` is built with the in-box
+`csc.exe` from managed code that P/Invokes `ntdll`, so it is functionally the same call path, 6.6 KB
+instead of about 40 KB, and it depends on the .NET Framework 4.x that ships with Windows. Building the
+C version requires a native toolchain that a stock Windows machine does not carry, which is why the
+managed twin is shipped rather than the reference source compiled.
+
+### RSS spans cannot be non-contiguous
+
+NDIS receive-queue keywords describe a contiguous processor range, so the adapter's mask has to be the
+range its queues cover (`Assignment.MaskCpus`) and `ChooseQueues` sizes the queue count to fill that
+span. A pin from an earlier run is never widened to make the two agree: `AffinityPlanner.Clamp` narrows
+the range instead, and when nothing fits no keywords are written and the row states why. Per-queue
+verification would need `Get-NetAdapterRss` data that the Realtek driver does not populate.
+
+### Coverage boundary
+
+The self-test project references `DpcTweaker.Core` only. View models and XAML are outside it, so the
+assertion count is evidence about the engine and never about the window. Any interface change needs a
+build plus a human look, and no number in this file changes that.
+
+### Two catalogue groups overlap
+
+`bad_drivers.json` contains two groups sharing a `driverFile` and `hardwareIdPattern` with overlapping
+bugged versions (Pascal `DEV_1B80`, Ampere `DEV_2204`). Harmless because the most severe match wins, but
+the duplicate content should be merged to keep the catalogue readable.
