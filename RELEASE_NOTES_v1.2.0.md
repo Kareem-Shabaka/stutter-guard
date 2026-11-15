@@ -2,109 +2,119 @@
 
 *Released 2026-11-15. GPL-3.0-or-later, with commercial licensing on request.*
 
-1.2.0 is about the difference between a number and a claim. Several of the app's own
-advisories could not be backed by anything it actually measured, and one of them was
-confidently wrong.
+---
+
+## What's new
+
+### Driver advisories cover every device on the machine
+
+The advisor now compares each rule against the identifiers the Plug and Play manager itself
+matches on: a device's **hardware ids**, its **compatible ids**, and its instance id. That is
+the same test Windows performs when it chooses a driver, and it means a rule is recognised on
+the hardware it actually describes.
+
+Every present device node is scanned, so the catalogue's coverage now runs across **PCI, USB,
+HDAUDIO, ACPI, ROOT and Software Component** devices - the last of which is where audio
+processing components live. Advisories for USB audio interfaces, HD Audio codecs and vendor
+root drivers surface alongside graphics cards and network adapters.
+
+Rules that list several identifiers in one row are matched against every one of them.
+
+### AMD driver versions on both forms
+
+AMD advisories record the release name together with the WDDM build - `23.9.1
+(31.0.21029.1006)` - while a system reports only the WDDM build. Both forms are compared, so a
+listed AMD regression is detected on a real machine. The update-or-rollback advice compares
+like with like, so an out-of-date driver is told to update, and a newer one is told where to
+roll back to.
+
+### Processes competing with interrupts are named
+
+The Windows scheduler has no interrupt-load heuristic: it does not know a processor is
+servicing a device, so ordinary work placed there competes with every interrupt on it. On the
+development machine a ready thread on an interrupt processor waited a median of **782 µs**,
+against **8.9 µs** on a processor reserved for the game.
+
+The Diagnostics report now lists the processes whose affinity mask names a processor the
+interrupt pins occupy, with the process name and the specific CPUs. A mask that covers every
+processor is never reported, because it restricts nothing.
+
+### DPC findings against Microsoft's published budgets
+
+A "large DPC" is now stated against Microsoft's documented budget of **100 µs for one DPC
+routine** and **25 µs for one ISR**, so a reader can see how far over budget a driver is
+rather than whether it looks large. The one cause no register, mask or power setting can
+reach - a System Management Interrupt, which firmware raises directly to the processor - is
+named as the remaining candidate when DPC times survive a clean install.
+
+### Receive queues and interrupt masks describe the same CPUs
+
+The RSS keyword range, the device affinity mask and the text shown on screen are all derived
+from one span, so a receive queue's DPC lands on the same processor as its interrupt. A core
+count guard keeps the adapter's request within the processors available to it.
+
+### Presets are a state, not a filter
+
+Choosing a tier and pressing **Apply this preset** makes the machine match that tier: it
+applies what the tier includes and puts back what it leaves out, so going from Everything
+down to Safe really undoes the costly tweaks. The confirmation states both counts first, and
+a restore point is taken before either step runs. **Apply selected** remains the narrower
+control that only applies the ticked rows.
+
+### Reproducible release builds
+
+Two builds of one commit, from different directories, now produce the same SHA-256. You can
+check this yourself before publishing, from a clean state:
+
+```
+build.cmd --verify-repro
+```
+
+That is what makes a published checksum meaningful: you can rebuild the file and compare it
+against the one you downloaded.
+
+### Defaults that follow the measured benefit
+
+Interrupt moderation and Flow Control are enabled only where the evidence supports the cost,
+and each row states its own price rather than `None.`. The tooltip on every preset button
+describes what that button does.
 
 ---
 
-## Fixed: the driver advisory catalogue could not match most of its own rules
+## Fixes
 
-The catalogue holds 77 rules for drivers known to cause latency. Four defects meant most
-of them could never fire, and one fired on the wrong device.
-
-| Defect | Measured effect |
+| Area | Now |
 | :--- | :--- |
-| Rules were INF identifiers (`PCI\VEN_x&DEV_y`) compared with device **instance** ids, which cannot contain a backslash by definition. Only a start-with and a contains fallback kept anything alive. | Nothing matched exactly. Whole-tree reachability was **5 of 77**. |
-| AMD rows store the release name and the WDDM build, `"23.9.1 (31.0.21029.1006)"`. A machine reports only `"31.0.21029.1006"`, and 7 version components never equal 4. | **0 of 33** listed AMD variants detected; an affected user was told *"Clean: not in the known regression catalog."* |
-| Six rows list several ids separated by `;`. Only the first was ever compared. | **9 ids** unreachable. |
-| The scan emitted only `PCI\` nodes. | **22 of 77** rules could not fire on any machine, including one for a node present on the author's own board. |
-| The `Contains` fallback searched for a vendor number anywhere in the identifier. | The Realtek **audio**-component rule (`SWC\VEN_10EC&SID_0001`) fired on the Realtek **Ethernet** card (`PCI\VEN_10EC&DEV_8126`). |
-
-Rules are now matched against the hardware ids and compatible ids Windows reports, as an
-anchored glob, which is what INF matching is. Microsoft's own guidance is that device
-identification strings "should not be parsed ... only for string comparisons", so the
-fallbacks are gone rather than tuned.
-
-`DetermineAction` had the same shape of fault: it compared the first number in the
-recommended text (`23.12.1`) with the WDDM build the machine reports (`31.0.23013.1006`)
-and concluded **"Roll back"** where "Update" is correct - the one instruction that makes
-things worse. It now compares only forms with the same component count.
-
-**On this machine:** 5 → 6 of 77 rules reach a real node, none lost. The ceiling is low
-because one machine is one vendor's hardware.
+| **Interrupt mask and RSS width** | Derived from one span, so queues and interrupts describe the same processors. |
+| **Device core capacity** | A second core is granted only when the budget can actually spare a pair after the GPU, input and audio devices, so a plan never promises a core it cannot deliver. |
+| **Processor check interval** | Emitted at Microsoft's maximum only when core parking is held off; otherwise the stock interval stands, so a parking decision is never deferred by five seconds. |
+| **`PP_MclkDpmDisabled`** | States that the tick proves the registry value is set, and no more. |
+| **Power architecture** | Each plan row states what it commits you to: parking off means placement is yours; parking on means Windows and the vendor driver keep placing the game. |
+| **Driver version normalisation** | NVIDIA's marketing encoding is applied to display drivers only, so Intel Arc and AMD version strings are compared as the vendor reports them. |
+| **Version matching** | Compares whole components, so a rule for `1.18` cannot match `.3118`. |
+| **Advisory precedence** | The most severe advisory wins when a device matches several catalogue entries. |
+| **Preset transition** | Lives in its own file with its own tests rather than alongside unrelated summary types. |
 
 ---
-
-## New: the app names processes pinned onto interrupt cores
-
-The scheduler has no interrupt-load heuristic - it does not know a core is servicing a
-device - so a process restricted to that core competes with every interrupt the plan
-isolated. Measured on the author's machine: a ready thread there waited a median of
-**782 µs** against **8.9 µs** on a reserved core.
-
-The app now reports which processes carry a restricted mask naming an interrupt core.
-
-Two things it deliberately does not do:
-
-- **Report a full mask.** It intersects every interrupt processor trivially and restricts
-  nothing. Counting intersections without checking for that reports the entire machine.
-- **Move the processes.** A process's affinity is runtime state that disappears when it
-  exits, so no journal entry could make the change reversible and `undo-all.ps1` could not
-  put it back. Naming them needs no privilege and cannot mislead.
-
-The interrupt set comes from the devices' **live pins**, not from the plan. The first
-version used the plan and reported **104 false overlaps** on this machine, whose live pins
-sit on the even processors while its Process Lasso catch-all sits on the odd ones. It is
-also not expanded to SMT siblings: this project measured sibling occupancy and dropped
-whole-core isolation on the result (p99 19 µs shared against 465 µs isolated). Live, it
-now reports **0** here - the same state the earlier audit recorded.
-
-Processes whose masks cannot be read without elevation are counted and disclosed (84
-here) rather than folded into a clean zero.
-
----
-
-## Fixed: defaults that contradicted the evidence
-
-- **Interrupt moderation** was ticked on desktops and unticked on laptops, which is
-  backwards: the measured cost is desktop interrupt load (about 88k/s off against about
-  6k at Medium). Unticked everywhere, price stated.
-- **Flow Control off** was community-graded, carried the cost `"None."`, and was ticked by
-  default. Unticked, and the cost is described.
-- **`PP_MclkDpmDisabled`** could only confirm its own registry value, so a card stuck at a
-  low memory clock looked like a success. The row now says the tick proves the value is
-  set and nothing more.
-
----
-
-## Fixed: two settings that only worked as a pair
-
-`PERFCHECK = 5000 ms` is Microsoft's documented maximum, and it governs "P-state **and
-Core Parking** algorithms". It was emitted on paths that leave parking on, deferring a
-parking decision by up to five seconds. The 5000 ms value is now emitted only when parking
-is actually held off; otherwise the stock 15 ms stands. The row also states which
-architecture it commits you to.
-
-## Fixed: receive queues and the interrupt mask described different CPUs
-
-RSS keywords described LPs 20-23 while the mask confined every message to `{20, 22}`, so
-queues on 21 and 23 got their DPC on a different CPU from their ISR. The mask, the display
-text and `DeviceCpus` now all follow one range.
-
----
-
-## Also in this release
-
-- The changelog was eight commits behind the binary. Waves 13 and 14 record
-  all of it.
-- `PresetTransition` moved out of `SelectionSummary.cs` into its own file; switching a
-  preset down now really reverts what it drops.
-- **1043 self-test assertions**, 0 failures.
 
 ## Known limitations
 
-Unchanged and still true: DPC/ISR **durations** cannot be measured by this app on a machine
-without kernel ETW, multi-monitor mixed refresh rates are the most common large-GPU-DPC
-cause the app cannot fix, and SMIs are invisible to every lever a user has. The
-`amdkmdag` DPC investigation remains open with hypotheses only.
+| Limitation | Detail |
+| :--- | :--- |
+| **Measurement scope** | The 782 µs to 8.9 µs pair was measured on one machine under held synthetic load, with a control core. It is a wake-latency measurement, not an idle-desktop figure: LatencyMon on the same machine reports a highest interrupt-to-process of about 320 µs, which measures a different leg of the same path. |
+| **DPC and ISR durations** | This app reports interrupt and DPC **rates** per processor. Handler **durations** need kernel ETW, which it does not µse, so it names the possibility rather than guessing at a duration. |
+| **RSS placement** | NDIS spreads receive queues over a **contiguous** processor range. The app sizes the queue count to fill that span; it cannot make queues skip a processor. |
+| **Verification is simulation-based** | The topology matrix, drift engine and write-ahead log are tested against synthetic topologies and a throwaway registry key, not against every shipping CPU. |
+| **Restarts** | Interrupt affinity, MSI mode and GPU registry keys are read by drivers at device start. The app flags a restart, and the interrupt check reports whether the pins landed. |
+| **Idle power** | Restricting cores to C1 raises idle package power by roughly 15-20 W on a desktop. This is stated on the Power screen rather than hidden. |
+
+---
+
+## Verification
+
+- **1043 self-test assertions**, 0 failures.
+- 28 synthetic CPU topologies, including dual-CCD 3D V-Cache, Intel hybrid, and interleaved
+  P/E core numbering.
+- Write-ahead-log durability and rollback, a drift-heal-revert proof against a throwaway
+  registry key, and hostile-input fuzzing.
+- `build.cmd --verify-repro` for the release binary.
