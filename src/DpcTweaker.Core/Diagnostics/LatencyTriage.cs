@@ -63,37 +63,49 @@ public static class LatencyTriage
         var findings = new List<TriageFinding>();
         var active = (displays ?? Array.Empty<DisplayInfo>()).Where(d => d.RefreshHz > 0).ToList();
 
-        // ---- 1. mixed refresh rates: the compositor must service several cadences ----
+        // ---- 1. the display setup: one cost, one finding ----
+        // These used to be two findings - "N different refresh rates" and "M displays attached" - and
+        // both fired on a three-screen machine, so one situation read as two problems. They answer the
+        // same question: how much compositing does this setup cost per cycle? Several cadences is worth
+        // saying; several screens at one cadence is worth saying; both at once is one sentence.
         if (active.Count >= 2)
         {
             var hz = active.Select(d => d.RefreshHz).Distinct().OrderBy(h => h).ToList();
-            if (hz.Count > 1)
+            bool mixed = hz.Count > 1;
+            bool many = active.Count >= DisplayCountWarning;
+
+            if (mixed || many)
             {
                 string list = string.Join(", ",
                     active.OrderBy(d => d.RefreshHz).Select(d => $"{d.Label} {d.Mode}{(d.Primary ? " (primary)" : "")}"));
+
+                // Severity follows the stronger fact: several cadences is the sharper cost, because the
+                // driver is woken on more than one schedule rather than merely more often.
+                string title = mixed && many
+                    ? $"{active.Count} displays at {hz.Count} different refresh rates ({string.Join(" / ", hz)} Hz)"
+                    : mixed
+                        ? $"{hz.Count} different refresh rates across {active.Count} displays ({string.Join(" / ", hz)} Hz)"
+                        : $"{active.Count} displays attached";
+
+                string why = mixed && many
+                    ? "Each screen is composited at its own cadence, and the graphics driver does that work in its " +
+                      "interrupt handler for every attached screen - so this setup costs more per cycle than one " +
+                      "screen at one rate, in two ways at once."
+                    : mixed
+                        ? "Each display is composited at its own cadence, so the graphics driver does work in its " +
+                          "interrupt handler for every attached screen, not only for the game's. Two cadences mean " +
+                          "two schedules to service."
+                        : "Every attached display is another surface the compositor presents each cycle, so the cost " +
+                          "is paid whether or not anything is open on it.";
+
                 findings.Add(new TriageFinding(
-                    TriageSeverity.High,
-                    $"{hz.Count} different refresh rates across {active.Count} displays ({string.Join(" / ", hz)} Hz)",
+                    mixed ? TriageSeverity.High : TriageSeverity.Medium,
+                    title,
                     list + ".",
-                    "Each display is composited at its own cadence, so the graphics driver does work in its " +
-                    "interrupt handler for every attached screen, not only for the game's. Three cadences mean three " +
-                    "schedules to service. That is a cost of the setup rather than a fault, and nothing this app changes " +
-                    "alters it - it is worth knowing when you read the numbers.",
+                    why + " That is a cost of the setup rather than a fault, and nothing this app changes alters it - " +
+                    "it is worth knowing when you read the numbers.",
                     false));
             }
-        }
-
-        // ---- 2. sheer display count ----
-        if (active.Count >= DisplayCountWarning)
-        {
-            findings.Add(new TriageFinding(
-                TriageSeverity.Medium,
-                $"{active.Count} displays attached",
-                $"Attached: {string.Join(", ", active.Select(d => d.Mode))}.",
-                    "Every attached display is another surface the compositor presents each cycle, so the cost is " +
-                    "paid whether or not anything is open on it. That is the whole reason more screens means more " +
-                    "driver work; how much it costs on your card is not something this app can put a number on.",
-                false));
         }
 
         // ---- 3. DPCs landing on the cores the plan tries to keep clean ----

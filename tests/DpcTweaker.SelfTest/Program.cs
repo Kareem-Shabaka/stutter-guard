@@ -3976,6 +3976,45 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
     var same = LatencyTriage.Scan(threeSame, null, null);
     Check("matching refresh rates produce no mixed warning", !same.Any(x => x.Title.Contains("different refresh rates")),
         string.Join(" | ", same.Select(x => x.Title)));
+
+    // One situation, one finding. These were two rules - "N different refresh rates" and "M displays
+    // attached" - and both fired on a three-screen machine, so the same setup read as two problems.
+    // Three ways to arrive here, and each must produce exactly one display finding.
+    var twoMixed = LatencyTriage.Scan(new[]
+    {
+        new DisplayInfo("\\\\.\\DISPLAY1", "A", 2560, 1440, 240, true),
+        new DisplayInfo("\\\\.\\DISPLAY2", "A", 1920, 1080, 60, false),
+    });
+    Check("two displays at two rates produce one display finding, not two",
+        twoMixed.Count == 1, $"{twoMixed.Count}: " + string.Join(" | ", twoMixed.Select(x => x.Title)));
+    Check("...and it names the rates", twoMixed[0].Title.Contains("240") || twoMixed[0].Title.Contains("2 different"), twoMixed[0].Title);
+
+    var threeSameRate = LatencyTriage.Scan(new[]
+    {
+        new DisplayInfo("\\\\.\\DISPLAY1", "A", 1920, 1080, 60, true),
+        new DisplayInfo("\\\\.\\DISPLAY2", "A", 1920, 1080, 60, false),
+        new DisplayInfo("\\\\.\\DISPLAY3", "A", 1920, 1080, 60, false),
+    });
+    Check("three displays at one rate produce one display finding", threeSameRate.Count == 1, threeSameRate.Count.ToString());
+    Check("...about the count, not the rates", threeSameRate[0].Title.Contains("3 displays attached"), threeSameRate[0].Title);
+    Check("...at Medium, not High", threeSameRate[0].Severity == TriageSeverity.Medium);
+
+    // The machine this audit came from: three screens, three cadences. One finding, High.
+    var mixedAndMany = LatencyTriage.Scan(new[]
+    {
+        new DisplayInfo("\\\\.\\DISPLAY1", "A", 1920, 1080, 240, true),
+        new DisplayInfo("\\\\.\\DISPLAY2", "A", 1280, 1024, 60, false),
+        new DisplayInfo("\\\\.\\DISPLAY3", "A", 3840, 2160, 120, false),
+    });
+    Check("three displays at three rates is ONE finding", mixedAndMany.Count == 1,
+        $"{mixedAndMany.Count}: " + string.Join(" | ", mixedAndMany.Select(x => x.Title)));
+    Check("...it states both facts", mixedAndMany[0].Title.Contains("3 displays") && mixedAndMany[0].Title.Contains("3 different"),
+        mixedAndMany[0].Title);
+    Check("...and it is High", mixedAndMany[0].Severity == TriageSeverity.High);
+
+    // One display, one rate: nothing to say.
+    var single = LatencyTriage.Scan(new[] { new DisplayInfo("\\\\.\\DISPLAY1", "A", 1920, 1080, 240, true) });
+    Check("a single display produces no display finding", single.Count == 0, single.Count.ToString());
     Check("three displays still warn about count", same.Any(x => x.Title.Contains("3 displays")),
         string.Join(" | ", same.Select(x => x.Title)));
     Check("the count warning is Medium", same.First(x => x.Title.Contains("3 displays")).Severity == TriageSeverity.Medium);
@@ -4038,7 +4077,7 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
 
     // ---- no counters available: display findings still work ----
     var noCounters = LatencyTriage.Scan(mixed, null, new[] { 0, 1 });
-    Check("display findings survive a missing counter sample", noCounters.Count >= 2, noCounters.Count.ToString());
+        Check("the display cost is reported even with no counters", noCounters.Count == 1, $"{noCounters.Count}: " + string.Join(" | ", noCounters.Select(x => x.Title)));
     Check("mixed refresh alone (no DPC counters) does not raise the SMI card", !noCounters.Any(x => x.Title.Contains("System Management Interrupts")));
 
     // ---- ordering ----

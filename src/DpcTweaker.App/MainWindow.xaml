@@ -449,7 +449,7 @@
                                              actionable. Severity lives in the wording; a coloured bar on
                                              every finding made an informational list look like a fault
                                              report. A hairline divider separates them instead. -->
-                                        <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
                                                 Padding="0,10,0,2" Margin="0,0,0,10">
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -504,13 +504,6 @@
                             <ItemsControl ItemsSource="{Binding Lines}" />
                         </Border>
                     </Expander>
-
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <TextBlock Text="Tweak status" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <ItemsControl ItemsSource="{Binding Counts}" />
-                        </StackPanel>
-                    </Border>
 
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
