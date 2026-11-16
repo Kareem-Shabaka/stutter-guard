@@ -3951,6 +3951,118 @@ Console.WriteLine("Wave 10: 28-CPU architecture simulation matrix");
     }
     Check("every applicable topology was exercised", applicable >= 26, applicable.ToString());
 
+    // ================================================================ Wave 10b: 20-year topology trace
+    //
+    // Shapes Wave 10 does not cover: no L3 at all (2005-07), CMT modules, Intel HEDT single-ring,
+    // dual-socket, Zen 1, and the 4-domain Zen 2 part that produced a real bug. Each is pushed through
+    // the same planner with the same invariants, plus the ones specific to its shape.
+    Console.WriteLine("Wave 10b: 20-year topology trace");
+    {
+        const long MB2 = 1024L * 1024;
+
+        // Shape 1: two dies, no shared L3 anywhere (Athlon 64 X2, Pentium D, Core 2 Duo E6000).
+        var noL3 = Build(Enumerable.Range(0, 2).Select(i => (new[] { i }, (byte)0, 0L, 0)).ToArray());
+        Check("Athlon 64 X2 / Core 2 Duo: reports zero L3 domains", noL3.L3Groups.Count == 0, noL3.L3Groups.Count.ToString());
+        Check("Athlon 64 X2 / Core 2 Duo: no V-Cache and not multi-CCD", noL3.VCacheGroup is null && !noL3.IsMultiCcd);
+        {
+            var prof = new SystemProfile
+            {
+                Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Home"),
+                CpuName = "AMD Athlon 64 X2 Dual Core Processor 4200+", CpuVendor = "AMD", Cpu = noL3,
+                FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+                Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            };
+            AffinityPlan noL3Plan = AffinityPlanner.Plan(noL3, Sets(noL3, _ => 0), null, devs);
+            Check("no-L3 CPU: the planner does not throw and reports why", noL3Plan is not null);
+            Check("no-L3 CPU: no Process Lasso split is invented", LassoRules.SplitFor(prof, noL3Plan!) is null);
+            Check("no-L3 CPU: the CCD picker has nothing to offer",
+                !(LassoRules.SplitFor(prof, noL3Plan!, 0) is not null));
+        }
+
+        // Shape 2/3: one shared L3 domain, no SMT (Core 2 Quad / Phenom X4) and with SMT (Nehalem).
+        var core2q = Build(Enumerable.Range(0, 4).Select(i => (new[] { i }, (byte)0, 8 * MB2, 0)).ToArray());
+        Check("Core 2 Quad / Phenom X4: one L3 domain on 4 cores", core2q.L3Groups.Count == 1 && core2q.CoreCount == 4);
+        var nehalem = Build(Homogeneous(4, 8 * MB2, true));
+        Check("i7-920 Nehalem: one L3 domain, 4 cores / 8 threads",
+            nehalem.L3Groups.Count == 1 && nehalem.CoreCount == 4 && nehalem.LogicalCount == 8 && nehalem.SmtEnabled);
+
+        // Shape 4: Bulldozer CMT - Windows reports a module as one core with two LPs, like SMT.
+        var fx8350 = Build(Homogeneous(4, 8 * MB2, true));
+        Check("FX-8350 CMT: Windows' view is 4 cores / 8 threads", fx8350.CoreCount == 4 && fx8350.LogicalCount == 8);
+        Check("FX-8350 CMT: the second LP of a module is reported as a second thread",
+            fx8350.Cpus.Count(c => c.IsSecondThread) == 4);
+        Check("FX-8350 CMT: one L3 domain, so nothing to separate", fx8350.L3Groups.Count == 1);
+
+        // Shape 6: Intel HEDT - one inclusive ring however wide. 18C/36T is 36 LPs, still one domain.
+        var hedt = Build(Homogeneous(18, 24 * MB2, true));
+        Check("i9-7980XE 18C/36T: one L3 domain despite 18 cores", hedt.L3Groups.Count == 1 && hedt.CoreCount == 18);
+        {
+            var prof = new SystemProfile
+            {
+                Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Pro"),
+                CpuName = "Intel Core i9-7980XE", CpuVendor = "Intel", Cpu = hedt,
+                FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+                Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            };
+            var plan = AffinityPlanner.Plan(hedt, Sets(hedt, _ => 0), null, devs);
+            Check("HEDT: no catch-all is invented for a single-domain CPU", LassoRules.SplitFor(prof, plan) is null);
+        }
+
+        // Shape 8: Zen 1 - two CCX on ONE CCD. Two domains, but they are not two CCDs.
+        var zen1 = Build(ZenSmt(8, 8 * MB2, 4));
+        Check("1800X / 2700X Zen1: two L3 domains on 8 cores", zen1.L3Groups.Count == 2);
+        Check("Zen1: two domains are NOT called two CCDs", !LassoRules.OneDomainPerCcd(zen1));
+
+        // Shape 9: Zen 2 four domains. The decisive case - each index must reach its own domain.
+        var zen2q = Build(ZenSmt(12, 16 * MB2, 3));
+        Check("3900X Zen2: four L3 domains", zen2q.L3Groups.Count == 4, zen2q.L3Groups.Count.ToString());
+        Check("3900X Zen2: four domains are NOT four CCDs", !LassoRules.OneDomainPerCcd(zen2q));
+        for (int i = 0; i < 4; i++)
+        {
+            var want = zen2q.L3Groups.First(g => g.Id == i);
+            Check($"3900X Zen2: index {i} selects domain {i}",
+                LassoRules.ResolveGameGroup(new SystemProfile
+                {
+                    Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Pro"),
+                    CpuName = "AMD Ryzen 9 3900X", CpuVendor = "AMD", Cpu = zen2q, FormFactor = FormFactor.Desktop,
+                    FormFactorEvidence = "", Gpus = Array.Empty<GpuInfo>(),
+                    Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+                }, zen2q, i).Group.Id == want.Id);
+        }
+
+        // Shape 10/11/12: Zen 3+, X3D asymmetric, X3D symmetric.
+        var zen4 = Build(ZenSmt(16, 32 * MB2, 8));
+        Check("5950X/7950X/9950X: two domains ARE two CCDs", LassoRules.OneDomainPerCcd(zen4));
+        var x3d = Build(ZenSmt(16, 96 * MB2, 8).Select((s, i) => (s.Item1, s.Item2, i < 8 ? 96 * MB2 : 32 * MB2, i / 8)).ToArray());
+        Check("7950X3D/9950X3D: the 96 MB CCD is the V-Cache group",
+            x3d.VCacheGroup is { } v && v.SizeBytes == 96 * MB2);
+        var x3d2 = Build(ZenSmt(16, 96 * MB2, 8));
+        Check("9950X3D2: two 96 MB domains resolve to no V-Cache group", x3d2.VCacheGroup is null);
+        Check("9950X3D2: two domains ARE two CCDs (one L3 per CCD)",
+            LassoRules.OneDomainPerCcd(x3d2) && x3d2.L3Groups.Count == 2);
+
+        // Shape 15: above 64 logical processors the app refuses rather than half-supporting it.
+        var trBig = Build(ZenSmt(64, 16 * MB2, 8), groups: 2);
+        var trBigPlan = AffinityPlanner.Plan(trBig, Sets(trBig, _ => 0), null, devs);
+        Check("7980X 128-thread: GroupCount > 1 is not planned", !trBigPlan.Applicable);
+
+        // ---- shape 12 end to end: the symmetric chip produces a usable, honest plan ----
+        var symProf = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Pro"),
+            CpuName = "AMD Ryzen 9 9950X3D2 Dual Edition", CpuVendor = "AMD", Cpu = x3d2,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var symPlan = AffinityPlanner.Plan(x3d2, Sets(x3d2, _ => 0), null, devs);
+        Check("9950X3D2: split resolves rather than falling through", LassoRules.SplitFor(symProf, symPlan) is not null);
+        Check("9950X3D2: the label admits there is no cache to prefer",
+            LassoRules.SplitFor(symProf, symPlan)?.GameLabel.Contains("same L3") == true,
+            LassoRules.SplitFor(symProf, symPlan)?.GameLabel ?? "");
+        Check("9950X3D2: index 1 reaches CCD 1",
+            LassoRules.SplitFor(symProf, symPlan, 1) is { } s1 && s1.GameCpus.All(c => c >= 16));
+    }
+
     // ---- targeted assertions for the three traps -------------------------------------
     var strix = matrix.Single(m => m.Name.Contains("Strix Point")).Topo;
     Check("Trap A: Strix Point 16+8 MB is NOT V-Cache", strix.VCacheGroup is null && !strix.IsDualCcdX3D);
