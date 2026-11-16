@@ -62,7 +62,7 @@ public static class Recommendations
             },
             new[] { new RecLink("WinUtil on GitHub", "https://github.com/ChrisTitusTech/winutil"), new RecLink("Startup apps settings", "ms-settings:startupapps") }));
 
-        var split = LassoRules.SplitFor(p, plan);
+        var split = LassoRules.SplitFor(p, plan, o.GameCcd);
         if (p.ParkingDependentCpu && split is not null)
         {
             bool lassoPath = o.PlanTarget == PlanTargetKind.TunedUltimate;

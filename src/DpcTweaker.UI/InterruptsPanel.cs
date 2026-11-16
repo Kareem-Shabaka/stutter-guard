@@ -22,6 +22,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     private Choice<MsiMode> _msiMode;
     private Choice<bool> _pinMode;
     private Choice<HybridDevicePolicy> _hybridChoice;
+    private Choice<GameCcdChoice>? _gameCcdPick;
     private bool _downloadDuringCheck = true;
 
     public InterruptOptionsViewModel(MainViewModel main, TweakEngine engine)
@@ -70,6 +71,46 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         };
         _pinMode = PinModes.First(m => m.Value == engine.Options.KeepValidPins);
         UsePinModeCommand = new RelayCommand(UsePinMode);
+
+        // Only meaningful where a choice exists: two or more L3 groups. A single-CCD or Intel hybrid CPU
+        // has nothing to pick between, so the whole control stays hidden rather than showing a dead option.
+        HasCcdChoice = !p.Cpu.IsHybrid && p.Cpu.L3Groups.Count >= 2;
+        GameCcdChoices = new();
+        if (HasCcdChoice)
+        {
+            var biggest = p.Cpu.L3Groups.MaxBy(g => g.SizeBytes)!;
+            bool symmetric = p.Cpu.L3Groups.Select(g => g.SizeBytes).Distinct().Count() == 1;
+            GameCcdChoices.Add(new(GameCcdChoice.Auto,
+                symmetric
+                    ? "Let the app decide - both CCDs carry the same L3, so it follows Windows' core ranking"
+                    : $"Let the app decide - the larger L3 (CCD {biggest.Id}, {biggest.SizeBytes / (1024 * 1024)} MB)",
+                symmetric
+                    ? "Both CCDs on this CPU have the same L3 and the same clocks, so there is no cache to prefer. The app follows Windows' own core ranking, and either choice below is a preference rather than a trade."
+                    : $"On this CPU one CCD carries more L3 and the other clocks higher. The app puts games on the larger-L3 CCD (CCD {biggest.Id}) because that is where the cache-bound frames win."));
+            foreach (var g in p.Cpu.L3Groups.OrderBy(g => g.Id))
+            {
+                var other = p.Cpu.L3Groups.FirstOrDefault(x => x.Id != g.Id);
+                string desc = other is null
+                    ? $"Games run on CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)."
+                    : g.SizeBytes >= other.SizeBytes
+                        ? $"Games run on CCD {g.Id}, which has the larger L3 ({g.SizeBytes / (1024 * 1024)} MB against {other.SizeBytes / (1024 * 1024)} MB)."
+                        : $"Games run on CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3 against {other.SizeBytes / (1024 * 1024)} MB on CCD {other.Id}). This gives up cache for higher clocks - the right call for a frequency-bound game, the wrong one for a cache-bound game.";
+                GameCcdChoices.Add(new(g.Id == 0 ? GameCcdChoice.Ccd0 : GameCcdChoice.Ccd1, $"CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)", desc));
+            }
+            _gameCcdPick = GameCcdChoices.First(x => x.Value == engine.Options.GameCcd);
+            UseGameCcdCommand = new RelayCommand(UseGameCcd);
+        }
+
+        // Who else is steering games right now. On a dual-CCD X3D part AMD's driver and Xbox Game Bar
+        // decide the CCD automatically, and both can be absent - so a placement claim without this line
+        // would be describing a mechanism the user may not have.
+        AmdSteeringText = p.Cpu.IsHybrid || p.Cpu.L3Groups.Count < 2
+            ? ""
+            : p.Software.AmdVCacheService && p.Software.XboxGameBar
+                ? "Windows is also steering games: AMD's 3D V-Cache service is present and Xbox Game Bar is installed, so Windows places games by itself. A choice here overrides it."
+                : !p.Software.XboxGameBar
+                    ? "Nothing else is steering games: Xbox Game Bar is not installed, so AMD's V-Cache placement cannot detect a game. On this PC the plan here is the only thing placing game threads."
+                    : "AMD's 3D V-Cache service was not found, so Windows is not steering games onto a cache CCD. The plan here is what places them.";
 
         // Only meaningful on an Intel hybrid CPU; hidden everywhere else.
         HybridPolicies = new()
@@ -151,6 +192,24 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     }
 
     public RelayCommand UsePinModeCommand { get; }
+
+    /// <summary>True only where more than one CCD exists and they are not P/E cores.</summary>
+    public bool HasCcdChoice { get; }
+
+    public List<Choice<GameCcdChoice>> GameCcdChoices { get; } = new();
+
+    public Choice<GameCcdChoice>? GameCcdPick
+    {
+        get => _gameCcdPick;
+        set => Set(ref _gameCcdPick, value);
+    }
+
+    public RelayCommand? UseGameCcdCommand { get; }
+
+    /// <summary>What AMD's own steering is doing, so the user knows who else is choosing a CCD.</summary>
+    public string AmdSteeringText { get; } = "";
+
+    public bool HasAmdSteering => AmdSteeringText.Length > 0;
 
     public Choice<MsiMode> MsiModeChoice
     {
@@ -319,6 +378,13 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         _main.ReloadPages();
     }
 
+    private void UseGameCcd()
+    {
+        var engine = _main.Engine;
+        if (engine is null || GameCcdPick is null || GameCcdPick.Value == engine.Options.GameCcd) return;
+        engine.SetOptions(engine.Options.With(o => o.GameCcd = GameCcdPick.Value));
+        _main.ReloadPages();
+    }
     private void UseHybridPolicy()
     {
         var engine = _main.Engine;

@@ -242,6 +242,21 @@
                             <Button Content="Use this" Command="{Binding UsePinModeCommand}" Margin="12,0,0,0" Padding="14,6" />
                         </StackPanel>
                         <TextBlock Text="{Binding PinModeChoice.Description}" Style="{StaticResource Secondary}" Margin="0,0,0,10" />
+
+                        <!-- Which CCD games land on. Hidden on a single-CCD or Intel hybrid CPU: there is
+                             nothing to pick, and a control that does nothing is a lie. The sentence under it
+                             says who else is steering games, because on a dual-CCD X3D part AMD's driver and
+                             Game Bar may already be doing this - or may not be installed at all. -->
+                        <StackPanel Visibility="{Binding HasCcdChoice, Converter={StaticResource BoolToVis}}" Margin="0,4,0,10">
+                            <TextBlock Text="Which CCD games run on" FontWeight="SemiBold" Margin="0,0,0,4" />
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox ItemsSource="{Binding GameCcdChoices}" SelectedItem="{Binding GameCcdPick}" DisplayMemberPath="Label" MinWidth="380" />
+                                <Button Content="Use this" Command="{Binding UseGameCcdCommand}" Margin="12,0,0,0" Padding="14,6" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding GameCcdPick.Description}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <TextBlock Text="{Binding AmdSteeringText}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Visibility="{Binding HasAmdSteering, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
                         <ItemsControl ItemsSource="{Binding PlanLines}" />
                         <ItemsControl ItemsSource="{Binding Notes}" ItemTemplate="{StaticResource BulletLine}" Margin="0,8,0,0"
                                       Visibility="{Binding HasNotes, Converter={StaticResource BoolToVis}}" />

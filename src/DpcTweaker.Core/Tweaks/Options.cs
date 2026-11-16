@@ -35,6 +35,21 @@ public enum CStateMode
     Off,
 }
 
+/// <summary>
+/// Which CCD the game threads are placed on. The default reads the topology; the others exist because
+/// the topology cannot know which half of a chip the user wants - on a symmetric part like the 9950X3D2
+/// there is no cache difference to prefer, and on an asymmetric part the V-Cache CCD is also the
+/// <em>slower</em> CCD, so "games belong there" is a trade-off rather than a rule.
+/// </summary>
+public enum GameCcdChoice
+{
+    /// <summary>Decide from the measured L3 sizes, falling back to Windows' own core ranking.</summary>
+    Auto,
+    /// <summary>The group with index 0.</summary>
+    Ccd0,
+    /// <summary>The group with index 1.</summary>
+    Ccd1,
+}
 public sealed class AppOptions
 {
     public PlanTargetKind PlanTarget { get; set; } = PlanTargetKind.TunedUltimate;
@@ -93,6 +108,12 @@ public sealed class AppOptions
     /// P-cores as better. Ignored on non-hybrid CPUs.
     /// </summary>
     public HybridDevicePolicy HybridDevices { get; set; } = HybridDevicePolicy.EcoresForNetAudio;
+
+    /// <summary>
+    /// Where game threads go. Only meaningful when the CPU has two or more L3 groups; a single-CCD or
+    /// hybrid part has nothing to choose and the planner ignores this.
+    /// </summary>
+    public GameCcdChoice GameCcd { get; set; } = GameCcdChoice.Auto;
 
     public bool UserChosen { get; set; }
 

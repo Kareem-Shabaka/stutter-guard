@@ -184,7 +184,7 @@ public sealed class RecommendationsPageViewModel : PageViewModel
     {
         try
         {
-            string file = LassoRules.Write(engine.Profile, engine.Plan);
+            string file = LassoRules.Write(engine.Profile, engine.Plan, null, engine.Options.GameCcd);
             Message = "Saved " + file + ". Import it into its own profile in Process Lasso, then add your own games.";
             _main.Ui.Open(Path.GetDirectoryName(file)!);
         }

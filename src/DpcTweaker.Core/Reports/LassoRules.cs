@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Infra;
 using DpcTweaker.Core.Interrupts;
+using DpcTweaker.Core.Tweaks;
 
 namespace DpcTweaker.Core.Reports;
 
@@ -45,8 +46,17 @@ public static class LassoRules
 
     public sealed record Split(IReadOnlyList<int> GameCpus, IReadOnlyList<int> OtherCpus, string GameLabel, string Note);
 
-    /// <summary>Which CPUs games get and which everything else gets. Null when the CPU has nothing to separate.</summary>
-    public static Split? SplitFor(SystemProfile p, AffinityPlan plan)
+    /// <summary>
+    /// Which CPUs games get and which everything else gets. Null when the CPU has nothing to separate.
+    /// <para>
+    /// On a CPU with two or more L3 groups the choice is explicit: <see cref="AppOptions.GameCcd"/> wins
+    /// when the user set it, and otherwise the measured L3 sizes decide. The label describes the group by
+    /// its cache size, never as "the V-Cache CCD", because that phrase is false on a symmetric part such
+    /// as the 9950X3D2 where both CCDs carry V-Cache and the app previously fell through to a clock
+    /// ranking that carried no cache information at all.
+    /// </para>
+    /// </summary>
+    public static Split? SplitFor(SystemProfile p, AffinityPlan plan, GameCcdChoice gameCcd = GameCcdChoice.Auto)
     {
         var topo = p.Cpu;
         var all = topo.Cpus.Where(c => c.Index < 64).Select(c => c.Index).ToList();
@@ -58,17 +68,11 @@ public static class LassoRules
             game = topo.Cpus.Where(c => c.EfficiencyClass == maxEff).Select(c => c.Index).ToList();
             label = "P-cores";
         }
-        else if (topo.IsDualCcdX3D)
+        else if (topo.L3Groups.Count >= 2)
         {
-            game = topo.VCacheGroup!.Cpus().ToList();
-            label = "the V-Cache CCD";
-        }
-        else if (topo.IsMultiCcd)
-        {
-            int topCpu = p.CpuSets.Count > 0 ? p.CpuSets.OrderByDescending(s => s.SchedulingClass).ThenBy(s => s.LogicalIndex).First().LogicalIndex : 0;
-            var group = topo.L3Groups.FirstOrDefault(g => g.Cpus().Contains(topCpu)) ?? topo.L3Groups[0];
-            game = group.Cpus().ToList();
-            label = "the CCD with the top-ranked cores";
+            var chosen = ResolveGameGroup(p, topo, gameCcd);
+            game = chosen.Group.Cpus().ToList();
+            label = CcdLabel(chosen.Group) + chosen.Why;
         }
         else return null;
 
@@ -88,9 +92,52 @@ public static class LassoRules
         return new Split(game, other, label, note);
     }
 
-    public static string Build(SystemProfile p, AffinityPlan plan)
+    /// <summary>A cache group named by what it measurably is: "CCD 0 (96 MB L3)".</summary>
+    public static string CcdLabel(CacheGroup g) => $"CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)";
+
+    /// <summary>Which group games should use, and one clause saying why.</summary>
+    public readonly record struct GameGroup(CacheGroup Group, string Why);
+
+    /// <summary>
+    /// Resolves the game group from the user's choice, else the measured cache sizes, else Windows'
+    /// core ranking. Each branch returns the reason it fired, because "games go on CCD 1" without a
+    /// reason is indistinguishable from a bug to the person reading it.
+    /// </summary>
+    public static GameGroup ResolveGameGroup(SystemProfile p, CpuTopology topo, GameCcdChoice choice)
     {
-        var split = SplitFor(p, plan) ?? throw new InvalidOperationException("This CPU has one CCD and no E-cores: there's nothing to separate.");
+        // An explicit choice wins. It is legitimate to move games off the larger cache: on every
+        // asymmetric X3D part the cache CCD is also the slower CCD, so a frequency-bound game can be
+        // faster on the other one. The label says what was given up rather than pretending it is free.
+        if (choice is GameCcdChoice.Ccd0 or GameCcdChoice.Ccd1)
+        {
+            int want = choice == GameCcdChoice.Ccd0 ? 0 : 1;
+            var pick = topo.L3Groups.FirstOrDefault(g => g.Id == want) ?? topo.L3Groups[0];
+            var biggest = topo.L3Groups.MaxBy(g => g.SizeBytes)!;
+            string trade = pick.SizeBytes == biggest.SizeBytes
+                ? ", the same cache as the other CCD, so this is a preference rather than a trade"
+                : $", giving up {biggest.SizeBytes / (1024 * 1024)} MB of L3 on CCD {biggest.Id}";
+            return new GameGroup(pick, $" - chosen by you{trade}.");
+        }
+
+        // Auto: the largest cache group when the groups differ by enough to be a real difference.
+        // VCacheGroup already applies the 64 MB floor and the 1.5x ratio; reusing it keeps one rule.
+        if (topo.VCacheGroup is { } vc)
+            return new GameGroup(vc, " - the largest L3 on this CPU.");
+
+        // Symmetric cache (9950X3D2: 96 + 96) or an asymmetric part below the V-Cache floor. There is no
+        // cache difference to prefer, so fall back to Windows' own ranking - and say that is what happened.
+        int topCpu = p.CpuSets.Count > 0
+            ? p.CpuSets.OrderByDescending(s => s.SchedulingClass).ThenBy(s => s.LogicalIndex).First().LogicalIndex
+            : 0;
+        var group = topo.L3Groups.FirstOrDefault(g => g.Cpus().Contains(topCpu)) ?? topo.L3Groups[0];
+        bool symmetric = topo.L3Groups.Select(g => g.SizeBytes).Distinct().Count() == 1;
+        return new GameGroup(group, symmetric
+            ? " - both CCDs have the same L3, so this follows Windows' core ranking rather than cache."
+            : " - the largest L3 on this CPU.");
+    }
+    public static string Build(SystemProfile p, AffinityPlan plan, GameCcdChoice gameCcd = GameCcdChoice.Auto)
+    {
+        var split = SplitFor(p, plan, gameCcd) ?? throw new InvalidOperationException("This CPU has one CCD and no E-cores: there's nothing to separate.");
         string games = CpuTopology.FormatCpus(split.GameCpus, ";");
 
         // Refuse a catch-all that would be worse than none. Emitting a mask that overlapped device CPUs
@@ -140,11 +187,11 @@ public static class LassoRules
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
-    public static string Write(SystemProfile p, AffinityPlan plan, string? folder = null)
+    public static string Write(SystemProfile p, AffinityPlan plan, string? folder = null, GameCcdChoice gameCcd = GameCcdChoice.Auto)
     {
         folder ??= Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         string file = Path.Combine(folder, $"processlasso-rules-dpc-tweaker-{DateTime.Now:yyyyMMdd-HHmm}.json");
-        File.WriteAllText(file, Build(p, plan), new UTF8Encoding(false));
+        File.WriteAllText(file, Build(p, plan, gameCcd), new UTF8Encoding(false));
         Log.Info("Lasso rules written: " + file);
         return file;
     }

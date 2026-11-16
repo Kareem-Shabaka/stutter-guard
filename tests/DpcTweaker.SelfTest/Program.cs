@@ -771,6 +771,57 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     Check("no priority is emitted anywhere in the rules",
         !root.GetProperty("ruleSets").EnumerateArray().Any(r => r.TryGetProperty("priorityClass", out _)));
     Check("no priorityClassRuleOrder is emitted", !root.TryGetProperty("priorityClassRuleOrder", out _));
+
+    // ---- game CCD selection: the shape that started this, and the trade it names ----
+    Console.WriteLine("M3b: which CCD games land on");
+    {
+        // Asymmetric dual X3D: 96 MB + 32 MB, the 7950X3D / 9950X3D / 9900X3D shape.
+        var asym = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var asymP = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D", CpuVendor = "AMD", Cpu = asym, FormFactor = FormFactor.Desktop,
+            FormFactorEvidence = "", Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false),
+            Software = new SoftwareInfo(),
+        };
+        var asymPlan = AffinityPlanner.Plan(asym, Sets(asym, _ => 0), null, DesktopDevices());
+
+        Check("auto picks the 96 MB CCD on an asymmetric part",
+            LassoRules.SplitFor(asymP, asymPlan) is { } a0 && CpuTopology.FormatCpus(a0.GameCpus) == "0-15");
+        Check("auto names the choice by cache size, never 'V-Cache CCD'",
+            LassoRules.SplitFor(asymP, asymPlan) is { } a1 && a1.GameLabel.Contains("96 MB L3") && !a1.GameLabel.Contains("V-Cache"),
+            LassoRules.SplitFor(asymP, asymPlan)?.GameLabel ?? "");
+        Check("picking the smaller CCD says what the user gave up",
+            LassoRules.SplitFor(asymP, asymPlan, GameCcdChoice.Ccd1) is { } a2 &&
+            CpuTopology.FormatCpus(a2.GameCpus) == "16-31" && a2.GameLabel.Contains("giving up 96 MB"),
+            LassoRules.SplitFor(asymP, asymPlan, GameCcdChoice.Ccd1)?.GameLabel ?? "");
+
+        // Symmetric dual V-Cache: 96 + 96, the 9950X3D2. The ratio test cannot resolve this, so auto must
+        // fall through to Windows' ranking AND say so - it must not claim a cache reason it does not have.
+        var sym = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 96u << 20) });
+        var symP = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D2 Dual Edition", CpuVendor = "AMD", Cpu = sym, FormFactor = FormFactor.Desktop,
+            FormFactorEvidence = "", Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false),
+            Software = new SoftwareInfo(),
+        };
+        var symPlan = AffinityPlanner.Plan(sym, Sets(sym, _ => 0), null, DesktopDevices());
+
+        Check("symmetric cache: auto still resolves a group", LassoRules.SplitFor(symP, symPlan) is not null);
+        Check("symmetric cache: auto admits it followed Windows' ranking, not cache",
+            LassoRules.SplitFor(symP, symPlan) is { } s0 && s0.GameLabel.Contains("same L3"),
+            LassoRules.SplitFor(symP, symPlan)?.GameLabel ?? "");
+        Check("symmetric cache: CCD1 is selectable and called a preference, not a trade",
+            LassoRules.SplitFor(symP, symPlan, GameCcdChoice.Ccd1) is { } s1 &&
+            CpuTopology.FormatCpus(s1.GameCpus) == "16-31" && s1.GameLabel.Contains("preference"),
+            LassoRules.SplitFor(symP, symPlan, GameCcdChoice.Ccd1)?.GameLabel ?? "");
+        Check("symmetric cache: the rule file carries the chosen CCD",
+            LassoRules.Build(symP, symPlan, GameCcdChoice.Ccd1).Contains("\"0\": \"16-31\"".Replace("\"0\"", "\"cpuAffinity\""))
+            || LassoRules.Build(symP, symPlan, GameCcdChoice.Ccd1).Contains("16-31"));
+    }
     // Dynamic thread priority boost must be left alone: Windows' +6 mouse/keyboard and +8 sound wake
     // boosts are what let a woken input or audio thread preempt, so emitting "off" worked against latency.
     Check("game rule does not disable dynamic thread priority boost", !mk.TryGetProperty("threadPriorityBoosts", out _));
