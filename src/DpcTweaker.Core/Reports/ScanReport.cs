@@ -12,6 +12,35 @@ namespace DpcTweaker.Core.Reports;
 /// <summary>A plain-text report of the profile and every tweak's live state. Nothing personal in it.</summary>
 public static class ScanReport
 {
+    /// <summary>
+    /// Strips the account name out of everything the report prints. The report is offered as
+    /// anonymous, so a home directory or a task author must not name the person it came from.
+    /// Kept public and pure so the rule is tested directly rather than inferred from a whole scan.
+    /// </summary>
+    public static string Redact(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        // C:\Users\<name>\...  and  \\?\C:\Users\<name>\...
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"(?<![A-Za-z0-9])([A-Za-z]):\\Users\\[^\\\s""'<>|*?]+",
+            "$1:\\Users\\<user>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // %USERPROFILE% and its common spelled-out forms.
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"%USERPROFILE%", "<userprofile>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"(?<![A-Za-z0-9])([A-Za-z]):\\Documents and Settings\\[^\\\s""'<>|*?]+",
+            "$1:\\Users\\<user>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return text;
+    }
+
+    /// <summary>A scheduled task's author with the account name removed: DOMAIN\name becomes &lt;account&gt;.</summary>
+    private static string Account(string? author)
+    {
+        if (string.IsNullOrWhiteSpace(author)) return "-";
+        return author.Contains('\\') ? "<account>" : author;
+    }
     public static string Build(TweakEngine engine)
     {
         var p = engine.Profile;
@@ -193,7 +222,7 @@ public static class ScanReport
         {
             sb.AppendLine($"UNCATALOGUED SCHEDULED TASKS ({uncatTasks.Count})");
             foreach (var t in uncatTasks)
-                sb.AppendLine($"  {(t.Enabled ? "enabled " : "disabled")} {t.Path,-56} [{t.Author ?? "-"}] triggers: {(string.IsNullOrEmpty(t.TriggersText) ? "-" : t.TriggersText)} -> {t.ActionsText}");
+                sb.AppendLine($"  {(t.Enabled ? "enabled " : "disabled")} {t.Path,-56} [{Account(t.Author)}] triggers: {(string.IsNullOrEmpty(t.TriggersText) ? "-" : t.TriggersText)} -> {t.ActionsText}");
             sb.AppendLine();
         }
 
@@ -213,7 +242,10 @@ public static class ScanReport
         }
         sb.AppendLine();
         sb.AppendLine($"Journal: {engine.Journal.EntryCount} recorded values, {engine.Journal.AppliedCount} tweaks applied by the app.");
-        return sb.ToString();
+        // The public claim is that this report is anonymous. Paths and task authors were not: a
+        // scheduled task action is routinely C:\Users\<name>\... and an author is DOMAIN\name. The
+        // text is redacted as a whole rather than field by field, so a field added later cannot leak.
+        return Redact(sb.ToString());
     }
 
     private static string BuiltAt()

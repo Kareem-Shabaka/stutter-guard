@@ -784,6 +784,27 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
         .Select(r => r.GetProperty("processName").GetString())
         .ToList();
     Check("no emitted cpuAffinity contains a comma", commaIssues.Count == 0, string.Join(", ", commaIssues));
+
+    // ---- the scan report is offered as anonymous, so it must not name the account it came from ----
+    Console.WriteLine("ScanReport.Redact");
+    {
+        string home = @"  TeamViewer_Service  [Auto]  3rd-party  TeamViewer  (C:\Users\kareem\AppData\Local\TeamViewer\TeamViewer_Service.exe)";
+        string red = ScanReport.Redact(home);
+        Check("a home directory in a service path is redacted", !red.Contains("kareem"), red);
+        Check("the redacted path keeps its shape", red.Contains(@"C:\Users\<user>\AppData\Local\TeamViewer"), red);
+
+        Check("USERPROFILE is redacted",
+            !ScanReport.Redact(@"actions: %USERPROFILE%\AppData\Local\x.exe").Contains("USERPROFILE"));
+        Check("a lowercase drive letter is redacted",
+            !ScanReport.Redact(@"c:\users\kareem\app.exe").Contains("kareem"));
+        Check("Documents and Settings is redacted",
+            !ScanReport.Redact(@"C:\Documents and Settings\kareem\x.exe").Contains("kareem"));
+        // A path that merely contains the word Users must survive: over-redaction hides real paths.
+        Check("a path that is not a home directory is left alone",
+            ScanReport.Redact(@"C:\Program Files\Users\Tools\a.exe") == @"C:\Program Files\Users\Tools\a.exe");
+        Check("an ordinary path is untouched",
+            ScanReport.Redact(@"C:\Windows\System32\svchost.exe") == @"C:\Windows\System32\svchost.exe");
+    }
     var single = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFFFUL, 96u << 20) });
     Check("single CCD: nothing to separate", LassoRules.SplitFor(new SystemProfile
     {
