@@ -86,6 +86,35 @@ four hours. That is the shape of a single long call, not a storm, and the app re
 
 ---
 
+## Which measurements move, and which cannot
+
+The question that comes up most is a throughput benchmark before and after - Cinebench, 3DMark, a
+Y-cruncher run. Those will show **no change**, and knowing why is the point of this section.
+
+A throughput benchmark saturates a workload and asks how much work completed. Interrupt placement does
+not change how many cores you have, what they clock to, or how many instructions they retire per second.
+It changes **which processor performs device work**, and therefore **how long a ready thread waits** before
+it gets one. That is a tail, not a rate.
+
+| Instrument | Measures | Does this app move it? |
+| :--- | :--- | :--- |
+| Cinebench / 3DMark / Y-cruncher | Work completed under saturated load | **No.** Same cores, same clocks, same throughput |
+| LatencyMon "highest interrupt to process" | One outlier across a whole run | Only if the outlier was itself a placement problem |
+| **Core wake latency** (`tools/WakeProbe.cs`) | How late a ready thread runs | **Yes - 782 µs to 8.9 µs median**, measured, control core proving locality |
+| **1 % / 0.1 % frame times** | The worst frames in a play session | **Yes**, when the stutter was device work landing on a render thread |
+| Average FPS | Throughput while frames are steady | Only if it was already losing frames to stalls |
+
+The measured result above is a **wake latency** figure, stated with its load condition, because that is the
+quantity placement changes. A throughput number would be the wrong instrument for this claim - not a
+weaker one.
+
+**Can it cost throughput?** Only by misconfiguration, and the app refuses or states both cases: a
+background mask that would leave fewer than four processors is not written at all, and the power tiers
+print what they cost (a C1 cap trades some idle headroom for a flatter wake-up). On the `Safe` tier,
+nothing here raises a clock, lowers a power limit or removes a core from the scheduler.
+
+---
+
 ## Install in three steps
 
 **1. Download and verify.** Get `StutterGuard.exe` and `StutterGuard.exe.sha256` from the
