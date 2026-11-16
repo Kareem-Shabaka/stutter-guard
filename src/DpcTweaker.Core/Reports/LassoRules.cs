@@ -56,7 +56,7 @@ public static class LassoRules
     /// ranking that carried no cache information at all.
     /// </para>
     /// </summary>
-    public static Split? SplitFor(SystemProfile p, AffinityPlan plan, GameCcdChoice gameCcd = GameCcdChoice.Auto)
+    public static Split? SplitFor(SystemProfile p, AffinityPlan plan, int? gameCcd = null)
     {
         var topo = p.Cpu;
         var all = topo.Cpus.Where(c => c.Index < 64).Select(c => c.Index).ToList();
@@ -72,7 +72,7 @@ public static class LassoRules
         {
             var chosen = ResolveGameGroup(p, topo, gameCcd);
             game = chosen.Group.Cpus().ToList();
-            label = CcdLabel(chosen.Group) + chosen.Why;
+            label = CcdLabel(chosen.Group, OneDomainPerCcd(topo)) + chosen.Why;
         }
         else return null;
 
@@ -92,8 +92,33 @@ public static class LassoRules
         return new Split(game, other, label, note);
     }
 
-    /// <summary>A cache group named by what it measurably is: "CCD 0 (96 MB L3)".</summary>
-    public static string CcdLabel(CacheGroup g) => $"CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)";
+    /// <summary>
+    /// Whether one L3 domain corresponds to one CCD, which decides whether "CCD" is an honest word.
+    /// <para>
+    /// Measured rather than looked up: a CCD holds at most eight cores, so a chip reports one domain per
+    /// CCD when it has at most one domain per eight cores. Zen 3 and later qualify (one CCX per CCD);
+    /// Zen 2 does not, because each of its CCDs carries two CCX with isolated L3 - a 3900X reports four
+    /// domains across two CCDs, and a 3600X reports two across one. Naming those "CCD 0..3" would name
+    /// hardware that does not exist.
+    /// </para>
+    /// </summary>
+    public static bool OneDomainPerCcd(CpuTopology topo)
+    {
+        if (topo.L3Groups.Count < 2) return true;
+        int ccdsAtMost = Math.Max(1, (topo.CoreCount + 7) / 8);
+        return topo.L3Groups.Count <= ccdsAtMost;
+    }
+    /// <summary>
+    /// A cache domain named by what it measurably is.
+    /// <para>
+    /// "CCD" is only correct when one CCD carries one L3 domain, which is true for Zen 3 and later. A
+    /// Zen 2 part has two CCX per CCD, so it reports four domains on a two-CCD chip and two on a
+    /// single-CCD chip - calling those "CCD 0..3" would name hardware that does not exist. The caller
+    /// says which case it is; this only formats.
+    /// </para>
+    /// </summary>
+    public static string CcdLabel(CacheGroup g, bool oneDomainPerCcd = true) =>
+        $"{(oneDomainPerCcd ? "CCD" : "Cache domain")} {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)";
 
     /// <summary>Which group games should use, and one clause saying why.</summary>
     public readonly record struct GameGroup(CacheGroup Group, string Why);
@@ -103,19 +128,22 @@ public static class LassoRules
     /// core ranking. Each branch returns the reason it fired, because "games go on CCD 1" without a
     /// reason is indistinguishable from a bug to the person reading it.
     /// </summary>
-    public static GameGroup ResolveGameGroup(SystemProfile p, CpuTopology topo, GameCcdChoice choice)
+    public static GameGroup ResolveGameGroup(SystemProfile p, CpuTopology topo, int? choice)
     {
         // An explicit choice wins. It is legitimate to move games off the larger cache: on every
         // asymmetric X3D part the cache CCD is also the slower CCD, so a frequency-bound game can be
         // faster on the other one. The label says what was given up rather than pretending it is free.
-        if (choice is GameCcdChoice.Ccd0 or GameCcdChoice.Ccd1)
+        //
+        // An index out of range - hardware changed, or an option restored from another machine - is not
+        // silently coerced to a different domain. It falls back to Auto and says so.
+        if (choice is { } want && topo.L3Groups.Any(g => g.Id == want))
         {
-            int want = choice == GameCcdChoice.Ccd0 ? 0 : 1;
-            var pick = topo.L3Groups.FirstOrDefault(g => g.Id == want) ?? topo.L3Groups[0];
+            var pick = topo.L3Groups.First(g => g.Id == want);
             var biggest = topo.L3Groups.MaxBy(g => g.SizeBytes)!;
+            string domain = OneDomainPerCcd(topo) ? "CCD" : "domain";
             string trade = pick.SizeBytes == biggest.SizeBytes
-                ? ", the same cache as the other CCD, so this is a preference rather than a trade"
-                : $", giving up {biggest.SizeBytes / (1024 * 1024)} MB of L3 on CCD {biggest.Id}";
+                ? $", the same cache as the other {domain}, so this is a preference rather than a trade"
+                : $", giving up {biggest.SizeBytes / (1024 * 1024)} MB of L3 on {domain} {biggest.Id}";
             return new GameGroup(pick, $" - chosen by you{trade}.");
         }
 
@@ -132,10 +160,10 @@ public static class LassoRules
         var group = topo.L3Groups.FirstOrDefault(g => g.Cpus().Contains(topCpu)) ?? topo.L3Groups[0];
         bool symmetric = topo.L3Groups.Select(g => g.SizeBytes).Distinct().Count() == 1;
         return new GameGroup(group, symmetric
-            ? " - both CCDs have the same L3, so this follows Windows' core ranking rather than cache."
+            ? " - every cache domain has the same L3, so this follows Windows' core ranking rather than cache."
             : " - the largest L3 on this CPU.");
     }
-    public static string Build(SystemProfile p, AffinityPlan plan, GameCcdChoice gameCcd = GameCcdChoice.Auto)
+    public static string Build(SystemProfile p, AffinityPlan plan, int? gameCcd = null)
     {
         var split = SplitFor(p, plan, gameCcd) ?? throw new InvalidOperationException("This CPU has one CCD and no E-cores: there's nothing to separate.");
         string games = CpuTopology.FormatCpus(split.GameCpus, ";");
@@ -187,7 +215,7 @@ public static class LassoRules
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
-    public static string Write(SystemProfile p, AffinityPlan plan, string? folder = null, GameCcdChoice gameCcd = GameCcdChoice.Auto)
+    public static string Write(SystemProfile p, AffinityPlan plan, string? folder = null, int? gameCcd = null)
     {
         folder ??= Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         string file = Path.Combine(folder, $"processlasso-rules-dpc-tweaker-{DateTime.Now:yyyyMMdd-HHmm}.json");

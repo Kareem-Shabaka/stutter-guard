@@ -4,6 +4,7 @@ using DpcTweaker.Core;
 using DpcTweaker.Core.Detection;
 using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Tweaks;
+using DpcTweaker.Core.Reports;
 
 namespace DpcTweaker.UI;
 
@@ -22,7 +23,7 @@ public sealed class InterruptOptionsViewModel : ObservableObject
     private Choice<MsiMode> _msiMode;
     private Choice<bool> _pinMode;
     private Choice<HybridDevicePolicy> _hybridChoice;
-    private Choice<GameCcdChoice>? _gameCcdPick;
+    private Choice<int?>? _gameCcdPick;
     private bool _downloadDuringCheck = true;
 
     public InterruptOptionsViewModel(MainViewModel main, TweakEngine engine)
@@ -72,45 +73,55 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         _pinMode = PinModes.First(m => m.Value == engine.Options.KeepValidPins);
         UsePinModeCommand = new RelayCommand(UsePinMode);
 
-        // Only meaningful where a choice exists: two or more L3 groups. A single-CCD or Intel hybrid CPU
-        // has nothing to pick between, so the whole control stays hidden rather than showing a dead option.
+        // Only meaningful where more than one L3 cache domain exists. A single-domain or Intel hybrid CPU
+        // has nothing to pick between, so the control stays hidden rather than showing a dead option.
+        //
+        // The option is an INDEX into L3Groups, not a pair of values: Windows reports a domain per CCX, and
+        // a Zen 2 part has two CCX per CCD, so a 3900X reports four domains and a 3600X reports two across
+        // a single CCD. A "CCD 0 / CCD 1" pair would have silently collapsed those onto two values.
         HasCcdChoice = !p.Cpu.IsHybrid && p.Cpu.L3Groups.Count >= 2;
         GameCcdChoices = new();
         if (HasCcdChoice)
         {
+            bool onePerCcd = LassoRules.OneDomainPerCcd(p.Cpu);
+            string word = onePerCcd ? "CCD" : "cache domain";
             var biggest = p.Cpu.L3Groups.MaxBy(g => g.SizeBytes)!;
             bool symmetric = p.Cpu.L3Groups.Select(g => g.SizeBytes).Distinct().Count() == 1;
-            GameCcdChoices.Add(new(GameCcdChoice.Auto,
+
+            GameCcdChoices.Add(new Choice<int?>(null,
                 symmetric
-                    ? "Let the app decide - both CCDs carry the same L3, so it follows Windows' core ranking"
-                    : $"Let the app decide - the larger L3 (CCD {biggest.Id}, {biggest.SizeBytes / (1024 * 1024)} MB)",
+                    ? $"Let the app decide - every {word} carries the same L3, so it follows Windows' core ranking"
+                    : $"Let the app decide - the larger L3 ({word} {biggest.Id}, {biggest.SizeBytes / (1024 * 1024)} MB)",
                 symmetric
-                    ? "Both CCDs on this CPU have the same L3 and the same clocks, so there is no cache to prefer. The app follows Windows' own core ranking, and either choice below is a preference rather than a trade."
-                    : $"On this CPU one CCD carries more L3 and the other clocks higher. The app puts games on the larger-L3 CCD (CCD {biggest.Id}) because that is where the cache-bound frames win."));
-            foreach (var g in p.Cpu.L3Groups.OrderBy(g => g.Id))
+                    ? $"Every {word} on this CPU has the same L3, so there is no cache to prefer. The app follows Windows' own core ranking, and either choice below is a preference rather than a trade."
+                    : $"On this CPU one {word} carries more L3 and the others clock higher. The app puts games on the larger-L3 {word} ({word} {biggest.Id}) because that is where the cache-bound frames win."));
+
+            foreach (var g in p.Cpu.L3Groups.OrderBy(x => x.Id))
             {
-                var other = p.Cpu.L3Groups.FirstOrDefault(x => x.Id != g.Id);
-                string desc = other is null
-                    ? $"Games run on CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)."
-                    : g.SizeBytes >= other.SizeBytes
-                        ? $"Games run on CCD {g.Id}, which has the larger L3 ({g.SizeBytes / (1024 * 1024)} MB against {other.SizeBytes / (1024 * 1024)} MB)."
-                        : $"Games run on CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3 against {other.SizeBytes / (1024 * 1024)} MB on CCD {other.Id}). This gives up cache for higher clocks - the right call for a frequency-bound game, the wrong one for a cache-bound game.";
-                GameCcdChoices.Add(new(g.Id == 0 ? GameCcdChoice.Ccd0 : GameCcdChoice.Ccd1, $"CCD {g.Id} ({g.SizeBytes / (1024 * 1024)} MB L3)", desc));
+                long mb = g.SizeBytes / (1024 * 1024);
+                long most = biggest.SizeBytes / (1024 * 1024);
+                string desc = g.SizeBytes >= biggest.SizeBytes
+                    ? $"Games run on {word} {g.Id}, which carries the most L3 ({mb} MB)."
+                    : $"Games run on {word} {g.Id} ({mb} MB L3 against {most} MB on {word} {biggest.Id}). This gives up cache for higher clocks - right for a frequency-bound game, wrong for a cache-bound one.";
+                GameCcdChoices.Add(new Choice<int?>(g.Id, $"{word} {g.Id} ({mb} MB L3)", desc));
             }
-            _gameCcdPick = GameCcdChoices.First(x => x.Value == engine.Options.GameCcd);
+
+            // An index that no longer exists - hardware changed, or an option restored from another PC -
+            // falls back to Auto rather than coercing to a different domain.
+            _gameCcdPick = GameCcdChoices.FirstOrDefault(x => x.Value == engine.Options.GameCcd) ?? GameCcdChoices[0];
             UseGameCcdCommand = new RelayCommand(UseGameCcd);
         }
 
-        // Who else is steering games right now. On a dual-CCD X3D part AMD's driver and Xbox Game Bar
-        // decide the CCD automatically, and both can be absent - so a placement claim without this line
-        // would be describing a mechanism the user may not have.
+        // Who else is steering games right now. On a dual-domain X3D part AMD's driver and Xbox Game Bar
+        // decide the placement automatically, and both can be absent - so a placement claim without this
+        // line would be describing a mechanism the user may not have.
         AmdSteeringText = p.Cpu.IsHybrid || p.Cpu.L3Groups.Count < 2
             ? ""
             : p.Software.AmdVCacheService && p.Software.XboxGameBar
                 ? "Windows is also steering games: AMD's 3D V-Cache service is present and Xbox Game Bar is installed, so Windows places games by itself. A choice here overrides it."
                 : !p.Software.XboxGameBar
                     ? "Nothing else is steering games: Xbox Game Bar is not installed, so AMD's V-Cache placement cannot detect a game. On this PC the plan here is the only thing placing game threads."
-                    : "AMD's 3D V-Cache service was not found, so Windows is not steering games onto a cache CCD. The plan here is what places them.";
+                    : "AMD's 3D V-Cache service was not found, so Windows is not steering games onto a cache domain. The plan here is what places them.";
 
         // Only meaningful on an Intel hybrid CPU; hidden everywhere else.
         HybridPolicies = new()
@@ -193,12 +204,12 @@ public sealed class InterruptOptionsViewModel : ObservableObject
 
     public RelayCommand UsePinModeCommand { get; }
 
-    /// <summary>True only where more than one CCD exists and they are not P/E cores.</summary>
+    /// <summary>True only where more than one L3 cache domain exists and the cores are not P/E classes.</summary>
     public bool HasCcdChoice { get; }
 
-    public List<Choice<GameCcdChoice>> GameCcdChoices { get; } = new();
+    public List<Choice<int?>> GameCcdChoices { get; } = new();
 
-    public Choice<GameCcdChoice>? GameCcdPick
+    public Choice<int?>? GameCcdPick
     {
         get => _gameCcdPick;
         set => Set(ref _gameCcdPick, value);

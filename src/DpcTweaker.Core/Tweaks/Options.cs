@@ -35,21 +35,6 @@ public enum CStateMode
     Off,
 }
 
-/// <summary>
-/// Which CCD the game threads are placed on. The default reads the topology; the others exist because
-/// the topology cannot know which half of a chip the user wants - on a symmetric part like the 9950X3D2
-/// there is no cache difference to prefer, and on an asymmetric part the V-Cache CCD is also the
-/// <em>slower</em> CCD, so "games belong there" is a trade-off rather than a rule.
-/// </summary>
-public enum GameCcdChoice
-{
-    /// <summary>Decide from the measured L3 sizes, falling back to Windows' own core ranking.</summary>
-    Auto,
-    /// <summary>The group with index 0.</summary>
-    Ccd0,
-    /// <summary>The group with index 1.</summary>
-    Ccd1,
-}
 public sealed class AppOptions
 {
     public PlanTargetKind PlanTarget { get; set; } = PlanTargetKind.TunedUltimate;
@@ -110,10 +95,20 @@ public sealed class AppOptions
     public HybridDevicePolicy HybridDevices { get; set; } = HybridDevicePolicy.EcoresForNetAudio;
 
     /// <summary>
-    /// Where game threads go. Only meaningful when the CPU has two or more L3 groups; a single-CCD or
-    /// hybrid part has nothing to choose and the planner ignores this.
+    /// Which L3 cache domain game threads go on, as an index into <see cref="Detection.CpuTopology.L3Groups"/>.
+    /// <para>
+    /// Null means "decide from the measured cache sizes, else Windows' ranking". An index rather than a
+    /// fixed pair of values because Windows reports a cache domain per CCX, and a Zen 2 part has two CCX
+    /// per CCD - so a 3900X reports <b>four</b> groups, not two, and an enum with Ccd0/Ccd1 would have
+    /// silently mapped three of them onto the same value.
+    /// </para>
+    /// <para>
+    /// Only meaningful when the CPU has two or more cache domains; a single-domain or hybrid part has
+    /// nothing to choose and the planner ignores this.
+    /// </para>
     /// </summary>
-    public GameCcdChoice GameCcd { get; set; } = GameCcdChoice.Auto;
+    [JsonConverter(typeof(GameCcdIndexConverter))]
+    public int? GameCcd { get; set; }
 
     public bool UserChosen { get; set; }
 
@@ -197,6 +192,43 @@ public sealed class AppOptions
         return DefaultsFor(p);
     }
 
+    /// <summary>
+    /// Reads <see cref="GameCcd"/>, tolerating the one unreleased build that stored an enum name there.
+    /// <para>
+    /// Why this exists rather than a plain nullable int: a value the reader cannot parse throws, and
+    /// <see cref="Load"/> treats a throw as "the whole file is unreadable" and returns the defaults -
+    /// which would discard the user's plan target, per-tab presets, cleanup preset and timer resolution
+    /// because of one field. Anything unrecognised becomes Auto instead.
+    /// </para>
+    /// </summary>
+    private sealed class GameCcdIndexConverter : JsonConverter<int?>
+    {
+        public override int? Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.Null:
+                    return null;
+                case JsonTokenType.Number:
+                    return reader.TryGetInt32(out int n) ? n : null;
+                case JsonTokenType.String:
+                    string s = reader.GetString() ?? "";
+                    if (s.Equals("Ccd0", StringComparison.OrdinalIgnoreCase)) return 0;
+                    if (s.Equals("Ccd1", StringComparison.OrdinalIgnoreCase)) return 1;
+                    if (s.Equals("Auto", StringComparison.OrdinalIgnoreCase)) return null;
+                    return int.TryParse(s, out int parsed) ? parsed : null;
+                default:
+                    reader.Skip();
+                    return null;
+            }
+        }
+
+        public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
+        {
+            if (value is null) writer.WriteNullValue();
+            else writer.WriteNumberValue(value.Value);
+        }
+    }
     public void Save(Journal j)
     {
         UserChosen = true;

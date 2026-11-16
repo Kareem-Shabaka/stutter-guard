@@ -793,9 +793,9 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
             LassoRules.SplitFor(asymP, asymPlan) is { } a1 && a1.GameLabel.Contains("96 MB L3") && !a1.GameLabel.Contains("V-Cache"),
             LassoRules.SplitFor(asymP, asymPlan)?.GameLabel ?? "");
         Check("picking the smaller CCD says what the user gave up",
-            LassoRules.SplitFor(asymP, asymPlan, GameCcdChoice.Ccd1) is { } a2 &&
+            LassoRules.SplitFor(asymP, asymPlan, 1) is { } a2 &&
             CpuTopology.FormatCpus(a2.GameCpus) == "16-31" && a2.GameLabel.Contains("giving up 96 MB"),
-            LassoRules.SplitFor(asymP, asymPlan, GameCcdChoice.Ccd1)?.GameLabel ?? "");
+            LassoRules.SplitFor(asymP, asymPlan, 1)?.GameLabel ?? "");
 
         // Symmetric dual V-Cache: 96 + 96, the 9950X3D2. The ratio test cannot resolve this, so auto must
         // fall through to Windows' ranking AND say so - it must not claim a cache reason it does not have.
@@ -815,12 +815,92 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
             LassoRules.SplitFor(symP, symPlan) is { } s0 && s0.GameLabel.Contains("same L3"),
             LassoRules.SplitFor(symP, symPlan)?.GameLabel ?? "");
         Check("symmetric cache: CCD1 is selectable and called a preference, not a trade",
-            LassoRules.SplitFor(symP, symPlan, GameCcdChoice.Ccd1) is { } s1 &&
+            LassoRules.SplitFor(symP, symPlan, 1) is { } s1 &&
             CpuTopology.FormatCpus(s1.GameCpus) == "16-31" && s1.GameLabel.Contains("preference"),
-            LassoRules.SplitFor(symP, symPlan, GameCcdChoice.Ccd1)?.GameLabel ?? "");
+            LassoRules.SplitFor(symP, symPlan, 1)?.GameLabel ?? "");
         Check("symmetric cache: the rule file carries the chosen CCD",
-            LassoRules.Build(symP, symPlan, GameCcdChoice.Ccd1).Contains("\"0\": \"16-31\"".Replace("\"0\"", "\"cpuAffinity\""))
-            || LassoRules.Build(symP, symPlan, GameCcdChoice.Ccd1).Contains("16-31"));
+            LassoRules.Build(symP, symPlan, 1).Contains("\"0\": \"16-31\"".Replace("\"0\"", "\"cpuAffinity\""))
+            || LassoRules.Build(symP, symPlan, 1).Contains("16-31"));
+
+        // ---- stress: the shapes that break a two-value CCD pair ----
+
+        // Zen 2 (3900X: two CCDs, two CCX each) reports FOUR L3 domains over 12 cores. An enum with
+        // Ccd0/Ccd1 would map domains 1, 2 and 3 onto the same value and write the wrong mask.
+        var zen2 = Topo(Enumerable.Range(0, 12).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000003FUL, 16u << 20), (0x00000FC0UL, 16u << 20), (0x0003F000UL, 16u << 20), (0x00FC0000UL, 16u << 20) });
+        var zen2P = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 3900X", CpuVendor = "AMD", Cpu = zen2, FormFactor = FormFactor.Desktop,
+            FormFactorEvidence = "", Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false),
+            Software = new SoftwareInfo(),
+        };
+        var zen2Plan = AffinityPlanner.Plan(zen2, Sets(zen2, _ => 0), null, DesktopDevices());
+
+        Check("3900X: four L3 domains are reported", zen2.L3Groups.Count == 4, zen2.L3Groups.Count.ToString());
+        Check("3900X: one domain is NOT one CCD (Zen 2 has two CCX per CCD)", !LassoRules.OneDomainPerCcd(zen2));
+        // The decisive one: domain 3 must reach domain 3's cores. With the old Ccd0/Ccd1 pair this
+        // returned domain 1, i.e. the wrong CCD, silently.
+        Check("3900X: index 3 selects the fourth domain, not the second",
+            LassoRules.SplitFor(zen2P, zen2Plan, 3) is { } z3 &&
+            z3.GameCpus.SequenceEqual(zen2.L3Groups.First(g => g.Id == 3).Cpus()),
+            LassoRules.SplitFor(zen2P, zen2Plan, 3) is { } zz ? string.Join(",", zz.GameCpus) : "null");
+        Check("3900X: the label says 'Cache domain', never 'CCD'",
+            LassoRules.SplitFor(zen2P, zen2Plan, 3) is { } z4 && z4.GameLabel.Contains("Cache domain 3") && !z4.GameLabel.Contains("CCD"),
+            LassoRules.SplitFor(zen2P, zen2Plan, 3)?.GameLabel ?? "");
+
+        // Zen 2 single CCD (3600X: six cores, two CCX) also reports two domains, on ONE CCD. The control
+        // appearing there is legitimate - a cross-CCX move is a real latency change - but it must not be
+        // called a CCD choice.
+        var zen2one = Topo(Enumerable.Range(0, 6).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x00000F0FUL, 16u << 20), (0x0F0F0000UL, 16u << 20) });
+        Check("3600X: two domains on a single CCD are not called CCDs", !LassoRules.OneDomainPerCcd(zen2one));
+
+        // Zen 3 / Zen 4 / Zen 5: one CCX per CCD, so domains == CCDs.
+        var zen4 = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 32u << 20), (0xFFFF0000UL, 32u << 20) });
+        Check("9950X: two domains on 16 cores ARE two CCDs", LassoRules.OneDomainPerCcd(zen4));
+
+        // An index that no longer exists must fall back to Auto, not coerce to a different domain and not
+        // claim the user chose it.
+        Check("out-of-range index falls back to Auto and does not claim the user chose it",
+            LassoRules.SplitFor(asymP, asymPlan, 7) is { } o1 && !o1.GameLabel.Contains("chosen by you"),
+            LassoRules.SplitFor(asymP, asymPlan, 7)?.GameLabel ?? "");
+        Check("out-of-range index still yields a usable mask",
+            LassoRules.SplitFor(asymP, asymPlan, 7) is { } o2 && o2.GameCpus.Count > 0);
+        // ---- stress: a stored option must never cost the rest of the file when it cannot be read ----
+        Console.WriteLine("Options.GameCcd migration");
+        {
+            // The one unreleased build stored an enum name here. A plain int? reader would throw, and
+            // Load treats a throw as "whole file unreadable" and returns defaults - losing every other
+            // stored choice with it.
+            var fromEnum = System.Text.Json.JsonSerializer.Deserialize<AppOptions>(
+                "{\"GameCcd\":\"Ccd1\",\"UserChosen\":true}", new System.Text.Json.JsonSerializerOptions());
+            Check("an enum-name value is read as its index", fromEnum is { GameCcd: 1 }, fromEnum?.GameCcd?.ToString() ?? "null");
+            Check("an enum-name value does not throw", fromEnum is not null);
+
+            var fromAuto = System.Text.Json.JsonSerializer.Deserialize<AppOptions>(
+                "{\"GameCcd\":\"Auto\",\"UserChosen\":true}", new System.Text.Json.JsonSerializerOptions());
+            Check("'Auto' is read as null", fromAuto is { GameCcd: null });
+
+            var fromNumber = System.Text.Json.JsonSerializer.Deserialize<AppOptions>(
+                "{\"GameCcd\":3,\"UserChosen\":true}", new System.Text.Json.JsonSerializerOptions());
+            Check("a number is read as that index", fromNumber is { GameCcd: 3 });
+
+            var fromJunk = System.Text.Json.JsonSerializer.Deserialize<AppOptions>(
+                "{\"GameCcd\":\"nonsense\",\"UserChosen\":true,\"TimerResolution\":7500}", new System.Text.Json.JsonSerializerOptions());
+            Check("an unrecognised value becomes Auto rather than throwing", fromJunk is { GameCcd: null });
+            Check("and the other stored fields survive it", fromJunk is { TimerResolution: 7500 } && fromJunk.UserChosen);
+
+            var roundTrip = new AppOptions { GameCcd = 2 };
+            string s = System.Text.Json.JsonSerializer.Serialize(roundTrip, new System.Text.Json.JsonSerializerOptions());
+            var back = System.Text.Json.JsonSerializer.Deserialize<AppOptions>(s, new System.Text.Json.JsonSerializerOptions());
+            Check("an index round-trips", back is { GameCcd: 2 }, s);
+        }
+        Check("null index means Auto",
+            LassoRules.SplitFor(asymP, asymPlan, null) is { } o3 &&
+            LassoRules.SplitFor(asymP, asymPlan) is { } o4 &&
+            o3.GameCpus.SequenceEqual(o4.GameCpus));
     }
     // Dynamic thread priority boost must be left alone: Windows' +6 mouse/keyboard and +8 sound wake
     // boosts are what let a woken input or audio thread preempt, so emitting "off" worked against latency.
