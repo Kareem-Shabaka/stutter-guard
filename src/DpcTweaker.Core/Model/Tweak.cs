@@ -108,7 +108,11 @@ public abstract class TweakBase : ITweak
         Journal = journal;
     }
 
-    public TweakInfo Info { get; }
+    /// <summary>
+    /// Set in the constructor, and once more by a tweak whose description depends on a plan it computes
+    /// in its own body: RssTweak, where a kept pin can narrow the queue span it can express.
+    /// </summary>
+    public TweakInfo Info { get; protected set; }
     protected Journal Journal { get; }
 
     protected abstract Probe Read();

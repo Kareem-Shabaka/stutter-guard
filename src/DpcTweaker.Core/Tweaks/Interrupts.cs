@@ -117,12 +117,10 @@ public sealed class RssTweak : TweakBase
         Module = AffinityTweak.ModuleName,
         Group = AffinityTweak.GroupName,
         Title = $"{a.Device.Name}: receive queues (RSS) on {a.CpuText}",
-        What = "Sets the adapter's standard RSS keywords: RSS on, " +
-               (a.Cpus.Length > 1 ? $"{a.Cpus.Length} queues on {a.Cpus.Length} cores" : "1 queue on 1 core") +
-               $", processors {(a.Rss?.BaseProcNumber ?? a.Cpus[0])}-{(a.Rss?.MaxProcNumber ?? a.Cpus[^1])}" +
-               (a.Rss is { ThreadsPerCore: > 1 } rp ? $" ({rp.NumProcessors} logical processors over {a.Cpus.Length} SMT core(s))" : "") +
-               (a.Device.RssQueueOptions.Count > 0 ? $" as {ChooseQueues(a.Device, a.Rss ?? new RssPlan(a.Cpus[0], a.Cpus[^1], a.Cpus.Length, 1))} queue(s)" : "") +
-               ". Set-NetAdapterRss writes the same keywords. The RSS profile is left at the driver's default.",
+        // Filled in the body, where the CLAMPED plan exists. The first version described a.Rss and
+        // a.Cpus.Length, so a kept pin {20,22} promised "2 queues on 2 cores, processors 20-23" while
+        // the keywords actually written were one processor at LP 20.
+        What = "",
         Why = "Received packets are processed (DPC) on the RSS cores. Putting those on the same cores as the adapter's interrupts keeps network work off the game's cores. On the desktop: ndis DPCs only on CPUs 20/22, CCD0 untouched. Games use at most 2 queues.",
         Cost = "None for gaming. Very fast multi-stream downloads use fewer cores.",
         CanBreak = "Nothing known. A driver update can reset these keywords.",
@@ -151,6 +149,7 @@ public sealed class RssTweak : TweakBase
             SkipReason = "The kept interrupt pin and an RSS range cannot both be expressed: the keywords " +
                          "describe one contiguous block and this pin is not one. Nothing is written rather " +
                          "than a range that includes a CPU this adapter never interrupts.";
+            Info = Info with { What = SkipReason };
             return;
         }
         if (d.RssCapable) _items.Add(("*RSS", "1"));
@@ -159,6 +158,26 @@ public sealed class RssTweak : TweakBase
         _items.Add(("*RssBaseProcNumber", rss.BaseProcNumber.ToString(CultureInfo.InvariantCulture)));
         _items.Add(("*MaxRssProcessors", rss.NumProcessors.ToString(CultureInfo.InvariantCulture)));
         _items.Add(("*RssMaxProcNumber", rss.MaxProcNumber.ToString(CultureInfo.InvariantCulture)));
+        Info = Info with { What = DescribeWritten(d, wanted, rss, queues) };
+    }
+
+    /// <summary>
+    /// The row text, built from the plan that will actually be written rather than the one that was
+    /// asked for. A kept pin that cannot hold the adapter's own queue span is stated as the narrowing it
+    /// is, with the pin itself left alone.
+    /// </summary>
+    private string DescribeWritten(PciDevice d, RssPlan wanted, RssPlan rss, string queues)
+    {
+        int lps = Math.Max(1, rss.MaxProcNumber - rss.BaseProcNumber + 1);
+        string span = rss.BaseProcNumber == rss.MaxProcNumber
+            ? $"processor {rss.BaseProcNumber}"
+            : $"processors {rss.BaseProcNumber}-{rss.MaxProcNumber}";
+        string text = $"Sets the adapter's RSS keywords: RSS on, {queues} queue(s) over {span} ({lps} logical processor(s)).";
+        if (rss.MaxProcNumber < wanted.MaxProcNumber)
+            text += $" The kept interrupt pin ({_a.CpuText}) covers a narrower span than the queue range wants, " +
+                    "so the queue range is narrowed to the pin rather than the pin widened: interrupts stay exactly " +
+                    "where they are.";
+        return text + " Set-NetAdapterRss writes the same keywords. The RSS profile is left at the driver's default.";
     }
 
     /// <summary>
@@ -375,7 +394,8 @@ public static class InterruptsModule
             yield return new LeftoverTweak(
                 LeftoverTweak.MakeInfo(id, AffinityTweak.ModuleName,
                     $"{dev?.Name ?? suffix}: receive queues set earlier, no longer planned",
-                    "The app set this adapter's RSS keywords earlier. This path does not place device interrupts, so the row is here to put the keywords back."),
+                    "The app set this adapter's RSS keywords earlier. This path does not place device interrupts, so the row is here to put the keywords back.",
+                    group: AffinityTweak.GroupName, needsReboot: true),
                 journal, () => RssLeftoverProbe(dev));
         }
         // A device the app switched to MSI keeps its row even if it stopped working: that's when the row matters most.

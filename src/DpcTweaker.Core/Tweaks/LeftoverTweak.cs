@@ -35,12 +35,18 @@ public sealed class LeftoverTweak : TweakBase
         // Nothing to apply: this row exists so an earlier change can be reverted.
     }
 
-    /// <summary>Shared info shape, so every leftover row reads the same way.</summary>
-    public static TweakInfo MakeInfo(string id, string module, string title, string what) => new()
+    /// <summary>
+    /// Shared info shape, so every leftover row reads the same way. Group and NeedsReboot are the
+    /// caller's, because a leftover has to sit in the same section and carry the same restart advice as
+    /// the row it replaces: an RSS revert is a registry keyword change that needs a restart, and a CPU
+    /// power setting belongs under "CPU".
+    /// </summary>
+    public static TweakInfo MakeInfo(string id, string module, string title, string what,
+        string group = "", bool needsReboot = false) => new()
     {
         Id = id,
         Module = module,
-        Group = "",
+        Group = group,
         Title = title,
         What = what,
         Why = "Kept so every change the app made can be undone one by one.",
@@ -48,7 +54,7 @@ public sealed class LeftoverTweak : TweakBase
         Evidence = Evidence.Documented,
         CostClass = TweakCost.Free,
         Risk = Risk.Low,
-        NeedsReboot = false,
+        NeedsReboot = needsReboot,
         DefaultSelected = false,
     };
 }

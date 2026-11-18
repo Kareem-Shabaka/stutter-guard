@@ -764,6 +764,34 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var order = root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Select(x => x.GetString()).ToList();
     Check("catch-all is the last affinity rule", order.Last() == "*.*" && order[^2] == "dwm.exe");
     var mk = root.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "mk12.exe");
+    // ---- #3b: the RSS row must describe the keywords it actually writes ----
+    Console.WriteLine("RssTweak: text matches the write");
+    {
+        var topoR = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var planR = AffinityPlanner.Plan(topoR, Sets(topoR, _ => 0), null, DesktopDevices());
+
+        // A kept NIC pinned to the first thread of two cores: its pin cannot express the 4-LP span the
+        // adapter's own RSS wants. Clamp narrows the queue range; the text must say so.
+        // Use the same NIC the rest of the suite uses, so ClassKey and NetCfgInstanceId are real shapes.
+        var nic = DesktopDevices().Single(d => d.DeviceId == "8126");
+        nic.NetCfgInstanceId = "{TEST-NIC}";
+        var asg = new Assignment { Device = nic, Role = DeviceRole.Network, Cpus = new[] { 20, 22 },
+            Kept = true, Rss = new RssPlan(20, 23, 4, 2), Reason = "test" };
+        var t21 = new RssTweak(asg, new Journal(Path.Combine(Path.GetTempPath(), "sg-rsstext-" + Guid.NewGuid().ToString("N") + ".json")));
+        Check("kept pin {20,22}: text names one processor", t21.Info.What.Contains("processor 20"), t21.Info.What);
+        Check("kept pin {20,22}: text does not claim processors 20-23", !t21.Info.What.Contains("20-23"), t21.Info.What);
+        Check("kept pin {20,22}: text states the narrowing and that the pin is unchanged",
+            t21.Info.What.Contains("narrowed to the pin"), t21.Info.What);
+
+        // The unkept case keeps the full span and must not mention narrowing.
+        var asg2 = new Assignment { Device = nic, Role = DeviceRole.Network, Cpus = new[] { 20, 22 },
+            Kept = false, Rss = new RssPlan(20, 23, 4, 2), Reason = "test" };
+        var t232 = new RssTweak(asg2, new Journal(Path.Combine(Path.GetTempPath(), "sg-rsstext-" + Guid.NewGuid().ToString("N") + ".json")));
+        Check("unkept: text keeps the full 20-23 span", t232.Info.What.Contains("processors 20-23"), t232.Info.What);
+        Check("unkept: no narrowing sentence", !t232.Info.What.Contains("narrowed to the pin"), t232.Info.What);
+        _ = planR;
+    }
     Check("game rule: 0-15 affinity", mk.GetProperty("cpuAffinity").GetString() == "0-15");
     // Bitsum's setup guide: "Leave the game's priority alone. Raising a game to High or Realtime
     // priority rarely helps and can cause stutter or hangs." No priority may be emitted at all.

@@ -329,25 +329,8 @@ public static class PowerModule
     public static IEnumerable<ITweak> Build(SystemProfile profile, Journal journal, Func<AppOptions> options)
     {
         var target = new PowerPlanTarget(journal, options);
+        var plannedPower = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // The Balanced path no longer writes the CPU settings (see the loop below). Anything an earlier
-        // build applied there is still live on Windows' plan, so it keeps a revert-only row: the value is
-        // real, and losing the row would lose the only per-setting way back.
-        if (options().PlanTarget == PlanTargetKind.Balanced)
-        {
-            foreach (string id in journal.TweakIds().Where(i => i.StartsWith("power.cpu.", StringComparison.OrdinalIgnoreCase)))
-            {
-                if (!(journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0)) continue;
-                string key = id["power.".Length..];
-                var def = PowerSettings.All.FirstOrDefault(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
-                yield return new LeftoverTweak(
-                    LeftoverTweak.MakeInfo(id, "Power",
-                        (def?.Title ?? key) + ": set earlier on the Balanced path",
-                        "An earlier version wrote this CPU setting on the Balanced path. It is still on this PC. " +
-                        "Revert puts back the value it had before the app; the Balanced path no longer applies it."),
-                    journal, () => PowerLeftoverProbe(target, def));
-            }
-        }
 
         yield return new PlanActiveTweak(new TweakInfo
         {
@@ -374,6 +357,7 @@ public static class PowerModule
             // mutates a plan the app does not own and does not intend to tune on that path.
             if (d.Sub == PowerSettings.Proc && o.PlanTarget == PlanTargetKind.Balanced) continue;
             if (d.DesktopOnly && profile.IsLaptop) continue;
+            plannedPower.Add("power." + d.Key);
 
             yield return new PowerSettingTweak(new TweakInfo
             {
@@ -407,5 +391,27 @@ public static class PowerModule
             NeedsReboot = true,
         }, journal, @"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power", "HiberbootEnabled",
             Microsoft.Win32.RegistryValueKind.DWord, 0);
+
+        plannedPower.Add("power.fast-startup");
+
+        // Anything the app wrote earlier that this run no longer plans, anywhere on the Power screen: a
+        // CPU setting on a path that stopped writing it (Balanced), a row that left the profile when Full
+        // became DevicesOnly, or a class-scoped setting whose class this CPU no longer reports after a
+        // swap. One rule covers all three, and every leftover row is revert-only so nothing is lost.
+        foreach (string id in journal.TweakIds().Where(i => i.StartsWith("power.", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (plannedPower.Contains(id)) continue;
+            if (!(journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0)) continue;
+            string key = id["power.".Length..];
+            var def = PowerSettings.All.FirstOrDefault(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
+            yield return new LeftoverTweak(
+                LeftoverTweak.MakeInfo(id, "Power",
+                    (def?.Title ?? key) + ": set earlier, not part of this plan now",
+                    "The app applied this setting earlier. This run does not plan it - a different power path, " +
+                    "a narrower profile, or a CPU that no longer reports this setting. It is still on this PC. " +
+                    "Revert puts back the value it had before the app.",
+                    group: def is not null && def.Sub == PowerSettings.Proc ? "CPU" : "Devices"),
+                journal, () => PowerLeftoverProbe(target, def));
+        }
     }
 }

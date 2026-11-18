@@ -37,7 +37,11 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         ReservedText = plan.Applicable ? $"Kept free of devices: CPUs {CpuTopology.FormatCpus(plan.ReservedCpus)}. {plan.ReservedReason}" : "";
         CandidatesText = plan.Applicable
             ? "Cores that take devices, best first: " + string.Join(", ", plan.Candidates.Select(c => CoreLabel(c, p.Cpu.IsHybrid))) +
-              ". Only the first thread of each core takes a device; its SMT sibling shares the same execution units."
+              // A sibling only exists when SMT does. Saying it on a 6C/6T or Arrow Lake part describes
+              // hardware the CPU does not have.
+              (p.Cpu.SmtEnabled
+                  ? ". Only the first thread of each core takes a device; its SMT sibling shares the same execution units."
+                  : ". One thread per core on this CPU: SMT is off, so every core takes at most one device.")
             : "";
         RankingText = plan.RankingSource;
 
