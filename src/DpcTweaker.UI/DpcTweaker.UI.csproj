@@ -15,4 +15,10 @@
     <ProjectReference Include="..\DpcTweaker.Core\DpcTweaker.Core.csproj" />
   </ItemGroup>
 
+  <!-- The self-test asserts two things that only exist here: that a suppressed interrupt plan does
+       not advertise its assignments, and that a preset switch is scoped to one tab's rows. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DpcTweaker.SelfTest" />
+  </ItemGroup>
+
 </Project>

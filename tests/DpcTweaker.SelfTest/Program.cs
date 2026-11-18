@@ -11,6 +11,7 @@ using DpcTweaker.Core.Interrupts;
 using DpcTweaker.Core.Model;
 using DpcTweaker.Core.Native;
 using DpcTweaker.Core.Tweaks;
+using DpcTweaker.UI;
 using Microsoft.Win32;
 
 int failures = 0;
@@ -360,8 +361,15 @@ Console.WriteLine("Power settings table");
     Check("light caps idle at C1", idleMax.Target(light) == 1);
     Check("deep removes the cap", idleMax.Target(deep) == 0);
     Check("21 Ultimate settings from the audit are in Full",
-        PowerSettings.All.Count(d => d.InFull && !d.DesktopOnly && d.Key != "cpu.interrupt-steering") == 21,
-        PowerSettings.All.Count(d => d.InFull && !d.DesktopOnly && d.Key != "cpu.interrupt-steering").ToString());
+        PowerSettings.All.Count(d => d.InFull && !d.DesktopOnly && d.Key != "cpu.interrupt-steering" &&
+                                     !d.ClassOne && !d.AmdOverlay && d.Key != "cpu.boost-policy") == 21,
+        PowerSettings.All.Count(d => d.InFull && !d.DesktopOnly && d.Key != "cpu.interrupt-steering" &&
+                                     !d.ClassOne && !d.AmdOverlay && d.Key != "cpu.boost-policy").ToString());
+    // The rows added with the audit fixes are Full-only as well, and conditional on the hardware
+    // (class 1 needs an Intel hybrid, the overlay needs AMD plus the GUID on the plan).
+    Check("the class-1 rows and the two vendor/ceiling rows are Full-only",
+        new[] { "cpu.core-parking-class1", "cpu.min-state-class1", "cpu.epp-class1", "cpu.epp-latency-class1", "cpu.boost-policy", "cpu.amd-overlay" }
+            .All(k => PowerSettings.All.Single(d => d.Key == k) is { InFull: true, InDevicesOnly: false }));
     Check("devices-only has no CPU settings", PowerSettings.All.Where(d => d.InDevicesOnly).All(d => d.Sub != PowerSettings.Proc || d.Key == "cpu.interrupt-steering"));
 }
 
@@ -4665,6 +4673,457 @@ Console.WriteLine("Triage: names the costs that interrupt pinning cannot remove"
         try { Directory.Delete(tdir, true); } catch { }
     }
 }
+// ================================================================ 2026-11-18: the regression pass
+
+Console.WriteLine("A suppressed plan advertises nothing and keeps every applied pin revertible");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-suppress-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var topo = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD", Cpu = topo,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            Devices = DesktopDevices(),
+        };
+        var engine = new TweakEngine(profile, j);
+
+        // DefaultsFor a parking-dependent AMD desktop is the Balanced path, which is the path that
+        // suppressed the plan and made every applied pin disappear from the list.
+        Check("the Balanced default suppresses the plan", !engine.Plan.Applicable, engine.Plan.NotApplicableReason ?? "applicable");
+        Check("...and the planner still knows where the devices would go", engine.Plan.Assignments.Count > 0,
+            engine.Plan.Assignments.Count.ToString());
+
+        var plan = engine.Plan;
+        string irqId = "irq." + plan.Assignments[0].Device.InstanceId;
+        var nic = profile.Devices.Single(d => d.RssCapable);
+        string rssId = "rss." + (nic.NetCfgInstanceId ?? nic.InstanceId);
+        j.MarkApplied(irqId);
+        j.MarkApplied(rssId);
+        j.Save();
+
+        var built = InterruptsModule.Build(profile, j, engine.Options, plan).ToList();
+        Check("this path builds no pin at all", !built.OfType<AffinityTweak>().Any());
+        Check("an applied pin keeps a revert row", built.Any(t => t.Info.Id == irqId && t is LeftoverAffinityTweak),
+            string.Join(", ", built.Select(t => t.Info.Id + ":" + t.GetType().Name)));
+        var rssLeft = built.SingleOrDefault(t => t.Info.Id == rssId);
+        Check("an applied RSS row keeps a revert row", rssLeft is LeftoverTweak, rssLeft?.GetType().Name ?? "absent");
+        Check("...under interrupt affinity, where it was applied", rssLeft?.Info.Group == AffinityTweak.GroupName, rssLeft?.Info.Group ?? "");
+        Check("a leftover row is never ticked for the user", rssLeft?.Info.DefaultSelected == false);
+
+        // Back on a path that does place interrupts, the same ids are planned rows, not leftovers.
+        engine.SetOptions(engine.Options.With(o =>
+        {
+            o.PlanTarget = PlanTargetKind.TunedUltimate;
+            o.PowerProfile = PowerProfileKind.Full;
+        }));
+        Check("the tuned path builds pins", engine.Plan.Applicable);
+        var tuned = InterruptsModule.Build(profile, j, engine.Options, engine.Plan).ToList();
+        Check("the pin is a planned row again", tuned.Any(t => t.Info.Id == irqId && t is AffinityTweak));
+        Check("...and it is not also a leftover", !tuned.Any(t => t.Info.Id == irqId && t is LeftoverAffinityTweak));
+        // A synthetic adapter has no driver key, so this id can only be a revert-only row here: the
+        // point is that it is not lost across the path switch, not that a write is planned for it.
+        var rssRows = tuned.Where(t => t.Info.Id == rssId).Select(t => t.GetType().Name).ToList();
+        Check("the RSS id is still on the screen exactly once after the path switch", rssRows.Count == 1, string.Join(",", rssRows));
+
+        // The screen: a suppressed plan must not list a plan it will not carry out.
+        engine.SetOptions(engine.Options.With(o => o.PlanTarget = PlanTargetKind.Balanced));
+        var main = new MainViewModel(new FakeUiHost());
+        var vm = new InterruptOptionsViewModel(main, engine);
+        Check("the interrupt screen lists no plan lines on a suppressed plan", vm.PlanLines.Count == 0, vm.PlanLines.Count.ToString());
+        Check("...and states the reason instead", vm.NotApplicableText.Length > 0);
+        Check("...while the plan's assignments are still non-empty", engine.Plan.Assignments.Count > 0);
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("A preset switch is scoped to the tab it was clicked on");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-scope-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var topo = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD", Cpu = topo,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            Devices = DesktopDevices(),
+        };
+        var engine = new TweakEngine(profile, j);
+        engine.SetOptions(engine.Options.With(o =>
+        {
+            o.PlanTarget = PlanTargetKind.TunedUltimate;
+            o.PowerProfile = PowerProfileKind.Full;
+        }));
+
+        var main = new MainViewModel(new FakeUiHost());
+        var pages = main.Pages.OfType<ModulePageViewModel>().ToList();
+        ModulePageViewModel Page(string module) => pages.First(p => p.Module == module);
+
+        var power = Page("Power");
+        power.Load(engine, carryTicks: false);
+        var interrupts = Page("Interrupts");
+        interrupts.Load(engine, carryTicks: false);
+        Check("the Power tab has rows to switch", power.PresetRows().Count > 0, power.PresetRows().Count.ToString());
+        Check("the Interrupts tab has rows to switch", interrupts.PresetRows().Count > 0, interrupts.PresetRows().Count.ToString());
+
+        var powerIds = power.PresetRows().Select(r => r.Info.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var irqIds = interrupts.PresetRows().Select(r => r.Info.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Check("every row a Power switch may touch is a Power row",
+            power.PresetRows().All(r => r.Info.Module == "Power"),
+            string.Join(", ", power.PresetRows().Where(r => r.Info.Module != "Power").Select(r => r.Info.Id)));
+        Check("no Interrupts row is in Power's scope",
+            !power.PresetRows().Any(r => irqIds.Contains(r.Info.Id)));
+        Check("no Power row is in Interrupts' scope",
+            !interrupts.PresetRows().Any(r => powerIds.Contains(r.Info.Id)));
+
+        // The transition the tab builds can therefore only name its own rows: the old code fed every
+        // page's rows in, which is what reverted Costly tweaks on tabs the user had not touched.
+        var facts = power.PresetRows()
+            .Select(r => new RowFacts(r.Info.Id, r.Info.Title, r.IsSelected, r.IsApplicable, r.Info.DefaultSelected,
+                r.Info.CostClass, r.Info.Evidence, r.Status))
+            .ToList();
+        var transition = PresetTransition.Plan(TweakPreset.Safe, facts);
+        var scope = facts.Select(f => f.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Check("the transition only names rows in the tab's scope",
+            transition.ToApply.Concat(transition.ToRevert).All(scope.Contains),
+            string.Join(", ", transition.ToApply.Concat(transition.ToRevert).Where(id => !scope.Contains(id))));
+        Check("...and none of them is an Interrupts row", !transition.ToRevert.Concat(transition.ToApply).Any(irqIds.Contains));
+
+        // Background is one page with three sections: its scope is all three, and nothing else.
+        var background = main.Background;
+        background.Load(engine, carryTicks: false);
+        var allowed = new[] { "Boot tasks", "Services", "Tasks" };
+        Check("the Background tab has rows", background.PresetRows().Count > 0, background.PresetRows().Count.ToString());
+        Check("Background's scope is only its own three sections",
+            background.PresetRows().All(r => allowed.Contains(r.Info.Module)),
+            string.Join(", ", background.PresetRows().Select(r => r.Info.Module).Distinct()));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("The Background tab keeps its tier when it reloads");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-bgtier-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var engine = new TweakEngine(profile, j);
+
+        var o = new AppOptions();
+        o.SetPresetFor("Background", TweakPreset.Costly);
+        Check("the page reads its own tier", o.PresetFor("Background") == TweakPreset.Costly);
+        Check("startup tasks read the page's tier", o.PresetFor("Boot tasks") == TweakPreset.Costly, o.PresetFor("Boot tasks").ToString());
+        Check("services read the page's tier", o.PresetFor("Services") == TweakPreset.Costly);
+        Check("scheduled tasks read the page's tier", o.PresetFor("Tasks") == TweakPreset.Costly);
+        Check("another tab keeps the global tier", o.PresetFor("Power") == TweakPreset.Safe, o.PresetFor("Power").ToString());
+
+        // A section with an entry of its own still wins: the page is a fallback, not an override.
+        o.SetPresetFor("Services", TweakPreset.Essential);
+        Check("a section's own choice beats the page's", o.PresetFor("Services") == TweakPreset.Essential);
+
+        // Through the journal, which is what a restart does.
+        o.Save(j);
+        var back = AppOptions.Load(j, profile);
+        Check("the page's tier survives a save/load", back.PresetFor("Background") == TweakPreset.Costly, back.PresetFor("Background").ToString());
+        Check("...and reaches the sections after the round trip",
+            back.PresetFor("Boot tasks") == TweakPreset.Costly && back.PresetFor("Tasks") == TweakPreset.Costly);
+        Check("the section's own choice survives too", back.PresetFor("Services") == TweakPreset.Essential);
+
+        // And the view model: a reload must not drop the tab back to the global tier.
+        engine.SetOptions(engine.Options.With(x => x.SetPresetFor("Background", TweakPreset.Costly)));
+        var main = new MainViewModel(new FakeUiHost());
+        var bg = main.Background;
+        bg.Load(engine, carryTicks: false);
+        Check("the tab shows Costly after a reload", bg.PresetChoice?.Value == TweakPreset.Costly, bg.PresetChoice?.Value.ToString() ?? "null");
+        Check("...and so does every section", bg.Startup.PresetChoice?.Value == TweakPreset.Costly &&
+            bg.Services.PresetChoice?.Value == TweakPreset.Costly && bg.Scheduled.PresetChoice?.Value == TweakPreset.Costly,
+            $"{bg.Startup.PresetChoice?.Value}/{bg.Services.PresetChoice?.Value}/{bg.Scheduled.PresetChoice?.Value}");
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Healing runs the same follow-up an apply does");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-healfin-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "Test CPU", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var engine = new TweakEngine(profile, j);
+
+        // Two tweaks behind one adapter restart, and one whose restart fails: exactly the shape
+        // NicPropertyTweak has, where NeedsReboot is false because Finish() restarts the adapter.
+        var a = new FakeFinisherTweak(j, "t.fin.a", "nic-1");
+        var b = new FakeFinisherTweak(j, "t.fin.b", "nic-1");
+        var c = new FakeFinisherTweak(j, "t.fin.c", "nic-2") { FailOnFinish = true };
+        var healed = engine.Heal(new[] { a, b, c }, null);
+        Check("all three were re-applied", healed.Count(r => r.Ok) == 3, string.Join(", ", healed.Select(r => r.Error ?? "ok")));
+        Check("the shared follow-up ran once", a.FinishCount == 1 && b.FinishCount == 0, $"{a.FinishCount}/{b.FinishCount}");
+        Check("each key gets its own follow-up", c.FinishCount == 1, c.FinishCount.ToString());
+        Check("a failed follow-up is reported, not swallowed", engine.LastFinishErrors.Count == 1, string.Join(" | ", engine.LastFinishErrors));
+
+        // Apply already did this; the assertion above is the regression, and this one proves the two
+        // paths now agree.
+        var d = new FakeFinisherTweak(j, "t.fin.d", "nic-1");
+        engine.Apply(new[] { d });
+        Check("apply and heal run the same follow-up", d.FinishCount == 1, d.FinishCount.ToString());
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+Console.WriteLine("Triage on the Balanced path still knows which cores games use");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-triage2-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = dir;
+    try
+    {
+        var j = new Journal(Path.Combine(dir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+                new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            Devices = DesktopDevices(),
+        };
+        var engine = new TweakEngine(profile, j);
+        Check("the Balanced default builds no pins", !engine.Plan.Applicable, engine.Plan.NotApplicableReason ?? "applicable");
+        Check("...and the reserved cores are still known", engine.Plan.ReservedCpus.Count > 0, engine.Plan.ReservedCpus.Count.ToString());
+
+        int gameCpu = engine.Plan.ReservedCpus[0];
+        var rates = new[]
+        {
+            new CpuRates(gameCpu, 900, 400, 0.1, 2.2),
+            new CpuRates(20, 900, 400, 0.1, 5.0),
+        };
+        var withCores = LatencyTriage.Scan(null, rates, engine.Plan.ReservedCpus);
+        Check("DPCs on a reserved core are reported",
+            withCores.Any(f => f.Title.Contains("landing on game cores")), string.Join(" | ", withCores.Select(f => f.Title)));
+        var noCores = LatencyTriage.Scan(null, rates, null);
+        Check("the same sample with no reserved-core list reports nothing, which is what the fix removed",
+            !noCores.Any(f => f.Title.Contains("landing on game cores")));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+Console.WriteLine("Power: class-1 rows only on an Intel hybrid, the overlay only on AMD");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-pwrrows-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    var j = new Journal(Path.Combine(dir, "journal.json"));
+
+    var pCores = Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)).ToArray();
+    var eCores = Enumerable.Range(16, 4).Select(c => (new[] { c }, (byte)1)).ToArray();
+    var hybrid = new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "Intel Core Ultra 9 285K", CpuVendor = "Intel",
+        Cpu = Topo(pCores.Concat(eCores), new[] { (0x000FFFFFUL, 36u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+    };
+    Check("the synthetic CPU is an Intel hybrid", hybrid.Cpu.IsHybrid);
+    Check("...with a class 1 on the E-cores", hybrid.Cpu.Cpus.Any(c => c.EfficiencyClass > 0));
+
+    static AppOptions Tuned() => new() { PlanTarget = PlanTargetKind.TunedUltimate, PowerProfile = PowerProfileKind.Full };
+    var hybridIds = PowerModule.Build(hybrid, j, Tuned).Select(t => t.Info.Id).ToList();
+    foreach (string id in new[] { "power.cpu.core-parking-class1", "power.cpu.min-state-class1", "power.cpu.epp-class1", "power.cpu.epp-latency-class1" })
+        Check("a hybrid CPU builds " + id, hybridIds.Contains(id), string.Join(", ", hybridIds.Where(x => x.Contains("class1"))));
+    Check("...and the boost ceiling", hybridIds.Contains("power.cpu.boost-policy"));
+    Check("an Intel machine never gets the AMD overlay", !hybridIds.Contains("power.cpu.amd-overlay"));
+
+    var hybridBalanced = PowerModule.Build(hybrid, j,
+        () => new AppOptions { PlanTarget = PlanTargetKind.Balanced, PowerProfile = PowerProfileKind.Full }).Select(t => t.Info.Id).ToList();
+    Check("Balanced builds no class-1 row", !hybridBalanced.Any(id => id.EndsWith("-class1", StringComparison.Ordinal)),
+        string.Join(", ", hybridBalanced.Where(id => id.EndsWith("-class1", StringComparison.Ordinal))));
+    Check("Balanced builds no boost ceiling either", !hybridBalanced.Contains("power.cpu.boost-policy"));
+
+    var amd = new SystemProfile
+    {
+        Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+        CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD",
+        Cpu = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) }),
+        FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+        Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+    };
+    var amdIds = PowerModule.Build(amd, j, Tuned).Select(t => t.Info.Id).ToList();
+    Check("a 9950X3D reports no efficiency class above 0", amd.Cpu.Cpus.All(c => c.EfficiencyClass == 0));
+    Check("...so none of the class-1 rows is built", !amdIds.Any(id => id.EndsWith("-class1", StringComparison.Ordinal)),
+        string.Join(", ", amdIds.Where(id => id.EndsWith("-class1", StringComparison.Ordinal))));
+    Check("...while the boost ceiling still is", amdIds.Contains("power.cpu.boost-policy"));
+
+    var boost = PowerSettings.All.Single(d => d.Key == "cpu.boost-policy");
+    Check("the boost ceiling is graded Documented, not Measured", boost.Evidence == Evidence.Documented);
+    Check("...and costs nothing but power", boost.CostClass == TweakCost.Free);
+    var overlay = PowerSettings.All.Single(d => d.Key == "cpu.amd-overlay");
+    Check("the overlay is graded Documented too", overlay.Evidence == Evidence.Documented);
+    Check("...and names the slider's top position", overlay.Format(3) == "Best performance", overlay.Format(3));
+    Check("...and is never in the devices-only profile", !overlay.InDevicesOnly && overlay.InFull);
+
+    // A CPU swap: the journal still holds a class-1 setting on a machine without a class 1.
+    j.MarkApplied("power.cpu.core-parking-class1");
+    j.Save();
+    var swapped = PowerModule.Build(amd, j, Tuned).ToList();
+    var left = swapped.SingleOrDefault(t => t.Info.Id == "power.cpu.core-parking-class1");
+    Check("a class-1 setting left by a CPU swap becomes a leftover", left is LeftoverTweak, left?.GetType().Name ?? "absent");
+    Check("...under the CPU heading", left?.Info.Group == "CPU", left?.Info.Group ?? "");
+    Check("...and reads back without throwing", left is not null && left.Detect().Status != TweakStatus.Unknown);
+}
+
+Console.WriteLine("Plan notes: leftovers, live parking and the V-Cache conflict");
+{
+    string dirA = Path.Combine(Path.GetTempPath(), "dpc-notea-" + Guid.NewGuid().ToString("N"));
+    string dirB = Path.Combine(Path.GetTempPath(), "dpc-noteb-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dirA);
+    Directory.CreateDirectory(dirB);
+    string savedDir = Paths.DataDir;
+    try
+    {
+        var topo = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        SystemProfile Profile(bool vcacheService) => new()
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "AMD Ryzen 9 9950X3D 16-Core Processor", CpuVendor = "AMD", Cpu = topo,
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false),
+            Software = new SoftwareInfo { AmdVCacheService = vcacheService },
+            Devices = DesktopDevices(),
+        };
+
+        // M1: Balanced, with a CPU power setting left in the journal.
+        Paths.DataDir = dirA;
+        var jA = new Journal(Path.Combine(dirA, "journal.json"));
+        var engineA = new TweakEngine(Profile(false), jA);
+        Check("a clean Balanced machine gets no leftover note",
+            !engineA.Plan.Notes.Any(n => n.Contains("from an earlier configuration")),
+            string.Join(" | ", engineA.Plan.Notes));
+        jA.MarkApplied("power.cpu.epp");
+        jA.Save();
+        engineA.SetOptions(engineA.Options.With(o => o.PlanTarget = PlanTargetKind.Balanced));
+        Check("the leftover row exists", engineA.Tweaks.Any(t => t.Info.Id == "power.cpu.epp" && t is LeftoverTweak),
+            string.Join(", ", engineA.Tweaks.Where(t => t.Info.Id == "power.cpu.epp").Select(t => t.GetType().Name)));
+        Check("...and the M1 note is added with it",
+            engineA.Plan.Notes.Any(n => n.Contains("from an earlier configuration") && n.Contains("leftover rows")),
+            string.Join(" | ", engineA.Plan.Notes));
+
+        // P-E: the V-Cache service is installed, and the path is not Balanced.
+        Paths.DataDir = dirB;
+        var jB = new Journal(Path.Combine(dirB, "journal.json"));
+        var engineB = new TweakEngine(Profile(true), jB);
+        engineB.SetOptions(engineB.Options.With(o =>
+        {
+            o.PlanTarget = PlanTargetKind.TunedUltimate;
+            o.PowerProfile = PowerProfileKind.Full;
+        }));
+        Check("the tuned path applies", engineB.Plan.Applicable);
+        Check("the V-Cache conflict is named",
+            engineB.Plan.Notes.Any(n => n.Contains("amd3dvcacheSvc")), string.Join(" | ", engineB.Plan.Notes));
+        engineB.SetOptions(engineB.Options.With(o => o.PlanTarget = PlanTargetKind.Balanced));
+        Check("...and is not repeated on the Balanced path, which does not pin",
+            !engineB.Plan.Notes.Any(n => n.Contains("amd3dvcacheSvc")), string.Join(" | ", engineB.Plan.Notes));
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(dirA, true); } catch { }
+        try { Directory.Delete(dirB, true); } catch { }
+    }
+
+    // The CurrentActive parking note, every branch, without touching a live plan.
+    Check("100% unparked needs no note",
+        TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, false, false, 100, 100) is null);
+    string? parked = TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, false, false, 50, null);
+    Check("parking on the active plan is reported", parked is not null && parked.Contains("allows core parking"), parked ?? "null");
+    Check("a class-1 parking value counts as well",
+        TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, false, false, 100, 60) is not null);
+    Check("an unreadable value is not a claim",
+        TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, false, false, null, null) is null);
+    Check("the Balanced path has its own rule, so no note here",
+        TweakEngine.ParkingWarning(PlanTargetKind.Balanced, true, true, true, false, 50, 50) is null);
+    Check("a CPU that does not depend on parking gets no note",
+        TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, false, true, false, false, 40, null) is null);
+    string? laptop = TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, true, false, 40, null);
+    Check("a laptop gets the battery caveat", laptop is not null && laptop.Contains("DC"), laptop ?? "null");
+    string? laptopApplied = TweakEngine.ParkingWarning(PlanTargetKind.CurrentActive, true, true, true, true, 40, null);
+    Check("...unless applying on battery too is on", laptopApplied is not null && !laptopApplied.Contains("DC"));
+}
+
+Console.WriteLine("Options: a null or re-read preset map cannot take a tab down");
+{
+    var o = new AppOptions { Presets = null! };
+    Check("a null map reads as the global tier", o.PresetFor("Power") == o.Preset);
+    Check("...and so does a Background section", o.PresetFor("Boot tasks") == o.Preset);
+    o.SetPresetFor("Power", TweakPreset.Costly);
+    Check("writing into a null map works", o.PresetFor("Power") == TweakPreset.Costly);
+
+    var lower = new AppOptions();
+    lower.SetPresetFor("interrupts", TweakPreset.Costly);
+    var copy = lower.With(x => x.TimerResolution = 5000);
+    Check("a With() copy still matches a tab name whatever its case",
+        copy.PresetFor("Interrupts") == TweakPreset.Costly, copy.PresetFor("Interrupts").ToString());
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>
@@ -4698,4 +5157,50 @@ internal sealed class FakeDriftTweak : TweakBase
         if (FailOnApply) throw new InvalidOperationException("simulated failure");
         Matches = true;
     }
+}
+
+/// <summary>
+/// A tweak with a batched follow-up, the shape NicPropertyTweak has: the write is one registry value
+/// and the follow-up is one adapter restart for the whole batch. Its NeedsReboot is false for exactly
+/// that reason, so a heal that forgets the follow-up leaves the registry changed and the driver not
+/// running with it.
+/// </summary>
+internal sealed class FakeFinisherTweak : TweakBase, IBatchFinisher
+{
+    private readonly string _key;
+
+    public FakeFinisherTweak(Journal journal, string id, string key)
+        : base(new TweakInfo { Id = id, Module = "Test", Title = "Fake " + id, CostClass = TweakCost.Free, NeedsReboot = false }, journal)
+    {
+        _key = key;
+    }
+
+    public int FinishCount { get; private set; }
+    public bool FailOnFinish { get; init; }
+
+    string IBatchFinisher.FinishKey => _key;
+
+    void IBatchFinisher.Finish()
+    {
+        FinishCount++;
+        if (FailOnFinish) throw new InvalidOperationException("simulated finish failure");
+    }
+
+    protected override Probe Read() => new(true, "tuned", "tuned");
+
+    public override void Apply(TweakContext ctx) => ctx.Journal.RecordOriginal(Info.Id, "reg", _key, true, "DWord", "0");
+}
+
+/// <summary>Nothing is shown, nothing is clicked: the view models under test never reach the UI.</summary>
+internal sealed class FakeUiHost : IUiHost
+{
+    public List<string> Opened { get; } = new();
+    public List<string> Messages { get; } = new();
+    public void Post(Action action) => action();
+    public bool Confirm(string title, string message) { Messages.Add(title); return true; }
+    public void Inform(string title, string message) => Messages.Add(title);
+    public bool Review(string title, string message, string payload) => true;
+    public string? Prompt(string title, string message, string defaultText = "") => defaultText;
+    public void Open(string path) => Opened.Add(path);
+    public void Restart() => Messages.Add("restart");
 }
