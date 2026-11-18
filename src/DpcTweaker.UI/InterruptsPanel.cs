@@ -45,8 +45,12 @@ public sealed class InterruptOptionsViewModel : ObservableObject
             : "";
         RankingText = plan.RankingSource;
 
-        foreach (var a in plan.Assignments)
-            PlanLines.Add(new InfoLine($"{a.CpuText}{(a.Shared ? " (shared)" : "")}{(a.Kept ? " (kept)" : "")}", $"{a.Device.Name}: {AffinityTweak.RoleText(a.Role)}. {a.Reason}"));
+        // A suppressed plan keeps the assignments the planner worked out, so listing them would show a
+        // plan this path does not carry out. NotApplicableText says why instead; the leftover rows in
+        // the list below are what can still be reverted.
+        if (plan.Applicable)
+            foreach (var a in plan.Assignments)
+                PlanLines.Add(new InfoLine($"{a.CpuText}{(a.Shared ? " (shared)" : "")}{(a.Kept ? " (kept)" : "")}", $"{a.Device.Name}: {AffinityTweak.RoleText(a.Role)}. {a.Reason}"));
         foreach (var n in plan.Notes) Notes.Add(n);
         HasNotes = Notes.Count > 0;
 
@@ -119,13 +123,20 @@ public sealed class InterruptOptionsViewModel : ObservableObject
         // Who else is steering games right now. On a dual-domain X3D part AMD's driver and Xbox Game Bar
         // decide the placement automatically, and both can be absent - so a placement claim without this
         // line would be describing a mechanism the user may not have.
+        //
+        // This picker decides which cache domain is kept free of device interrupts, and which domain the
+        // exported Process Lasso starter rules name as the game domain. It never places game threads:
+        // on the Balanced path that is AMD's 3D V-Cache service plus Xbox Game Bar, and on the
+        // TunedUltimate path - where parking is off - it is Process Lasso or the user's own CPU Sets
+        // rule. The earlier wording said the opposite ("a choice here overrides it", "the plan here is
+        // the only thing placing game threads"), which contradicted the README and the Power tab.
         AmdSteeringText = p.Cpu.IsHybrid || p.Cpu.L3Groups.Count < 2
             ? ""
             : p.Software.AmdVCacheService && p.Software.XboxGameBar
-                ? "Windows is also steering games: AMD's 3D V-Cache service is present and Xbox Game Bar is installed, so Windows places games by itself. A choice here overrides it."
+                ? "This picker decides which cache domain stays free of device interrupts, and which one the exported Process Lasso starter rules name as the game domain. It does not place game threads: on the Balanced path AMD's 3D V-Cache service and Xbox Game Bar do, and on TunedUltimate Process Lasso or your own CPU Sets rule does."
                 : !p.Software.XboxGameBar
-                    ? "Nothing else is steering games: Xbox Game Bar is not installed, so AMD's V-Cache placement cannot detect a game. On this PC the plan here is the only thing placing game threads."
-                    : "AMD's 3D V-Cache service was not found, so Windows is not steering games onto a cache domain. The plan here is what places them.";
+                    ? "This picker decides which cache domain stays free of device interrupts, and which one the exported Process Lasso starter rules name as the game domain. It does not place game threads. Xbox Game Bar is not installed, so AMD's V-Cache placement cannot detect a game: on the Balanced path nothing is steering games, and on TunedUltimate placement is Process Lasso's or your CPU Sets rule's job."
+                    : "This picker decides which cache domain stays free of device interrupts, and which one the exported Process Lasso starter rules name as the game domain. It does not place game threads: AMD's 3D V-Cache service was not found, so on the Balanced path nothing is steering games, and on TunedUltimate placement is Process Lasso's or your CPU Sets rule's job.";
 
         // Only meaningful on an Intel hybrid CPU; hidden everywhere else.
         HybridPolicies = new()

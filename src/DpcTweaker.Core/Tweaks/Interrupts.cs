@@ -366,15 +366,24 @@ public static class InterruptsModule
 
         // Pins the app wrote earlier for devices that are no longer in the plan (disabled, failed, removed):
         // keep a row so they can still be reverted one by one.
-        var planned = plan.Assignments.Select(a => "irq." + a.Device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        //
+        // The same rule as plannedRss below. Suppress() clears Applicable and leaves Assignments
+        // populated, so an ungated set listed every planned pin as "planned" on a path that builds
+        // none of them: each applied pin then looked planned and its leftover row vanished from the
+        // screen while the pin itself stayed live.
+        var planned = plan.Applicable
+            ? plan.Assignments.Select(a => "irq." + a.Device.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool Touched(string id) => journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0;
         foreach (string id in journal.TweakIds().Where(i => i.StartsWith("irq.", StringComparison.OrdinalIgnoreCase) && !planned.Contains(i)))
         {
+            // A record from a run that never applied, or one that was fully reverted, has nothing to
+            // put back: no row. This is the rule the rss.* loop below already used.
+            if (!Touched(id)) continue;
             string inst = id[4..];
             var dev = profile.Devices.FirstOrDefault(d => string.Equals(d.InstanceId, inst, StringComparison.OrdinalIgnoreCase));
             yield return new LeftoverAffinityTweak(id, inst, dev?.Name ?? inst, journal);
         }
-
-        bool Touched(string id) => journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0;
 
         // RSS keywords the app wrote earlier, when this path no longer builds them (Balanced, or a CPU
         // whose game cores depend on parking). Revert-only, and it covers a gap: the leftover loop above
