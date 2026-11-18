@@ -57,7 +57,11 @@ public sealed class CleanupPanelViewModel : ObservableObject
             Summary = $"{p.Services.Count(s => !s.IsPerUserInstance)} services (plus {p.Services.Count(s => s.IsPerUserInstance)} per-user instances). " +
                       $"The \"{Core.Catalog.Presets.Label(o.Cleanup)}\" preset lists {changes} below. Changes take effect at the next restart; running services keep running until then.";
             IdleNote = "Hardware the presets check: " + p.Hardware.Describe() + ". Services for hardware this PC has are never offered.";
-            foreach (var s in p.Services)
+            // A measured latency cost sorts to the top of the reference table, so the one row with a
+            // number behind it is not buried alphabetically between Microsoft and OEM services.
+            foreach (var s in p.Services
+                .OrderByDescending(s => (Catalogs.Services.Find(s.Name) ?? Catalogs.Services.Find(Catalogs.TemplateName(s.Name)))?.Group == "latency")
+                .ThenBy(s => s.DisplayName, StringComparer.CurrentCultureIgnoreCase))
             {
                 var e = Catalogs.Services.Find(s.Name) ?? Catalogs.Services.Find(Catalogs.TemplateName(s.Name));
                 string verdict = e is null

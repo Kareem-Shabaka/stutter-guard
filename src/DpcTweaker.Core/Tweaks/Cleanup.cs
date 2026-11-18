@@ -63,7 +63,13 @@ public sealed class ServiceStartTweak : TweakBase
     private readonly StartType _target;
     private readonly bool _exact;
 
-    public ServiceStartTweak(ServiceInfo svc, ServiceEntry entry, StartType target, bool exact, string group, Journal journal)
+    /// <param name="optIn">
+    /// False when the current preset does not include this service, but the row is still offered so the
+    /// user can choose it without taking the whole preset. A measured latency cost reachable only by
+    /// switching to Aggressive is effectively hidden.
+    /// </param>
+    public ServiceStartTweak(ServiceInfo svc, ServiceEntry entry, StartType target, bool exact, string group,
+        Journal journal, bool optIn = false)
         : base(new TweakInfo
         {
             Id = "svc." + svc.Name,
@@ -78,6 +84,7 @@ public sealed class ServiceStartTweak : TweakBase
             CostClass = entry.Group is "hardware" or "disk" ? TweakCost.Small : TweakCost.Free,
             Risk = group is "hardware" or "disk" or "latency" || target == StartType.Disabled && group == "optional" ? Risk.Medium : Risk.Low,
             NeedsReboot = true,
+            DefaultSelected = !optIn,
         }, journal)
     {
         _svc = svc;
@@ -280,6 +287,15 @@ public static class ServicesModule
             {
                 bool exact = exactMode;
                 string? targetText = entry.Target(preset);
+                // A service whose group is a measured latency cost is offered on every preset, unticked,
+                // rather than only inside Aggressive. Otherwise the one row with a measured number behind
+                // it is unreachable unless the user also takes WSearch, PcaSvc, WerSvc and vendor bloat.
+                bool optIn = false;
+                if (targetText is null && !exactMode && entry.Group == "latency" && entry.Aggressive is { Length: > 0 })
+                {
+                    targetText = entry.Aggressive;
+                    optIn = true;
+                }
                 bool hardwarePresent = !exact && entry.OnlyIfAbsent is not null && profile.Hardware.Has(entry.OnlyIfAbsent);
                 var target = StartTypes.Parse(targetText);
                 if (target != StartType.Unknown && !hardwarePresent)
@@ -288,7 +304,7 @@ public static class ServicesModule
                     if (differs || touched)
                     {
                         string group = exact ? "default" : entry.Group;
-                        row = new ServiceStartTweak(svc, entry, target, exact, group, journal);
+                        row = new ServiceStartTweak(svc, entry, target, exact, group, journal, optIn);
                         order = exact ? 0 : CleanupGroups.Order(entry.Group);
                     }
                 }

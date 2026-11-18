@@ -764,6 +764,50 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var order = root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Select(x => x.GetString()).ToList();
     Check("catch-all is the last affinity rule", order.Last() == "*.*" && order[^2] == "dwm.exe");
     var mk = root.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "mk12.exe");
+    // ---- #5: a measured latency cost is reachable without taking the whole Aggressive preset ----
+    Console.WriteLine("Cleanup: DPS reachable on Safe");
+    {
+        var svcEntry = Catalogs.Services.Find("DPS");
+        Check("DPS is in the latency group", svcEntry?.Group == "latency", svcEntry?.Group ?? "absent");
+        Check("DPS is Measured", svcEntry?.Evidence == "Measured", svcEntry?.Evidence ?? "");
+        Check("the Safe preset does not select DPS", svcEntry?.Target(CleanupPreset.Safe) is null);
+        Check("Aggressive does select DPS", svcEntry?.Target(CleanupPreset.Aggressive) == "Disabled");
+
+        // Build with a profile that has DPS running as Auto, on the Safe preset.
+        var profC = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Pro"),
+            CpuName = "AMD Ryzen 9 9950X3D", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 8).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+                new[] { (0x0000FFFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+            Services = new List<ServiceInfo>
+            {
+                new() { Name = "DPS", DisplayName = "Diagnostic Policy Service", Description = "d",
+                        Start = StartType.Auto, State = "Running", IsWindowsBinary = true },
+            },
+        };
+        var jC = new Journal(Path.Combine(Path.GetTempPath(), "sg-dps-" + Guid.NewGuid().ToString("N") + ".json"));
+
+        var safeRows = ServicesModule.Build(profC, jC, new AppOptions { Cleanup = CleanupPreset.Safe }).ToList();
+        var dpsSafe = safeRows.SingleOrDefault(r => r.Info.Id == "svc.DPS");
+        Check("Safe still offers the DPS row", dpsSafe is not null, safeRows.Count.ToString());
+        Check("Safe does not tick it for the user", dpsSafe?.Info.DefaultSelected == false, dpsSafe?.Info.DefaultSelected.ToString() ?? "absent");
+        Check("the row sits under the measured-latency heading",
+            dpsSafe?.Info.Group == "Latency (measured)", dpsSafe?.Info.Group ?? "");
+
+        var aggRows = ServicesModule.Build(profC, jC, new AppOptions { Cleanup = CleanupPreset.Aggressive }).ToList();
+        var dpsAgg = aggRows.SingleOrDefault(r => r.Info.Id == "svc.DPS");
+        Check("Aggressive ticks it, as before", dpsAgg?.Info.DefaultSelected == true, dpsAgg?.Info.DefaultSelected.ToString() ?? "absent");
+        Check("Aggressive does not duplicate the row", aggRows.Count(r => r.Info.Id == "svc.DPS") == 1);
+
+        // Windows-default mode must not offer it at all: that mode only restores Windows' own values,
+        // and DPS is a service the user may never have changed.
+        var wdRows = ServicesModule.Build(profC, jC, new AppOptions { Cleanup = CleanupPreset.WindowsDefault }).ToList();
+        Check("Windows-default mode does not add an opt-in row for DPS",
+            wdRows.Count(r => r.Info.Id == "svc.DPS") <= 1);
+    }
     // ---- #2/#4 regression: the leftover sweep must not duplicate a row that IS still planned ----
     Console.WriteLine("Power leftovers: no duplicate, right section");
     {
