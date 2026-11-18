@@ -5124,6 +5124,43 @@ Console.WriteLine("Options: a null or re-read preset map cannot take a tab down"
     Check("a With() copy still matches a tab name whatever its case",
         copy.PresetFor("Interrupts") == TweakPreset.Costly, copy.PresetFor("Interrupts").ToString());
 }
+Console.WriteLine("Continuity: the new power rows are undone by the generated script");
+{
+    // undo-all.ps1 is built from the journal, not from the catalogue, so this is also the proof that a
+    // leftover row - a tweak id the current build no longer offers - is still undone by the script.
+    string dir = Path.Combine(Path.GetTempPath(), "dpc-undo-new-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    var j = new Journal(Path.Combine(dir, "journal.json"));
+    var plan = Guid.NewGuid();
+    var proc = new Guid("54533251-82be-4824-96c1-47b60b740d00");
+    var overlaySub = new Guid("c763b4ec-0e50-4b6b-9bed-2b92a6ee884e");
+    var rows = new (string Id, Guid Sub, string Setting, string Value)[]
+    {
+        ("power.cpu.core-parking-class1", proc, "0cc5b647-c1df-4637-891a-dec35c318584", "50"),
+        ("power.cpu.min-state-class1", proc, "893dee8e-2bef-41e0-89c6-b55d0929964d", "40"),
+        ("power.cpu.epp-class1", proc, "36687f9e-e3a5-4dbf-b1dc-15eb381c6864", "100"),
+        ("power.cpu.epp-latency-class1", proc, "4b70f900-cdd9-4e66-aa26-ae8417f98174", "80"),
+        ("power.cpu.boost-policy", proc, "45bcc044-d885-43e2-8605-ee0ec6e96b59", "60"),
+        ("power.cpu.amd-overlay", overlaySub, "7ec1751b-60ed-4588-afb5-9819d3d77d90", "1"),
+    };
+    foreach (var r in rows)
+    {
+        j.RecordOriginal(r.Id, "power", JournalRestorer.PowerTarget(plan, r.Sub, new Guid(r.Setting), false), true, null, r.Value);
+        j.MarkApplied(r.Id);
+    }
+    j.Save();
+
+    string undo = JournalRestorer.BuildUndoScript(j);
+    foreach (var r in rows)
+    {
+        Check($"{r.Id} is undone by powercfg", undo.Contains($"powercfg /setacvalueindex {plan} {r.Sub} {r.Setting} {r.Value}"), undo);
+        Check($"{r.Id} is named in the script so it can be undone by hand", undo.Contains("# " + r.Id));
+        Check($"{r.Id} kept one restorable entry", j.OriginalsFor(r.Id).Count == 1, j.OriginalsFor(r.Id).Count.ToString());
+    }
+    Check("every journal power target parses back to four parts",
+        j.OriginalsFor("power.cpu.amd-overlay").Single().Target.Split('|').Length == 4);
+    try { Directory.Delete(dir, true); } catch { }
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>
