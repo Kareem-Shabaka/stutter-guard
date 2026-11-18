@@ -157,8 +157,12 @@ public sealed class HomePageViewModel : PageViewModel
             int ok = results.Count(r => r.Ok);
             var failed = results.Where(r => !r.Ok).ToList();
             DriftMessage = $"Re-applied {ok} of {results.Count}." +
-                           (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "");
+                           (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "") +
+                           (engine.LastFinishErrors.Count > 0 ? " " + string.Join(" ", engine.LastFinishErrors) : "");
             if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
+            // A failed follow-up (the adapter restart behind a NIC property) is a change that is on disk
+            // and not in effect: exactly the case the restart banner exists for.
+            if (engine.LastFinishErrors.Count > 0) _main.ForceRestartNeeded();
             await _main.RefreshAllAsync();
             RefreshDrift();
             RefreshMpo();
@@ -805,6 +809,12 @@ public class ModulePageViewModel : PageViewModel
     public RelayCommand SetPresetCommand { get; }
 
     /// <summary>
+    /// The rows a preset switch on this tab may act on: this tab's own. Internal so the self-test can
+    /// assert the scope without pressing the button, which would apply and revert real tweaks.
+    /// </summary>
+    internal IReadOnlyList<TweakRowViewModel> PresetRows() => Rows.ToList();
+
+    /// <summary>
     /// Makes the machine match the chosen preset: applies what the preset includes and is still needed,
     /// and puts back what it leaves out. A preset is therefore a declared desired state, which is what lets
     /// a user go from Everything back to Safe and actually undo the costly tweaks.
@@ -827,9 +837,12 @@ public class ModulePageViewModel : PageViewModel
         OnPropertyChanged(nameof(ScopeSentence));
         _main.ReloadPages(carryTicks: false);
 
-        // The plan is computed across every module page, because a preset spans all of them.
-        var modules = _main.Pages.OfType<ModulePageViewModel>().ToList();
-        var rows = modules.SelectMany(m => m.Rows).ToList();
+        // This tab's rows only. A tier belongs to one tab - ScopeSentence above says so, and the rail
+        // shows each tab's own - so the old sweep over every page's rows made "Use this preset" on
+        // Network plan reverts for GPU, Power, Interrupts and Background, undoing costly tweaks on
+        // tabs the user never touched. Background is safe to read here: its Load() fills Rows with all
+        // three of its own sections (startup tasks, services, scheduled tasks) and nothing else.
+        var rows = PresetRows().ToList();
         var facts = rows
             .Select(r => new RowFacts(r.Info.Id, r.Title, r.IsSelected, r.IsApplicable,
                 r.Info.DefaultSelected, r.Info.CostClass, r.Info.Evidence, r.Status))
@@ -1099,7 +1112,7 @@ public sealed class PowerOptionsViewModel : ObservableObject
             new(PlanTargetKind.Balanced, "Let Windows place games",
                 "Keeps Windows core parking, which AMD's 3D V-Cache driver and Intel Thread Director use to put a game on the right cores. " +
                 "Needs Xbox Game Bar, and Game Bar misses some games. " +
-                "Note this works against the app's interrupt plan, which assumes those cores stay free. The CPU is left stock; only device power settings change."),
+                "Device interrupts are left to Windows on this path too, because Windows can park the cores the interrupt plan would pin them to. The CPU is left stock; only device power settings change."),
             new(PlanTargetKind.CurrentActive, "Tune whichever plan is active now",
                 "For laptops: tune the plan your vendor tool switches to in performance mode, so you don't end up with two plans fighting each other."),
         };
@@ -1344,8 +1357,10 @@ public sealed class SafetyPageViewModel : PageViewModel
             int ok = results.Count(r => r.Ok);
             var failed = results.Where(r => !r.Ok).ToList();
             Message = $"Re-applied {ok} of {results.Count}." +
-                      (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "");
+                      (failed.Count > 0 ? " Failed: " + string.Join("; ", failed.Select(f => $"{f.Tweak.Info.Title}: {f.Error}")) : "") +
+                      (e.LastFinishErrors.Count > 0 ? " " + string.Join(" ", e.LastFinishErrors) : "");
             if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) _main.ForceRestartNeeded();
+            if (e.LastFinishErrors.Count > 0) _main.ForceRestartNeeded();
             await _main.RefreshAllAsync();
         }
         catch (Exception ex)

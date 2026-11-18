@@ -60,9 +60,38 @@ public sealed class AppOptions
     /// </summary>
     public Dictionary<string, TweakPreset> Presets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The tier for one tab: its own choice, else the global default.</summary>
-    public TweakPreset PresetFor(string module) =>
-        Presets.TryGetValue(module, out var p) ? p : Preset;
+    /// <summary>The page that owns the startup / services / scheduled-task sections.</summary>
+    public const string BackgroundModule = "Background";
+
+    /// <summary>
+    /// The three section module names the Background page owns. They keep their own names so the
+    /// journal, undo-all.ps1 and every tweak id stay exactly as they were.
+    /// </summary>
+    private static readonly HashSet<string> BackgroundSections = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Boot tasks", "Services", "Tasks",
+    };
+
+    /// <summary>
+    /// The tier for one tab: its own choice, else the global default.
+    /// <para>
+    /// The tab a tier belongs to is not always the module a row belongs to. Background is one page with
+    /// three sections whose rows carry "Boot tasks", "Services" and "Tasks" (so ids and undo-all.ps1
+    /// keep working); the tier is chosen on the page, so a section with no entry of its own reads the
+    /// Background entry. Without this every section fell back to the global default on the next reload
+    /// and silently overwrote the tier the user had picked for the tab.
+    /// </para>
+    /// </summary>
+    public TweakPreset PresetFor(string module)
+    {
+        // Presets can be null in a hand-edited or older file ("Presets": null deserializes to null),
+        // and a getter that throws would take the whole Power/Background tab down with it.
+        var map = Presets;
+        if (map is null) return Preset;
+        if (map.TryGetValue(module, out var own)) return own;
+        if (BackgroundSections.Contains(module) && map.TryGetValue(BackgroundModule, out var bg)) return bg;
+        return Preset;
+    }
 
     /// <summary>Records a tab's own tier. A no-op copy is avoided so With() stays cheap.</summary>
     public void SetPresetFor(string module, TweakPreset value)
@@ -116,8 +145,27 @@ public sealed class AppOptions
     public AppOptions With(Action<AppOptions> change)
     {
         var copy = JsonSerializer.Deserialize<AppOptions>(JsonSerializer.Serialize(this, Json), Json)!;
+        copy.NormalizePresets();
         change(copy);
         return copy;
+    }
+
+    /// <summary>
+    /// A JSON round trip - which both <see cref="With"/> and <see cref="Load"/> do - rebuilds
+    /// <see cref="Presets"/> with the default, case-sensitive comparer. Every caller then compares tab
+    /// names the way the rail spells them, so a name stored in another case would create a second entry
+    /// and read as the global tier. Re-normalising makes "interrupts" and "Interrupts" one tab again.
+    /// A null map (a hand-edited or older file) becomes an empty one, so no getter can throw.
+    /// </summary>
+    public void NormalizePresets()
+    {
+        if (Presets is null)
+        {
+            Presets = new(StringComparer.OrdinalIgnoreCase);
+            return;
+        }
+        if (Presets.Comparer.Equals(StringComparer.OrdinalIgnoreCase) || Presets.Comparer.Equals(StringComparer.InvariantCultureIgnoreCase)) return;
+        Presets = new Dictionary<string, TweakPreset>(Presets, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>The preset defaults from the spec's preset matrix.</summary>
@@ -166,6 +214,7 @@ public sealed class AppOptions
             try
             {
                 var o = JsonSerializer.Deserialize<AppOptions>(s, Json);
+                if (o is not null) o.NormalizePresets();
                 if (o is not null && o.UserChosen) return o;
                 if (o is not null) return DefaultsFor(p);
             }
@@ -178,6 +227,7 @@ public sealed class AppOptions
                 var legacy = JsonSerializer.Deserialize<AppOptions>(s, JsonLegacy);
                 if (legacy is not null)
                 {
+                    legacy.NormalizePresets();
                     Log.Info("Options migrated from numeric enums to names.");
                     if (legacy.UserChosen)
                     {
