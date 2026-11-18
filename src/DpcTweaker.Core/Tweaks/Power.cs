@@ -20,7 +20,18 @@ public sealed record PowerSettingDef(
     TweakCost CostClass,
     bool InFull,
     bool InDevicesOnly,
-    bool DesktopOnly = false);
+    bool DesktopOnly = false,
+    /// <summary>
+    /// Only exists on a CPU that reports a PPM efficiency class above 0 (an Intel hybrid part). Windows
+    /// keeps a separate copy of a class-scoped processor setting per class, so the class-0 row cannot
+    /// reach the E-cores this app deliberately sends network and audio interrupts to.
+    /// </summary>
+    bool ClassOne = false,
+    /// <summary>
+    /// A vendor overlay setting: built only when this machine's target (or active) plan actually carries
+    /// the GUID. On anything but an AMD machine with the chipset driver installed it never does.
+    /// </summary>
+    bool AmdOverlay = false);
 
 /// <summary>The power settings of the desktop's tuned Ultimate plan (all verified by tweak-audit.ps1 on SHABAKA-B4).</summary>
 public static class PowerSettings
@@ -33,6 +44,12 @@ public static class PowerSettings
     public static readonly Guid Wireless = new("19cbb8fa-5279-450e-9fac-8a3d5fedd0c1");
     public static readonly Guid IoCoalescing = new("2e601130-5351-4d9d-8e04-252966bad054");
     public static readonly Guid Steering = new("48672f38-7a9a-4bb2-8bf8-3d85be19de4e");
+
+    /// <summary>CPMINCORES: minimum unparked cores, PPM class 0. The same GUID the parking row writes.</summary>
+    public static readonly Guid CoreParkingAc = new("0cc5b647-c1df-4637-891a-dec35c318583");
+
+    /// <summary>CPMINCORES1: the class-1 copy, which is the E-core class on an Intel hybrid part.</summary>
+    public static readonly Guid CoreParkingAcClass1 = new("0cc5b647-c1df-4637-891a-dec35c318584");
 
     private static string Num(uint v) => v.ToString(CultureInfo.InvariantCulture);
     private static string Pct(uint v) => v + "%";
@@ -109,6 +126,40 @@ public static class PowerSettings
             "How often Windows' power manager re-evaluates CPU performance (stock 15 ms).",
             "Fewer power-manager DPCs (PpmCheck ran 37-90 us each in the desktop's traces). The long interval is only safe because this same plan pins every core unparked: the interval governs the parking decision too, so with parking left active it would defer that decision by up to five seconds. On the Balanced path the target stays at the stock 15 ms for exactly that reason.",
             "None measured.", Evidence.Measured, TweakCost.Small, true, false),
+        // ---- efficiency class 1: the E-core class on an Intel hybrid part ----
+        // Four of the class-scoped processor settings have a class-1 twin with its own GUID. Emitting
+        // them only when the CPU reports a class above 0 keeps a Ryzen screen exactly as it was: on a
+        // 9950X3D every logical processor reports class 0, so none of these rows exist there.
+        new("cpu.core-parking-class1", "Core parking: minimum unparked cores (efficiency class 1)", Proc, new("0cc5b647-c1df-4637-891a-dec35c318584"),
+            _ => 100, Pct,
+            "The class-1 copy of the core-parking row: keeps every core of PPM class 1 unparked.",
+            "A parked core has to be woken before it can take its first interrupt. The class-0 row cannot keep an E-core awake, and on an Intel hybrid CPU class 1 is the E-core class - the class this app deliberately moves NIC and audio interrupts onto. Documented behaviour of the class-scoped processor settings; not separately A/B measured on this project.",
+            "More idle power, as with the class-0 row.", Evidence.Documented, TweakCost.Small, true, false, ClassOne: true),
+        new("cpu.min-state-class1", "Minimum processor state (efficiency class 1)", Proc, new("893dee8e-2bef-41e0-89c6-b55d0929964d"),
+            _ => 100, Pct,
+            "Sets a clock floor for PPM class 1, which is the E-core class on an Intel hybrid CPU.",
+            "Same reasoning as the class-0 row, applied to the class the devices were moved to: no ramp-up delay on the cores that take their interrupts.", "More idle power and heat.", Evidence.Documented, TweakCost.Small, true, false, ClassOne: true),
+        new("cpu.epp-class1", "Energy performance preference (efficiency class 1)", Proc, new("36687f9e-e3a5-4dbf-b1dc-15eb381c6864"),
+            _ => 0, Pct,
+            "The class-1 copy of EPP.",
+            "With the recommended hybrid policy this app puts NIC and audio interrupts on E-cores, so that class needs the performance-first hint too; class 0 alone leaves them asking for power savings. Documented; not separately A/B measured.", "More power at light load.", Evidence.Documented, TweakCost.Small, true, false, ClassOne: true),
+        new("cpu.epp-latency-class1", "Latency-sensitivity hint EPP (efficiency class 1)", Proc, new("4b70f900-cdd9-4e66-aa26-ae8417f98174"),
+            _ => 0, Pct,
+            "The class-1 copy of the latency-sensitivity EPP hint.",
+            "Insurance, as with the class-0 row: moot once EPP for that class is 0.", "None beyond EPP 0.", Evidence.Documented, TweakCost.Free, true, false, ClassOne: true),
+
+        // ---- the boost ceiling, and the AMD overlay's slider ----
+        new("cpu.boost-policy", "Processor performance boost policy", Proc, new("45bcc044-d885-43e2-8605-ee0ec6e96b59"),
+            _ => 100, Pct,
+            "PERFBOOSTPOL: the ceiling the boost mode above works inside. 100 means no ceiling.",
+            "The companion to boost mode, and the reason the pair is here: stock Balanced sets this ceiling to 60%, so a core can ask for Aggressive boost and still be held to 60% of it. Microsoft documents the policy as the upper bound on boost. Included because the stock plan contradicts the row above, not because a number was reproduced.",
+            "More power and heat under sustained boost.", Evidence.Documented, TweakCost.Free, true, false),
+        new("cpu.amd-overlay", "AMD power slider: best performance", new("c763b4ec-0e50-4b6b-9bed-2b92a6ee884e"), new("7ec1751b-60ed-4588-afb5-9819d3d77d90"),
+            _ => 3, Names("Battery saver", "Better battery", "Better performance", "Best performance"),
+            "The slider AMD's chipset overlay adds to the Balanced plan. Windows' power slider and this overlay use the same 0-3 scale, and 3 is the performance end.",
+            "A stock Balanced plan leaves this below the performance end, which is a power-saving hint sitting on the same plan the rest of this screen has just stopped using. Documented from the vendor overlay's presence on the plan; not A/B measured here.",
+            "Higher idle power, and on a laptop it applies on battery as well when that option is on.", Evidence.Documented, TweakCost.Small, true, false, AmdOverlay: true),
+
         new("pcie.aspm", "PCI Express link state power management", Pcie, new("ee12f906-d277-404b-b6da-e5fa1a576df5"),
             _ => 0, Names("Off", "Moderate power savings", "Maximum power savings"),
             "Keeps PCIe links out of their sleep states (OS-controlled ASPM).",
@@ -350,6 +401,25 @@ public static class PowerModule
             "revert to what it was before the app",
             Note: "Not applied on the Balanced path. Tick it and press Revert selected to put the value back.");
     }
+    /// <summary>
+    /// True when the plan this path targets carries the setting at all. A vendor overlay is only
+    /// present where the vendor's driver put it, so this is answered by reading the GUID rather than
+    /// assumed from the CPU name; a plan that does not exist yet falls back to the active one.
+    /// </summary>
+    private static bool PlanExposes(PowerPlanTarget target, PowerSettingDef d)
+    {
+        try
+        {
+            var plan = target.Resolve() ?? PowerApi.GetActive();
+            return plan is not null && PowerApi.ReadAc(plan.Value, d.Sub, d.Setting) is not null;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Couldn't read {d.Key} on the target plan: {ex.Message}");
+            return false;
+        }
+    }
+
     public static IEnumerable<ITweak> Build(SystemProfile profile, Journal journal, Func<AppOptions> options)
     {
         var target = new PowerPlanTarget(journal, options);
@@ -375,6 +445,11 @@ public static class PowerModule
         }, journal, target);
 
         var o = options();
+        // One question, asked once: does this CPU report any PPM efficiency class above 0? False on
+        // every Ryzen (all 32 logical processors are class 0 on the reference 9950X3D), true on an
+        // Intel hybrid part, where the recommended device policy moves NIC and audio to the E-cores.
+        bool hasEfficiencyClasses = profile.Cpu.Cpus.Any(c => c.EfficiencyClass > 0);
+        bool amdVendor = profile.CpuVendor.Contains("AMD", StringComparison.OrdinalIgnoreCase);
         foreach (var d in PowerSettings.All)
         {
             bool inProfile = o.PowerProfile == PowerProfileKind.Full ? d.InFull : d.InDevicesOnly;
@@ -385,6 +460,11 @@ public static class PowerModule
             // mutates a plan the app does not own and does not intend to tune on that path.
             if (d.Sub == PowerSettings.Proc && o.PlanTarget == PlanTargetKind.Balanced) continue;
             if (d.DesktopOnly && profile.IsLaptop) continue;
+            // A class-1 row on a CPU with no class 1 would be a switch the platform has no use for.
+            if (d.ClassOne && !hasEfficiencyClasses) continue;
+            // The vendor overlay is only offered where the plan really carries it. The vendor test comes
+            // first so an Intel machine never reads a GUID that cannot be there.
+            if (d.AmdOverlay && !(amdVendor && PlanExposes(target, d))) continue;
             plannedPower.Add("power." + d.Key);
 
             yield return new PowerSettingTweak(new TweakInfo
