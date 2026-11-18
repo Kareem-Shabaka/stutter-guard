@@ -75,8 +75,22 @@ public sealed class Assignment
 
 public sealed class AffinityPlan
 {
-    public bool Applicable { get; init; } = true;
-    public string? NotApplicableReason { get; init; }
+    public bool Applicable { get; internal set; } = true;
+    public string? NotApplicableReason { get; internal set; }
+
+    /// <summary>
+    /// Turns placement off for a path that cannot support it, with the reason shown in place of the plan.
+    /// <para>
+    /// Used by the Balanced path, and by any path that leaves core parking active on a CPU whose game
+    /// cores depend on it: pinning a device to a core Windows may park means every interrupt pays a
+    /// wake-up first, which is worse than not pinning at all.
+    /// </para>
+    /// </summary>
+    internal void Suppress(string reason)
+    {
+        Applicable = false;
+        NotApplicableReason = reason;
+    }
     public List<int> ReservedCpus { get; init; } = new();
     public string ReservedReason { get; init; } = "";
     /// <summary>
@@ -227,8 +241,14 @@ public static class AffinityPlanner
             // spare P-core, and dropping the rule there would put every device on the LP-E island.
             reserved = new HashSet<int> { core0.Id };
             free = cores.Where(c => c.Id != core0.Id && !(l3Backed && c.L3 < 0)).ToList();
-            reason = "Only CPU 0/1: this CPU has too few cores to keep game cores free as well.";
-            notes.Add("Few cores: only CPU 0 and its sibling are kept free of devices.");
+            reason = core0.Threads.Count > 1
+                ? "Only CPU 0/1: this CPU has too few cores to keep game cores free as well."
+                : "Only CPU 0: this CPU has too few cores to keep game cores free as well.";
+            // "its sibling" only exists when SMT does. On a no-SMT part the reservation is CPU 0 alone,
+            // and the note has to match what was actually reserved.
+            notes.Add(core0.Threads.Count > 1
+                ? "Few cores: only CPU 0 and its sibling are kept free of devices."
+                : "Few cores: only CPU 0 is kept free of devices.");
 
             if (free.Count == 0 && l3Backed && l3Less.Count > 0)
             {
@@ -536,7 +556,16 @@ public static class AffinityPlanner
         last--;
         if (last < rss.BaseProcNumber) return null;
 
-        return rss with { MaxProcNumber = last, NumProcessors = last - rss.BaseProcNumber + 1 };
+        // ThreadsPerCore must shrink with the span or the plan becomes internally impossible:
+        // clamping a 2-core/4-LP plan to one LP used to leave NumProcessors=1 with ThreadsPerCore=2,
+        // which Describe() rendered as "one logical processor ... 2 thread(s) per core".
+        int num = last - rss.BaseProcNumber + 1;
+        return rss with
+        {
+            MaxProcNumber = last,
+            NumProcessors = num,
+            ThreadsPerCore = Math.Max(1, Math.Min(rss.ThreadsPerCore, num)),
+        };
     }
 
     internal static RssPlan? RssFor(Want w, int[] cpus, List<PhysCore> cores)

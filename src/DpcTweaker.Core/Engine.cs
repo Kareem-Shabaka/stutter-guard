@@ -85,8 +85,27 @@ public sealed class TweakEngine
 
         Bench = BenchResult.Load(Journal);
         Plan = AffinityPlanner.Plan(Profile.Cpu, Profile.CpuSets, Bench, Profile.Devices, Options.KeepValidPins, Options.HybridDevices);
-        if (Plan.Applicable && Profile.ParkingDependentCpu && Options.PlanTarget == PlanTargetKind.Balanced)
-            Plan.Notes.Add("With Windows parking (Balanced), the device cores can sleep deeply while a game runs on the other cores, so each interrupt pays a wake-up first. The Tuned Ultimate plan (light C-states) avoids that.");
+        // Placement needs cores that will not park under the device. Two paths cannot promise that, so
+        // they do not build pins at all rather than pinning and warning:
+        //   Balanced                          - Windows keeps core placement, including parking.
+        //   parking still active on a CPU     - CurrentActive + DevicesOnly leaves CPMINCORES stock, and
+        //   that needs parking held off         on a dual-CCD or hybrid CPU the pinned core can sleep.
+        // Exception by design: a path where nothing depends on parking (single-CCD AMD, classic Intel,
+        // no P/E split) applies normally, because there is no cross-domain placement to protect.
+        if (Plan.Applicable)
+        {
+            bool balanced = Options.PlanTarget == PlanTargetKind.Balanced;
+            bool parkingActive = Profile.ParkingDependentCpu && !PowerSettings.ParkingHeldOff(Options);
+            if (balanced)
+                Plan.Suppress("The Balanced path leaves core placement to Windows, which can park the cores " +
+                              "this app would pin devices to. Device interrupts are not placed on this path: choose " +
+                              "the TunedUltimate plan to place them, which keeps every core unparked.");
+            else if (parkingActive)
+                Plan.Suppress("Windows core parking is still active on this path, so a core a device is pinned to " +
+                              "could park and every interrupt would pay a wake-up first. Device interrupts are not " +
+                              "placed here: use the TunedUltimate plan (cores unparked), or the Balanced path and let " +
+                              "Windows place them.");
+        }
         list.AddRange(InterruptsModule.Build(Profile, Journal, Options, Plan));
         list.AddRange(NetworkModule.Build(Profile, Journal));
         list.AddRange(ServicesModule.Build(Profile, Journal, Options));

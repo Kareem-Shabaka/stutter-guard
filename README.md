@@ -204,7 +204,10 @@ Boot into Safe Mode and run `%ProgramData%\Stutter Guard\undo-all.ps1`. It resto
 originals with no app and no installer. It is regenerated on every change, so it is never out of date.
 
 **Do I need Process Lasso?**
-No. It is one of two ways to enforce placement, and the app works without it.
+Not for device placement - device interrupts are placed by this app. On the **TunedUltimate** path
+Windows core parking is off, so Windows also stops moving game processes between CCDs; something has to
+place them (Process Lasso, or your own CPU Sets rule), and this app does not do that. On the **Balanced**
+path Windows keeps placing games and nothing else is required.
 
 **Does it phone home?**
 Never on its own. The hardware report and feedback are off until you press the button, and both show

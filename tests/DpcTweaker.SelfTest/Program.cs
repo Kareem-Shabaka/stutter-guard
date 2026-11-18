@@ -3975,7 +3975,42 @@ Console.WriteLine("Wave 10: 28-CPU architecture simulation matrix");
             AffinityPlan noL3Plan = AffinityPlanner.Plan(noL3, Sets(noL3, _ => 0), null, devs);
             Check("no-L3 CPU: the planner does not throw and reports why", noL3Plan is not null);
             Check("no-L3 CPU: no Process Lasso split is invented", LassoRules.SplitFor(prof, noL3Plan!) is null);
-            Check("no-L3 CPU: the CCD picker has nothing to offer",
+            // ---- #3a: Clamp must not produce an internally impossible RssPlan ----
+    Console.WriteLine("AffinityPlanner.Clamp consistency");
+    {
+        // A kept 2-core pin {20,22} cannot express a 4-LP span; clamping used to leave
+        // NumProcessors=1 with ThreadsPerCore=2, which Describe() rendered as nonsense.
+        var wanted = new RssPlan(20, 23, 4, 2);
+        var clamped = AffinityPlanner.Clamp(wanted, new[] { 20, 22 });
+        Check("Clamp narrows to one processor", clamped is { NumProcessors: 1, MaxProcNumber: 20 },
+            clamped?.Describe() ?? "null");
+        Check("Clamp keeps ThreadsPerCore consistent with the span",
+            clamped is { ThreadsPerCore: 1 }, clamped?.Describe() ?? "null");
+        Check("Clamp leaves a fitting plan untouched",
+            AffinityPlanner.Clamp(wanted, new[] { 20, 21, 22, 23 }) is { NumProcessors: 4, ThreadsPerCore: 2 });
+    }
+
+    // ---- #2: the Balanced path builds no pins, and the plan says why ----
+    Console.WriteLine("Balanced path: no device placement");
+    {
+        var topoB = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+            new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) });
+        Journal jB = null!;
+        TweakEngine engine = null!;
+        // The gate itself is pure: assert the predicate the engine uses, plus that Suppress works.
+        var planB = AffinityPlanner.Plan(topoB, Sets(topoB, _ => 0), null, DesktopDevices());
+        Check("an applicable plan starts applicable", planB.Applicable);
+        planB.Suppress("test reason");
+        Check("Suppress turns placement off", !planB.Applicable);
+        Check("Suppress carries its reason", planB.NotApplicableReason == "test reason");
+        Check("ParkingHeldOff is false on Balanced", !PowerSettings.ParkingHeldOff(new AppOptions { PlanTarget = PlanTargetKind.Balanced }));
+        Check("ParkingHeldOff is true on TunedUltimate + Full",
+            PowerSettings.ParkingHeldOff(new AppOptions { PlanTarget = PlanTargetKind.TunedUltimate, PowerProfile = PowerProfileKind.Full }));
+        Check("ParkingHeldOff is false on TunedUltimate + DevicesOnly",
+            !PowerSettings.ParkingHeldOff(new AppOptions { PlanTarget = PlanTargetKind.TunedUltimate, PowerProfile = PowerProfileKind.DevicesOnly }));
+        _ = jB; _ = engine;
+    }
+    Check("no-L3 CPU: the CCD picker has nothing to offer",
                 !(LassoRules.SplitFor(prof, noL3Plan!, 0) is not null));
         }
 

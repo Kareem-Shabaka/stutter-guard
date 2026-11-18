@@ -318,6 +318,21 @@ public sealed class LeftoverAffinityTweak : TweakBase
 
 public static class InterruptsModule
 {
+    /// <summary>Live read of an adapter's RSS keywords, for a revert-only leftover row.</summary>
+    private static Probe RssLeftoverProbe(PciDevice? d)
+    {
+        if (d?.ClassKey is not { } key)
+            return new Probe(true, "applied earlier", "revert to what it was before the app",
+                Note: "The adapter is no longer present. Revert still restores the recorded keywords.");
+        string? base0 = RegistryOps.ReadString(key, "*RssBaseProcNumber");
+        string? max = RegistryOps.ReadString(key, "*RssMaxProcNumber");
+        string? num = RegistryOps.ReadString(key, "*MaxRssProcessors");
+        string cur = base0 is null && max is null
+            ? "(keywords not set)"
+            : $"processors {base0}-{max}, {num} processor(s)";
+        return new Probe(true, cur, "revert to what it was before the app",
+            Note: "Not in the current plan. Tick it and press Revert selected (or use the Revert button) to put the keywords back.");
+    }
     public static IEnumerable<ITweak> Build(SystemProfile profile, Journal journal, AppOptions options, AffinityPlan plan)
     {
         if (plan.Applicable)
@@ -341,6 +356,28 @@ public static class InterruptsModule
         }
 
         bool Touched(string id) => journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0;
+
+        // RSS keywords the app wrote earlier, when this path no longer builds them (Balanced, or a CPU
+        // whose game cores depend on parking). Revert-only, and it covers a gap: the leftover loop above
+        // handled "irq." only, so an applied rss.* row vanished from the list with its value still live.
+        var plannedRss = plan.Applicable
+            ? plan.Assignments.Where(a => a.Role == DeviceRole.Network && a.Device.ClassKey is not null && a.Device.RssCapable)
+                              .Select(a => "rss." + (a.Device.NetCfgInstanceId ?? a.Device.InstanceId))
+                              .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string id in journal.TweakIds().Where(i => i.StartsWith("rss.", StringComparison.OrdinalIgnoreCase) && !plannedRss.Contains(i)))
+        {
+            if (!Touched(id)) continue;
+            string suffix = id[4..];
+            var dev = profile.Devices.FirstOrDefault(d =>
+                string.Equals(d.NetCfgInstanceId, suffix, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(d.InstanceId, suffix, StringComparison.OrdinalIgnoreCase));
+            yield return new LeftoverTweak(
+                LeftoverTweak.MakeInfo(id, AffinityTweak.ModuleName,
+                    $"{dev?.Name ?? suffix}: receive queues set earlier, no longer planned",
+                    "The app set this adapter's RSS keywords earlier. This path does not place device interrupts, so the row is here to put the keywords back."),
+                journal, () => RssLeftoverProbe(dev));
+        }
         // A device the app switched to MSI keeps its row even if it stopped working: that's when the row matters most.
         foreach (var d in profile.Devices.Where(d => d.SupportsMsi && (d.Started && d.Problem == 0 || Touched("msi." + d.InstanceId)))
                      .OrderBy(d => MsiTweak.IsSafeClass(d) ? 0 : 1).ThenBy(d => d.Name))

@@ -313,9 +313,41 @@ public static class PowerModule
     /// <summary>The row that owns the tuning plan's lifetime; created plans are journaled under it.</summary>
     public const string PlanActiveId = "power.active";
 
+    /// <summary>Live read of a CPU power setting that this path no longer applies.</summary>
+    private static Probe PowerLeftoverProbe(PowerPlanTarget target, PowerSettingDef? def)
+    {
+        var plan = target.Resolve();
+        if (def is null || plan is null)
+            return new Probe(true, "applied earlier", "revert to what it was before the app",
+                Note: "This path no longer applies it. Revert restores the recorded value.");
+        uint? ac = PowerApi.ReadAc(plan.Value, def.Sub, def.Setting);
+        return new Probe(true,
+            ac is null ? "(not on this PC)" : def.Format(ac.Value),
+            "revert to what it was before the app",
+            Note: "Not applied on the Balanced path. Tick it and press Revert selected to put the value back.");
+    }
     public static IEnumerable<ITweak> Build(SystemProfile profile, Journal journal, Func<AppOptions> options)
     {
         var target = new PowerPlanTarget(journal, options);
+
+        // The Balanced path no longer writes the CPU settings (see the loop below). Anything an earlier
+        // build applied there is still live on Windows' plan, so it keeps a revert-only row: the value is
+        // real, and losing the row would lose the only per-setting way back.
+        if (options().PlanTarget == PlanTargetKind.Balanced)
+        {
+            foreach (string id in journal.TweakIds().Where(i => i.StartsWith("power.cpu.", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!(journal.IsApplied(id) || journal.OriginalsFor(id).Count > 0)) continue;
+                string key = id["power.".Length..];
+                var def = PowerSettings.All.FirstOrDefault(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
+                yield return new LeftoverTweak(
+                    LeftoverTweak.MakeInfo(id, "Power",
+                        (def?.Title ?? key) + ": set earlier on the Balanced path",
+                        "An earlier version wrote this CPU setting on the Balanced path. It is still on this PC. " +
+                        "Revert puts back the value it had before the app; the Balanced path no longer applies it."),
+                    journal, () => PowerLeftoverProbe(target, def));
+            }
+        }
 
         yield return new PlanActiveTweak(new TweakInfo
         {
@@ -336,6 +368,11 @@ public static class PowerModule
         {
             bool inProfile = o.PowerProfile == PowerProfileKind.Full ? d.InFull : d.InDevicesOnly;
             if (!inProfile) continue;
+
+            // The row above tells the user the Balanced path applies none of these CPU settings. Until now
+            // that was prose: Balanced + Full wrote them into Windows' shared Balanced plan anyway, which
+            // mutates a plan the app does not own and does not intend to tune on that path.
+            if (d.Sub == PowerSettings.Proc && o.PlanTarget == PlanTargetKind.Balanced) continue;
             if (d.DesktopOnly && profile.IsLaptop) continue;
 
             yield return new PowerSettingTweak(new TweakInfo
