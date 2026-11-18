@@ -227,6 +227,14 @@ public sealed class TaskDisableTweak : TweakBase
                 ?? throw new InvalidOperationException("The task no longer exists.");
         ctx.Journal.RecordOriginal(Info.Id, "task-enabled", _path, true, null, t.Enabled ? "1" : "0");
         TaskSched.SetEnabled(_path, false);
+        // Read it back, as every other tweak that writes does. schtasks /Change can report success and
+        // leave a task enabled - a policy-managed task, or one answered from a cached store - and a row
+        // claiming "disabled" while the task still fires is worse than a visible failure that the user
+        // can act on. TaskSched.Query reports an unreadable task as Exists with Enabled = false, so an
+        // access-denied read does not masquerade as this error.
+        var back = TaskSched.Query(_path);
+        if (back.Exists && back.Enabled)
+            throw new InvalidOperationException("schtasks /Change ran, but the task still reads back as enabled.");
     }
 }
 

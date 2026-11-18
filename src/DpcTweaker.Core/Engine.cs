@@ -110,8 +110,71 @@ public sealed class TweakEngine
         list.AddRange(NetworkModule.Build(Profile, Journal));
         list.AddRange(ServicesModule.Build(Profile, Journal, Options));
         list.AddRange(TasksModule.Build(Profile, Journal, Options));
+        // After every module, because one of the notes exists only when some module left a revert-only
+        // row, and those come from Power, Interrupts, Services and Tasks alike.
+        AddPlanNotes(list);
         Tweaks = list;
         CatalogChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// The three notes the Interrupts screen shows under the plan. They are added after the modules are
+    /// built because two of them describe state the current path does not act on - a leftover row, or a
+    /// plan Windows is free to park - and that is exactly the state the user has to be told about.
+    /// </summary>
+    private void AddPlanNotes(List<ITweak> built)
+    {
+        // M1: the Balanced path (or a suppressed CurrentActive) builds no pins, but earlier runs may
+        // have left device pins or CPU power settings on this machine. Those values are live, so the
+        // tab has to say so where the user will look rather than only in the rows below.
+        if (!Plan.Applicable && built.Any(t => t is LeftoverTweak or LeftoverAffinityTweak))
+            Plan.Notes.Add("Settings from an earlier configuration (device pins or CPU power settings) are " +
+                           "still active on this PC. Use the leftover rows below or on the Power plan tab to revert them.");
+
+        // A laptop on the CurrentActive path tunes whatever plan the vendor tool switched to. If that
+        // plan still allows parking, a pinned core can sleep under the interrupt, which is worse than
+        // not pinning. Read live, because the values change when the vendor tool changes mode.
+        if (Options.PlanTarget == PlanTargetKind.CurrentActive && Profile.ParkingDependentCpu && Plan.Applicable &&
+            PowerApi.GetActive() is { } active)
+        {
+            uint? min = PowerApi.ReadAc(active, PowerSettings.Proc, PowerSettings.CoreParkingAc);
+            uint? min1 = Profile.Cpu.Cpus.Any(c => c.EfficiencyClass > 0)
+                ? PowerApi.ReadAc(active, PowerSettings.Proc, PowerSettings.CoreParkingAcClass1)
+                : null;
+            if (ParkingWarning(Options.PlanTarget, Profile.ParkingDependentCpu, Plan.Applicable,
+                    Profile.IsLaptop, Options.ApplyOnBattery, min, min1) is { } parking)
+                Plan.Notes.Add(parking);
+        }
+
+        // P-E: on a dual-CCD X3D part, AMD's service can move a game onto the V-Cache CCD and park or
+        // demote the other one - which is where this app just pinned the devices. The two mechanisms
+        // are not enemies, but the user has to know which one owns CCD placement on the path chosen.
+        if (Profile.Cpu.IsDualCcdX3D && Options.PlanTarget != PlanTargetKind.Balanced && Profile.Software.AmdVCacheService)
+            Plan.Notes.Add("AMD's 3D V-Cache Performance Optimizer service (amd3dvcacheSvc) is installed. " +
+                           "When Xbox Game Bar detects a game, that driver tries to park/demote the non-V-Cache CCD - " +
+                           "which is the CCD holding your pinned device interrupts. On the TunedUltimate path, " +
+                           "Process Lasso (or CPU Sets) owns CCD placement.");
+    }
+
+    /// <summary>
+    /// The note for a path whose plan still allows core parking, or null when nothing is wrong. Kept as
+    /// a pure function of the reads so each branch is testable without touching a live plan.
+    /// </summary>
+    /// <param name="minCores">CPMINCORES on the active plan; null when it could not be read.</param>
+    /// <param name="minCoresClass1">CPMINCORES1, only asked for on a CPU that reports a class 1.</param>
+    public static string? ParkingWarning(PlanTargetKind target, bool parkingDependent, bool applicable, bool laptop,
+        bool applyOnBattery, uint? minCores, uint? minCoresClass1)
+    {
+        if (target != PlanTargetKind.CurrentActive || !parkingDependent || !applicable) return null;
+        bool parked = minCores is < 100;
+        bool parkedClass1 = minCoresClass1 is < 100;
+        if (!parked && !parkedClass1) return null;
+        string text = "The active power plan currently allows core parking (minimum unparked cores < 100%). " +
+                      "Apply the Power plan tab so pinned interrupt cores cannot sleep under load.";
+        if (laptop && !applyOnBattery)
+            text += " On battery the plan switches to its DC values, where parking stays active unless " +
+                    "\"Apply on battery too\" is enabled.";
+        return text;
     }
 
     public IEnumerable<ITweak> InModule(string module) => Tweaks.Where(t => t.Info.Module == module);
@@ -303,6 +366,10 @@ public sealed class TweakEngine
                 Journal.Flush();
             }
         }
+        // The same follow-up an Apply runs. A healed NIC property is written to the registry and only
+        // Finish() restarts the adapter - which is why NicPropertyTweak reports NeedsReboot = false.
+        // Healing without it left the registry changed and the running driver unaware of it.
+        RunFinishers(results.Where(r => r.Ok).Select(r => r.Tweak));
         progress?.Report(results.All(r => r.Ok)
             ? $"{results.Count} drifted tweak(s) put back."
             : $"{results.Count(r => r.Ok)} of {results.Count} drifted tweak(s) put back.");
@@ -350,7 +417,10 @@ public sealed class TweakEngine
             Log.Warn("DPC sample failed: " + ex.Message);
         }
 
-        var gameCores = Plan.Applicable ? Plan.ReservedCpus : new List<int>();
+        // ReservedCpus is filled in whether or not this path places interrupts. On the Balanced path
+        // Applicable is false because no pins are built, but the cores games use are still known - and
+        // "DPC work is landing on game cores" is exactly the check that path needs.
+        var gameCores = Plan.ReservedCpus;
 
         // Processes pinned onto the cores the plan reserves: the scheduler has no way to know a core is
         // servicing a device, so anything restricted there competes with every interrupt. Read-only and

@@ -169,6 +169,14 @@
                     <TextBlock Text="{Binding NotApplicableText}" TextWrapping="Wrap" />
                 </Border>
 
+                <!-- The plan's notes, outside the "Applicable" cards on purpose. Two of them describe
+                     state the current path does NOT act on - leftover device pins or CPU settings from
+                     an earlier run, and a plan Windows is free to park - so hiding them whenever the
+                     plan is suppressed would hide exactly the sentences that matter on that path. -->
+                <Border Style="{StaticResource Card}" Visibility="{Binding HasNotes, Converter={StaticResource BoolToVis}}">
+                    <ItemsControl ItemsSource="{Binding Notes}" ItemTemplate="{StaticResource BulletLine}" />
+                </Border>
+
                 <!-- Core benchmark (Top placement: Progressive CTA or Compact Calibrated Badge) -->
                 <Border Style="{StaticResource Card}" Visibility="{Binding Applicable, Converter={StaticResource BoolToVis}}">
                     <StackPanel>
@@ -258,8 +266,6 @@
                                        Visibility="{Binding HasAmdSteering, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
                         <ItemsControl ItemsSource="{Binding PlanLines}" />
-                        <ItemsControl ItemsSource="{Binding Notes}" ItemTemplate="{StaticResource BulletLine}" Margin="0,8,0,0"
-                                      Visibility="{Binding HasNotes, Converter={StaticResource BoolToVis}}" />
                     </StackPanel>
                 </Border>
 

@@ -181,6 +181,9 @@ public sealed class MainViewModel : ObservableObject
         var results = await Task.Run(() => engine.HealDrifted(progress));
         if (results.Any(r => r.Ok)) DriftWatcher.Remember(engine);
         if (results.Any(r => r.Ok && r.Tweak.Info.NeedsReboot)) ForceRestartNeeded();
+        // The follow-up a heal runs (an adapter restart) can fail while the registry write succeeded.
+        // That leaves the change on disk and not in effect, which is what the restart banner is for.
+        if (engine.LastFinishErrors.Count > 0) ForceRestartNeeded();
         await RefreshAllAsync();
         return results;
     }

@@ -58,10 +58,10 @@ public sealed class DevicePowerTaskTweak : TweakBase
         Module = "Boot tasks",
         Title = "Device power saving off, at every boot",
         What = "Unticks \"Allow the computer to turn off this device to save power\" on every device (WMI MSPower_DeviceEnable) and sets PnPCapabilities = 24 on physical network adapters. A SYSTEM task re-applies it 30 s after every boot, because Windows re-ticks the box whenever a device is re-plugged or its driver reinstalls.",
-        Why = "Devices napping between uses add wake-up latency. Part of the desktop's 11.6 µs LatencyMon run (Oct 12 2026).",
+        Why = "An idle device is usually put into a low-power state - D3hot for a PCI function, USB selective suspend for a port - and coming back to D0 is on the interrupt path: the device cannot signal or service work until Windows has powered it again. Turning those transitions off removes that step from the first interrupt after an idle period. Microsoft documents the device power states and the wake requirement; what the wake costs on a given PC is what the project's cold-wake probe measures, so this row claims the mechanism rather than a number.",
         Cost = "A little idle power.",
         CanBreak = "Nothing known. \"Allow this device to wake the computer\" is left as it is.",
-        Evidence = Evidence.Measured,
+        Evidence = Evidence.Documented,
         CostClass = TweakCost.Small,
         Risk = Risk.Low,
     }, journal)
