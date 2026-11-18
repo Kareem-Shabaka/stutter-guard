@@ -274,7 +274,31 @@ public sealed class PowerSettingTweak : TweakBase
         }
 
         if (PowerApi.GetActive() == plan) PowerApi.SetActive(plan);
-        Log.Info($"Power {_def.Key} = {want} on {plan} (was {ac})");
+
+        // Read it back. Windows clamps some of these values against what the platform advertises, so a
+        // write can succeed and still not be the value that took effect. Saying so is the honest report,
+        // and it is the same rule RegistryValueTweak and AffinityTweak already follow - throwing here lets
+        // Engine.Apply roll the journal transaction back and show the reason on the row.
+        uint? backAc = PowerApi.ReadAc(plan, _def.Sub, _def.Setting);
+        if (backAc is null)
+            throw new InvalidOperationException($"Wrote {_def.Title}, but it can no longer be read back on the target plan.");
+        if (backAc.Value != want)
+            throw new InvalidOperationException(
+                $"Wrote {_def.Title} = {_def.Format(want)}, but Windows reports {_def.Format(backAc.Value)} " +
+                "(the platform clamps this setting to what it supports).");
+
+        if (o.ApplyOnBattery)
+        {
+            uint? backDc = PowerApi.ReadDc(plan, _def.Sub, _def.Setting);
+            if (backDc is null)
+                throw new InvalidOperationException($"Wrote {_def.Title} on battery, but it can no longer be read back.");
+            if (backDc.Value != want)
+                throw new InvalidOperationException(
+                    $"Wrote {_def.Title} = {_def.Format(want)} on battery, but Windows reports {_def.Format(backDc.Value)} " +
+                    "(the platform clamps this setting to what it supports).");
+        }
+
+        Log.Info($"Power {_def.Key} = {want} on {plan} (was {ac}, reads back {backAc})");
     }
 }
 
@@ -331,6 +355,10 @@ public static class PowerModule
         var target = new PowerPlanTarget(journal, options);
         var plannedPower = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+
+        // power.active starts with "power." and would otherwise be swept up by the leftover loop at the
+        // end of this method, which would emit a duplicate row beside the real PlanActiveTweak.
+        plannedPower.Add(PlanActiveId);
 
         yield return new PlanActiveTweak(new TweakInfo
         {
@@ -410,7 +438,8 @@ public static class PowerModule
                     "The app applied this setting earlier. This run does not plan it - a different power path, " +
                     "a narrower profile, or a CPU that no longer reports this setting. It is still on this PC. " +
                     "Revert puts back the value it had before the app.",
-                    group: def is not null && def.Sub == PowerSettings.Proc ? "CPU" : "Devices"),
+                    // A class-scoped setting orphaned by a CPU swap resolves to no def; its id still says CPU.
+                    group: (def is not null ? def.Sub == PowerSettings.Proc : id.StartsWith("power.cpu.", StringComparison.OrdinalIgnoreCase)) ? "CPU" : "Devices"),
                 journal, () => PowerLeftoverProbe(target, def));
         }
     }

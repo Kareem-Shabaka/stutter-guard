@@ -764,6 +764,43 @@ Console.WriteLine("M3: Process Lasso starter rules (the desktop)");
     var order = root.GetProperty("cpuAffinityRuleOrder").EnumerateArray().Select(x => x.GetString()).ToList();
     Check("catch-all is the last affinity rule", order.Last() == "*.*" && order[^2] == "dwm.exe");
     var mk = root.GetProperty("ruleSets").EnumerateArray().First(r => r.GetProperty("processName").GetString() == "mk12.exe");
+    // ---- #2/#4 regression: the leftover sweep must not duplicate a row that IS still planned ----
+    Console.WriteLine("Power leftovers: no duplicate, right section");
+    {
+        // power.active starts with "power.", so a journal where it was touched would have had a leftover
+        // emitted beside the real PlanActiveTweak, titled "active: set earlier".
+        var jP = new Journal(Path.Combine(Path.GetTempPath(), "sg-pwrleft-" + Guid.NewGuid().ToString("N") + ".json"));
+        jP.MarkApplied("power.active");
+        jP.MarkApplied("power.cpu.epp");
+        jP.Save();
+
+        var profP = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11", "24H2", 26100, 1, "Pro"),
+            CpuName = "AMD Ryzen 9 9950X3D", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 16).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)),
+                new[] { (0x0000FFFFUL, 96u << 20), (0xFFFF0000UL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+
+        var balanced = PowerModule.Build(profP, jP, () => new AppOptions { PlanTarget = PlanTargetKind.Balanced }).ToList();
+        Check("power.active is planned, so no leftover duplicates it",
+            balanced.Count(t2 => t2.Info.Id == "power.active") == 1,
+            string.Join(", ", balanced.Where(x => x.Info.Id == "power.active").Select(x => x.GetType().Name)));
+
+        var eppLeftover = balanced.SingleOrDefault(t2 => t2.Info.Id == "power.cpu.epp");
+        Check("a Balanced CPU setting keeps a revert-only row", eppLeftover is LeftoverTweak, eppLeftover?.GetType().Name ?? "absent");
+        Check("and it stays in the CPU section", eppLeftover?.Info.Group == "CPU", eppLeftover?.Info.Group ?? "");
+
+        // A row that is still planned must not also appear as a leftover.
+        var tuned = PowerModule.Build(profP, jP, () => new AppOptions { PlanTarget = PlanTargetKind.TunedUltimate, PowerProfile = PowerProfileKind.Full }).ToList();
+        Check("on TunedUltimate the CPU setting is planned, not leftover",
+            tuned.Any(t2 => t2.Info.Id == "power.cpu.epp" && t2 is PowerSettingTweak));
+        Check("and there is no duplicate leftover for it",
+            tuned.Count(t2 => t2.Info.Id == "power.cpu.epp") == 1,
+            string.Join(", ", tuned.Where(x => x.Info.Id == "power.cpu.epp").Select(x => x.GetType().Name)));
+    }
     // ---- #3b: the RSS row must describe the keywords it actually writes ----
     Console.WriteLine("RssTweak: text matches the write");
     {
