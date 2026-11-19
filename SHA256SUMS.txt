@@ -35,6 +35,10 @@
 # the .sha256 attached to that release by downloading it, and that check passed; it is a third value again,
 # because a different runner is a different build.
 #
+# v1.4.1, observed the same way and offered as an observation, not as a constant: 65,458,466 bytes,
+# 94029D2EFFBBB2F068A3A656F36A9C8A9BD22640A642D2EECB64232B797EFAFF, on .NET SDK 10.0.402 / win-x64.
+# Expect the release asset to differ, and treat the asset's own .sha256 as the authority.
+#
 # WHAT IS NOT CLAIMED: that a release's bytes equal a build of your own. They do not have to, and the
 # absolute figure moves between working trees: cleaning and publishing commit c59b29b gave 65,446,991
 # bytes (E36FE73D...), and commit 0b14fea - whose only difference was markdown and an SVG - gave

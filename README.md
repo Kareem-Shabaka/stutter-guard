@@ -3,7 +3,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.4.0-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Version](https://img.shields.io/badge/Version-1.4.1-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Tests](https://img.shields.io/badge/self--tests-1%2C438%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 
 ## Average FPS is not the number that decides whether a game feels smooth.
@@ -17,7 +17,7 @@ frame time come from the same machine.
 latency, away from the cores your game uses. Then it records every change it made, so you can put all
 of it back.**
 
-### [Download Stutter Guard 1.4.0](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
+### [Download Stutter Guard 1.4.1](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
@@ -275,7 +275,8 @@ docs/                  measurement method, architecture, release notes
 
 ## Releases
 
-- [v1.4.0](docs/releases/RELEASE_NOTES_v1.4.0.md) - current
+- [v1.4.1](docs/releases/RELEASE_NOTES_v1.4.1.md) - current
+- [v1.4.0](docs/releases/RELEASE_NOTES_v1.4.0.md) - superseded (see 1.4.1)
 - [v1.3.0](docs/releases/RELEASE_NOTES_v1.3.0.md)
 - [v1.2.0](docs/releases/RELEASE_NOTES_v1.2.0.md)
 - [v1.0.0](docs/releases/RELEASE_NOTES_v1.0.0.md)
