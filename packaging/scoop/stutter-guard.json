@@ -1,6 +1,6 @@
 {
     "version": "1.4.1",
-    "description": "Measured, reversible Windows 10/11 DPC latency and stutter tuner for gaming and real-time audio",
+    "description": "Reversible Windows 10/11 interrupt-affinity and power tuner for game stutter and real-time audio dropouts",
     "homepage": "https://github.com/Kareem-Shabaka/stutter-guard",
     "license": "GPL-3.0-or-later",
     "architecture": {
