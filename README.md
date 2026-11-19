@@ -82,10 +82,6 @@ no interrupt and no DPC at all. **No DPC reached 250 µs** out of 2,775,336.
 the one where a ready thread on a busy core waits 782 µs instead of 8.9 µs - a factor of about 90,
 measured, with the method below.*
 
-**Microsoft's budgets, for scale.** The documented ceiling is **100 µs** for one DPC routine and
-**25 µs** for one ISR. The healthy run above peaked at 239.49 µs - 2.4 times budget, once, in nearly
-four hours. That is the shape of a single long call, not a storm, and the app reports it as such.
-
 ---
 
 ## Which measurements move, and which cannot
