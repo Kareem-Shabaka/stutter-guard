@@ -4,24 +4,25 @@
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
 [![Version](https://img.shields.io/badge/Version-1.4.1-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
-[![Tests](https://img.shields.io/badge/self--tests-1%2C438%20passing-success.svg)](tests/DpcTweaker.SelfTest)
+[![Tests](https://img.shields.io/badge/self--tests-1%2C476%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 
-## Average FPS is not the number that decides whether a game feels smooth.
+## Average FPS is not what decides whether a game feels smooth - or whether real-time audio stays glitch-free.
 
-It measures compute. It does not measure what happens when your mouse moves, a packet arrives, or a
-sound plays mid-fight, because none of that is compute. It is interrupt work, and Windows delivers it
-to whichever core it likes - including the one your game is on. That is where a good average and a bad
-frame time come from the same machine.
+Average FPS measures compute. It does not measure what happens when your mouse moves, a network packet
+arrives, or an audio buffer runs, because none of that is compute. It is interrupt work, and Windows
+delivers it to whichever core it likes - including the cores running your game or DAW. That is how a
+fast machine still produces frametime spikes and audio dropouts.
 
-**Stutter Guard moves every busy device's interrupts onto a core of its own, chosen by measured wake
-latency, away from the cores your game uses. Then it records every change it made, so you can put all
-of it back.**
+**Stutter Guard measures per-core wake latency and pins each busy device (GPU, USB, audio interface,
+network) to a dedicated first-thread core - keeping CPU 0/1 clear on every system, and keeping the
+V-Cache CCD or P-cores free of devices on split-topology CPUs. Every change is journalled before it
+runs, so you can revert all of it, even from Safe Mode.**
 
 ### [Download Stutter Guard 1.4.1](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
-![The Stutter Guard window](docs/images/app-214811.png)
+![LatencyMon per-CPU interrupt distribution with Stutter Guard active](docs/images/app-214811.png)
 
 ---
 
@@ -44,7 +45,8 @@ accordingly, states the evidence behind each change, and hands you a script that
 
 | Benefit | What makes it true |
 | :--- | :--- |
-| **Your game's cores stop being shared with hardware** | Device interrupts are pinned to cores the plan reserves for them. On AMD dual-CCD V-Cache parts the entire V-Cache CCD is kept free of devices; on Intel hybrid, P-cores stay for the game. |
+| **Busy devices stop competing on the same cores** | Device interrupts are pinned to dedicated first-thread cores ranked by measured wake latency. On AMD dual-CCD X3D parts the V-Cache CCD stays device-free; on Intel hybrid, P-cores stay clear; on single-CCD and classic CPUs, CPU 0/1 stay reserved and busy devices are spread across separate cores. |
+| **Built for real-time audio (DAW / ASIO) as well as gaming** | Traces your active audio output back to its PCI or USB controller, gives it a dedicated first-thread core, disables USB selective suspend, USB 3 link power saving, PCIe ASPM, and deep C-states, and flags known-bad drivers so low-buffer audio stays free of wake-latency dropouts. |
 | **You get a measured number, not a mood** | Each core is ranked by a short wake-jitter and speed benchmark, plus Windows' own scheduling hints - not by folklore about which cores are "better". |
 | **Every change can be undone, from Safe Mode, without this app** | Each write is journalled to disk *before* it happens, and `undo-all.ps1` is regenerated on every flush. No app, no installer, no network. |
 | **A Windows update cannot silently keep your tweaks reverted** | Driver fingerprinting notices when an applied tweak was reset, names it on the Home screen, and re-applies it in one click - from the recorded factory value. |
@@ -101,7 +103,8 @@ it gets one. That is a tail, not a rate.
 | Cinebench / 3DMark / Y-cruncher | Work completed under saturated load | **No.** Same cores, same clocks, same throughput |
 | LatencyMon "highest interrupt to process" | One outlier across a whole run | Only if the outlier was itself a placement problem |
 | **Core wake latency** (`tools/WakeProbe.cs`) | How late a ready thread runs | **Yes - 782 µs to 8.9 µs median**, measured, control core proving locality |
-| **1 % / 0.1 % frame times** | The worst frames in a play session | **Yes**, when the stutter was device work landing on a render thread |
+| **1 % / 0.1 % frame times** | The worst frames in a play session | **Yes**, when the stutter was device work or wake stalls hitting a render thread |
+| **Real-time audio dropouts (DAW / ASIO)** | Buffer underruns, clicks and pops | **Yes**, when dropouts come from USB/PCIe power-saving wakes, deep C-states, or shared IRQ cores |
 | Average FPS | Throughput while frames are steady | Only if it was already losing frames to stalls |
 
 The measured result above is a **wake latency** figure, stated with its load condition, because that is the
@@ -248,7 +251,7 @@ What it measures and changes, and where that stops:
 
 ```powershell
 dotnet build -c Release
-dotnet run --project tests/DpcTweaker.SelfTest -c Release   # 1,438 assertions
+dotnet run --project tests/DpcTweaker.SelfTest -c Release   # 1,476 assertions
 build.cmd                                                    # publish\StutterGuard.exe
 build.cmd --verify-repro                                     # prove two clean builds match
 ```
