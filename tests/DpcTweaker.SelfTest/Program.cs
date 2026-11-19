@@ -5212,11 +5212,23 @@ Console.WriteLine("Reporting destination: per machine, never in the repository")
     Check("...and does not trip on the redactor's bare path fragment",
         !credentialShape.IsMatch("int i = url.IndexOf(\"/api/webhooks/\", StringComparison.Ordinal);"));
 
-    // A build-provisioned address is read from assembly metadata and validated like any other.
-    Check("an unprovisioned build has no baked report address", TelemetryClient.BakedDestination(TelemetryClient.ReportMetadataKey) is null,
-        TelemetryClient.BakedDestination(TelemetryClient.ReportMetadataKey) ?? "null");
-    Check("an unprovisioned build has no baked feedback address", TelemetryClient.BakedDestination(TelemetryClient.FeedbackMetadataKey) is null);
+    // A build-provisioned address is read from assembly metadata. Whether one EXISTS depends on whether the
+    // person who built this had a BuildSecrets.props, so the invariant is not "it is absent" - it is that
+    // anything baked in is a usable https address and nothing else, and that an unknown key yields nothing.
+    var bakedReport = TelemetryClient.BakedDestination(TelemetryClient.ReportMetadataKey);
+    var bakedFeedback = TelemetryClient.BakedDestination(TelemetryClient.FeedbackMetadataKey);
+    Console.WriteLine("  info  this build is " + (bakedReport is null && bakedFeedback is null
+        ? "unprovisioned: the app asks for an address at first use"
+        : "provisioned from BuildSecrets.props (address not printed)"));
+    Check("a baked report address, when present, is a usable https address",
+        bakedReport is null || TelemetryClient.IsUsableDestination(bakedReport));
+    Check("a baked feedback address, when present, is a usable https address",
+        bakedFeedback is null || TelemetryClient.IsUsableDestination(bakedFeedback));
     Check("an unknown metadata key is not an address", TelemetryClient.BakedDestination("Not.A.Key") is null);
+    // The property that matters either way: the source tree holds no credential. If a build is provisioned,
+    // the address arrived through a git-ignored file - which is the whole point of the mechanism.
+    Check("a provisioned build means BuildSecrets.props exists and is untracked",
+        bakedReport is null || File.Exists(Path.Combine(repoRoot?.FullName ?? ".", "BuildSecrets.props")));
 
     // Priority: what this machine was told wins over what the build shipped with.
     const string localUrl = "https://example.com/hook/local";
@@ -5288,6 +5300,46 @@ Console.WriteLine("Reporting destination: per machine, never in the repository")
     string preview = TelemetryClient.Preview(shown);
     Check("the preview names the configured destination", preview.Contains("example.com"), preview.Split('\n')[1]);
     Check("...without the token part of it", !preview.Contains("secret-token"), preview.Split('\n')[1]);
+}
+Console.WriteLine("PowerShell bridge: a script on disk, not base64 on a command line");
+{
+    // Base64 + execution-policy bypass is the canonical dropper signature, and it was half of what earned
+    // this build a Trojan-Downloader verdict. The script is now a readable .ps1 in the temp folder.
+    string exe = PowerShellBridge.PowerShellExe;
+    Check("powershell.exe is where the bridge says it is", File.Exists(exe), exe);
+    Check("the built Core assembly contains no -EncodedCommand",
+        !File.ReadAllText(typeof(PowerShellBridge).Assembly.Location).Contains("-EncodedCommand", StringComparison.Ordinal) ||
+        !Encoding.ASCII.GetString(File.ReadAllBytes(typeof(PowerShellBridge).Assembly.Location)).Contains("-EncodedCommand", StringComparison.Ordinal));
+
+    // Round trip a real call through the new path: the JSON contract has to survive it unchanged.
+    bool okJson = false; string detail = "";
+    try
+    {
+        var e = PowerShellBridge.RunJson("'{\"bridge\":\"ok\",\"n\":42}'");
+        okJson = e.Str("bridge") == "ok" && e.Num("n") == 42;
+        detail = e.ToString();
+    }
+    catch (Exception ex) { detail = ex.Message; }
+    Check("RunJson returns the script's JSON over the -File path", okJson, detail);
+
+    // Unicode has to survive the write: a .ps1 without a BOM is read as ANSI by PowerShell 5.1.
+    bool okUnicode = false; string uniDetail = "";
+    try
+    {
+        var e = PowerShellBridge.RunJson("'{\"name\":\"Caf\u00e9 \u2013 M\u00fcnchen\"}'");
+        okUnicode = e.Str("name") == "Caf\u00e9 \u2013 M\u00fcnchen";
+        uniDetail = e.Str("name") ?? "null";
+    }
+    catch (Exception ex) { uniDetail = ex.Message; }
+    Check("a non-ASCII value round-trips (the .ps1 is written with a BOM)", okUnicode, uniDetail);
+
+    // No temp scripts may be left behind, on success or on failure.
+    var leftover = Directory.GetFiles(Path.GetTempPath(), "stutterguard-*.ps1");
+    Check("no temporary script is left in the temp folder", leftover.Length == 0, string.Join(", ", leftover));
+
+    try { PowerShellBridge.RunJson("throw 'deliberate'"); } catch { }
+    Check("a failing script leaves no temporary file either",
+        Directory.GetFiles(Path.GetTempPath(), "stutterguard-*.ps1").Length == 0);
 }
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

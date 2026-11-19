@@ -61,16 +61,59 @@ jobs:
       - name: Publish Single-File Executable
         run: dotnet publish src/DpcTweaker.App/DpcTweaker.App.csproj -c Release -o publish
 
+
+      # Signing is optional at the secret level and mandatory at the verification level: if an identity is
+      # configured the signature MUST verify, and if one is not the job says so in the log rather than
+      # implying the artefact is signed. Requires the Windows SDK for signtool.exe (present on the runner).
+      - name: Sign the executable (optional)
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.SIGNING_PFX_PASSWORD }}
+          TIMESTAMP_URL: http://timestamp.digicert.com
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PFX_B64)) {
+            Write-Host "::notice::No signing identity configured (SIGNING_PFX_BASE64). This build is UNSIGNED."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          try {
+            $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                         Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1).FullName
+            if (-not $signtool) { throw "signtool.exe not found on the runner; install the Windows SDK." }
+            & $signtool sign /fd SHA256 /td SHA256 /tr $env:TIMESTAMP_URL /f $pfx /p $env:PFX_PASSWORD "publish\StutterGuard.exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
+            Write-Host "Signed. Verifying..."
+            & $signtool verify /pa /v "publish\StutterGuard.exe"
+            if ($LASTEXITCODE -ne 0) { throw "The signature does not verify; refusing to continue." }
+          }
+          finally {
+            # The private key must not survive the job.
+            if (Test-Path $pfx) { Remove-Item $pfx -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Report signing state
+        shell: pwsh
+        env:
+          EXPECT_SIGNED: ${{ secrets.SIGNING_PFX_BASE64 }}
+        run: |
+          $s = Get-AuthenticodeSignature "publish\StutterGuard.exe"
+          Write-Host ("Authenticode status: " + $s.Status)
+          if ($s.SignerCertificate) { Write-Host ("Signed by: " + $s.SignerCertificate.Subject) } else { Write-Host "Signer: none" }
+          if (-not [string]::IsNullOrWhiteSpace($env:EXPECT_SIGNED) -and $s.Status -ne 'Valid') {
+            throw "A signing identity was configured but the published file is $($s.Status). Not publishing it."
+          }
+      # The checksum has to be produced by the same job that uploads the binary, from the file it
+      # is about to upload. A hand-maintained checksum in the repository drifts the moment a new
+      # release is cut, and then it describes a file nobody can download.
+      # After signing and verification, never before: an artifact uploaded earlier would be the unsigned file.
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StutterGuard-x64
           path: publish/StutterGuard.exe
           if-no-files-found: error
-
-      # The checksum has to be produced by the same job that uploads the binary, from the file it
-      # is about to upload. A hand-maintained checksum in the repository drifts the moment a new
-      # release is cut, and then it describes a file nobody can download.
       - name: Write the download checksum
         shell: pwsh
         run: |

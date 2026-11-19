@@ -203,6 +203,13 @@ are disabled, so idle power draw and temperature rise - and the rows that cause 
 Boot into Safe Mode and run `%ProgramData%\Stutter Guard\undo-all.ps1`. It restores the recorded
 originals with no app and no installer. It is regenerated on every change, so it is never out of date.
 
+**Is the download signed?**
+Only if the release page says so. Check with `Get-AuthenticodeSignature .\StutterGuard.exe`: `Valid` means
+signed, `NotSigned` means it is not, and Windows SmartScreen will warn accordingly. Every release also
+publishes a SHA-256 generated from the exact bytes uploaded - that verifies the file arrived intact, but it
+does not prove who built it, because anyone able to replace the download could replace the checksum beside
+it. `sign.cmd` signs a local build when a certificate is available; `signtool verify /pa` is the check.
+
 **Do I need Process Lasso?**
 Not for device placement - device interrupts are placed by this app. On the **TunedUltimate** path
 Windows core parking is off, so Windows also stops moving game processes between CCDs; something has to

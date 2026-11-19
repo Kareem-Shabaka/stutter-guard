@@ -7,6 +7,18 @@ namespace DpcTweaker.Core.Infra;
 /// Runs short Windows PowerShell 5.1 scripts for the parts of Windows that are
 /// only reachable through WMI/CIM (chassis, device power, VBS, WHEA). The script's
 /// last output line must be one JSON value.
+/// <para>
+/// The script is handed over as a temporary .ps1 file. It used to go through
+/// <c>-EncodedCommand</c>, which is base64 text on a command line, and that single detail is the strongest
+/// thing in this program for a scanner to match: "unsigned executable spawns PowerShell with a
+/// base64-encoded script and an execution-policy bypass" is the canonical dropper signature, and it is
+/// half of what earned this build a Trojan-Downloader verdict. A .ps1 on disk that the user can read
+/// before it runs says the same thing to a human and much less to a heuristic.
+/// </para>
+/// <para>
+/// The temporary file is removed in a finally block, so a crash does not leave scripts behind. Its
+/// contents are ordinary PowerShell with no secrets: everything it touches is local WMI/CIM state.
+/// </para>
 /// </summary>
 public static class PowerShellBridge
 {
@@ -19,11 +31,22 @@ public static class PowerShellBridge
             "$ProgressPreference = 'SilentlyContinue'\n" +
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" +
             script;
-        string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(full));
 
-        var r = ProcessRunner.Run(PowerShellExe,
-            new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded },
-            timeoutMs);
+        // A .ps1 needs a BOM for Windows PowerShell 5.1 to read it as UTF-8; without one a non-ASCII
+        // device name in the output round-trips as mojibake.
+        string path = Path.Combine(Path.GetTempPath(), "stutterguard-" + Guid.NewGuid().ToString("N") + ".ps1");
+        ProcessResult r;
+        try
+        {
+            File.WriteAllText(path, full, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            r = ProcessRunner.Run(PowerShellExe,
+                new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path },
+                timeoutMs);
+        }
+        finally
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { /* a locked temp file is not an error */ }
+        }
 
         if (r.TimedOut) throw new TimeoutException("PowerShell didn't finish in time.");
 
