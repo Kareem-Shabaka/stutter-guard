@@ -1,0 +1,30 @@
+{
+    "version": "1.4.1",
+    "description": "Measured, reversible Windows 10/11 DPC latency and stutter tuner for gaming and real-time audio",
+    "homepage": "https://github.com/Kareem-Shabaka/stutter-guard",
+    "license": "GPL-3.0-or-later",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Kareem-Shabaka/stutter-guard/releases/download/v1.4.1/StutterGuard.exe",
+            "hash": "7741758d4f457af4e46c74dd231fee9ec499e7443dc59816186c56fc03625849"
+        }
+    },
+    "bin": "StutterGuard.exe",
+    "shortcuts": [
+        [
+            "StutterGuard.exe",
+            "Stutter Guard"
+        ]
+    ],
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/Kareem-Shabaka/stutter-guard/releases/download/v$version/StutterGuard.exe",
+                "hash": {
+                    "url": "$url.sha256"
+                }
+            }
+        }
+    }
+}
