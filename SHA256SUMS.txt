@@ -18,8 +18,16 @@
 # ---- The reproducible-build claim, stated as measured ----
 #
 # WHAT IS CLAIMED: two CLEAN publishes of one working tree, into two different directories, produce
-# byte-identical output. Measured on 2026-11-15, .NET SDK 10.0.402, win-x64, by `build.cmd --verify-repro`,
-# which deletes every obj/ and bin/ between the two publishes so they cannot share results.
+# byte-identical output. Measured on 2026-11-15 and again on 2026-11-19, .NET SDK 10.0.402, win-x64, by
+# `build.cmd --verify-repro`, which deletes every obj/ and bin/ between the two publishes so they cannot
+# share results.
+#
+#   v1.3.0 tree:  65,447,000 bytes  851FA3465EA11D59B141C3FEF8266E9352BE30FEA8477EC80B7D6B4F403D8880
+#   v1.4.0 tree:  65,456,984 bytes  4618F79B913F5548244EA6EFFF0DC8CF112187E48CA670EE27BD2025291C6FE0
+#
+# The v1.4.0 figure is that working tree's own clean-build hash, and it equals the file its own
+# `dotnet publish` produced. It is NOT a release asset's hash: the build job publishes its own bytes and
+# attaches their hash beside them.
 #
 # WHAT IS NOT CLAIMED: that a release's bytes equal a build of your own. They do not have to, and the
 # absolute figure moves between working trees: cleaning and publishing commit c59b29b gave 65,446,991

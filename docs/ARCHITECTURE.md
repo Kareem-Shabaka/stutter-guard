@@ -21,7 +21,7 @@ src/DpcTweaker.Core/     no UI. The engine, the journal, the catalog, the interr
   Diagnostics/LatencyTriage.cs    findings, each stated against a budget with its cost
 src/DpcTweaker.UI/       view models, page composition, row behaviour. No XAML.
 src/DpcTweaker.App/      WPF shell: one window, one template per page type, styles.
-tests/DpcTweaker.SelfTest/  dependency-free executable, 1,246 assertions
+tests/DpcTweaker.SelfTest/  dependency-free executable, 1,438 assertions
 tools/                   the measurement instruments behind the published numbers
 docs/                    this file, the measurement method, release notes
 ```
@@ -61,5 +61,8 @@ behaviour, the interrupt planner's invariants (a catch-all may never intersect t
 hold), registry round-tripping for every value kind including `REG_MULTI_SZ` elements that contain
 newlines, the preset ladder and its two absolute rules, and hostile-input handling.
 
-It references `DpcTweaker.Core` only. **It does not exercise the interface** - so a green run is evidence
-about the engine, never about the window.
+It references `DpcTweaker.Core` and `DpcTweaker.UI`. The second is there because the view models are plain
+`net10.0` with no WPF types in them, which makes the rules that live there - one preset tier per tab, a
+suppressed plan advertising no plan lines, a leftover row surviving a path switch - assertable in a console
+process. That is still not the window: **XAML, binding resolution and the shell are outside it**, so a green
+run is evidence about the engine and the view models, and never about a window anyone has looked at.

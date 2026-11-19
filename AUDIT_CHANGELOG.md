@@ -428,6 +428,7 @@ Shipped as **1.1.0**: 971 assertions at release. The instruments behind the numb
 | After Wave 12 (latency triage) | **888** |
 | After Wave 13 (post-1.0.0 fixes, built as 1.1.0; first released in 1.2.0) | 971 |
 | After Wave 14 (catalogue, defaults, budgets, parking coupling, RSS alignment) | **1022** |
+| After the 1.4.0 pass (Balanced path, preset scope, class-1 power, leftovers) | **1438** |
 
 Every stage: `dotnet build -c Release` → **0 warnings, 0 errors**; `--selftest` → **0 failures**.
 
@@ -456,8 +457,10 @@ verification would need `Get-NetAdapterRss` data that the Realtek driver does no
 
 ### Coverage boundary
 
-The self-test project references `DpcTweaker.Core` only. View models and XAML are outside it, so the
-assertion count is evidence about the engine and never about the window. Any interface change needs a
+The self-test project referenced `DpcTweaker.Core` only until 1.4.0, when the `DpcTweaker.UI` view-model
+project was added to it - they are plain `net10.0` with no WPF types, so rules such as "a preset tier applies
+to one tab" became assertable in a console process. XAML is still outside it, so the assertion count remains
+evidence about the engine and the view models and never about the window. Any interface change needs a
 build plus a human look, and no number in this file changes that.
 
 ### Two catalogue groups overlap

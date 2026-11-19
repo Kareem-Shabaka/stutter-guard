@@ -13,9 +13,10 @@ build.cmd                                                    # publish\StutterGu
 The self-test executable has no third-party dependencies by design, so it runs anywhere the SDK does.
 A pull request that changes behaviour without an assertion covering it is likely to be asked for one.
 
-Note what the test project does **not** cover: it references `DpcTweaker.Core` only. View models and
-XAML are not exercised by it, so a green run says nothing about the interface. If you change the UI,
-a build is the minimum and a screenshot is better.
+Note what the test project does **not** cover: it references `DpcTweaker.Core` and `DpcTweaker.UI` - the
+view models are plain `net10.0` so their rules can be asserted headlessly - but it never constructs a
+window. XAML, binding resolution and the shell are not exercised by it, so a green run says nothing about
+the interface. If you change the UI, a build is the minimum and a screenshot is better.
 
 ## The contract every tweak has to satisfy
 
