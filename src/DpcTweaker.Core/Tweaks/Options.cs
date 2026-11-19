@@ -154,6 +154,10 @@ public sealed class AppOptions
     /// </summary>
     public string ReportWebhookUrl { get; set; } = "";
 
+    /// <summary>Where feedback and issue reports go on this machine, when it differs from
+    /// <see cref="ReportWebhookUrl"/>. Empty means "use the report address".</summary>
+    public string FeedbackWebhookUrl { get; set; } = "";
+
     /// <summary>A copy with some fields changed (so a screen that owns one option never drops the others).</summary>
     public AppOptions With(Action<AppOptions> change)
     {

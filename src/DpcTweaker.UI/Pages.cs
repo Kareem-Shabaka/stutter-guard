@@ -566,11 +566,15 @@ public sealed class HomePageViewModel : PageViewModel
     /// the same information without the upload.
     /// </para>
     /// </summary>
-    private string? AskForDestination(string what)
+    private string? AskForDestination(string what, string metadataKey, bool feedback)
     {
         var engine = _main.Engine;
         if (engine is null) return null;
-        if (TelemetryClient.NormaliseDestination(engine.Options.ReportWebhookUrl) is { } known) return known;
+        // 1. what this machine was told, 2. what this build was given, 3. ask.
+        string? local = feedback && !string.IsNullOrWhiteSpace(engine.Options.FeedbackWebhookUrl)
+            ? engine.Options.FeedbackWebhookUrl
+            : engine.Options.ReportWebhookUrl;
+        if (TelemetryClient.ResolveDestination(local, metadataKey) is { } known) return known;
 
         string? entered = _main.Ui.Prompt("Where should " + what + " go?",
             "This build has no reporting address configured, so nothing can be uploaded yet.\n\n" +
@@ -592,7 +596,7 @@ public sealed class HomePageViewModel : PageViewModel
     {
         var engine = _main.Engine;
         if (engine is null) return;
-        if (AskForDestination("the hardware report") is not { } destination)
+        if (AskForDestination("the hardware report", TelemetryClient.ReportMetadataKey, feedback: false) is not { } destination)
         {
             SaveReport();
             Message = "Not uploaded: no reporting address is set. Saved a copy instead.";
@@ -628,7 +632,7 @@ public sealed class HomePageViewModel : PageViewModel
 
         // Asked before the message is written, not after: being told there is nowhere to send a paragraph
         // you have just typed is worse than being told first.
-        if (AskForDestination("your feedback") is not { } destination)
+        if (AskForDestination("your feedback", TelemetryClient.FeedbackMetadataKey, feedback: true) is not { } destination)
         {
             _main.Ui.Inform("Nothing was sent",
                 "No reporting address is set, so feedback cannot be uploaded. The hardware report can still be saved " +

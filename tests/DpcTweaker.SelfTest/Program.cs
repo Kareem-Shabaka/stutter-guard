@@ -5177,24 +5177,54 @@ Console.WriteLine("Reporting destination: per machine, never in the repository")
         TelemetryClient.NormaliseDestination("  https://example.com/hook  ") == "https://example.com/hook");
     Check("...and an unusable address normalises to null", TelemetryClient.NormaliseDestination("ftp://x/y") is null);
 
-    // The regression that matters: no destination may be compiled into the shipped assembly. This reads
-    // the built Core.dll, so it fails on the commit that reintroduces one rather than on a user's report.
-    var asm = typeof(TelemetryClient).Assembly.Location;
-    bool scanned = false;
-    var found = new List<string>();
-    if (!string.IsNullOrEmpty(asm) && File.Exists(asm))
+    // The leak vector is a URL in a TRACKED SOURCE FILE: that is what a public-repository scanner indexes,
+    // and it is how the two previous webhooks were found and deleted. A build-provisioned address arriving
+    // through the git-ignored BuildSecrets.props is legitimate and deliberately allowed here.
+    var repoRoot = new DirectoryInfo(AppContext.BaseDirectory);
+    while (repoRoot is not null && !Directory.Exists(Path.Combine(repoRoot.FullName, "src"))) repoRoot = repoRoot.Parent;
+    Check("the repository root could be located from the test binary", repoRoot is not null, AppContext.BaseDirectory);
+    // A CREDENTIAL is a full URL carrying a numeric webhook id, not the bare path fragment: the redactor in
+    // TelemetryClient searches for "/api/webhooks/" on purpose, and flagging that would make the guard
+    // demand the removal of the very code that hides tokens. Matching the shape is the whole point.
+    var credentialShape = new System.Text.RegularExpressions.Regex(
+        @"https?://[^\s""'<>]*api/webhooks/[0-9]{5,}|hooks\.slack\.com/services/[A-Za-z0-9/]{10,}",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    var offenders = new List<string>();
+    int scannedFiles = 0;
+    if (repoRoot is not null)
     {
-        scanned = true;
-        var bytes = File.ReadAllBytes(asm);
-        string ascii = Encoding.ASCII.GetString(bytes);
-        string utf16 = Encoding.Unicode.GetString(bytes);
-        foreach (string needle in new[] { "discord.com", "api/webhooks", "https://hooks.slack.com" })
-            if (ascii.Contains(needle, StringComparison.OrdinalIgnoreCase) || utf16.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                found.Add(needle);
+        foreach (string pattern in new[] { "*.cs", "*.csproj", "*.props", "*.yml", "*.json" })
+            foreach (string file in Directory.EnumerateFiles(Path.Combine(repoRoot.FullName, "src"), pattern, SearchOption.AllDirectories))
+            {
+                if (file.Replace('\\', '/').Contains("/obj/") || file.Replace('\\', '/').Contains("/bin/")) continue;
+                scannedFiles++;
+                string text = File.ReadAllText(file);
+                if (credentialShape.IsMatch(text)) offenders.Add(Path.GetFileName(file) + " -> " + credentialShape.Match(text).Value[..Math.Min(30, credentialShape.Match(text).Value.Length)] + "...");
+            }
     }
-    Check("the built Core assembly could be scanned", scanned, asm ?? "(no location)");
-    Check("no webhook URL is compiled in", found.Count == 0,
-        found.Count == 0 ? "" : "found: " + string.Join(", ", found));
+    Check("source files were scanned for a committed webhook", scannedFiles > 50, scannedFiles.ToString());
+    Check("no webhook credential is committed in src/", offenders.Count == 0, string.Join("; ", offenders));
+    // The guard has to be able to fail, or it proves nothing: a synthetic credential must trip it.
+    // The fixture is assembled from pieces so that no literal credential shape exists in this file -
+    // a repository scanner cannot tell a test fixture from a leak, and must not have to.
+    string shapeProbe = "url = \"https://discord.com/api/" + "webhooks/" + "111111111111111111/" + "FAKEtoken\";";
+    Check("the guard recognises the shape it is looking for", credentialShape.IsMatch(shapeProbe), shapeProbe);
+    Check("...and does not trip on the redactor's bare path fragment",
+        !credentialShape.IsMatch("int i = url.IndexOf(\"/api/webhooks/\", StringComparison.Ordinal);"));
+
+    // A build-provisioned address is read from assembly metadata and validated like any other.
+    Check("an unprovisioned build has no baked report address", TelemetryClient.BakedDestination(TelemetryClient.ReportMetadataKey) is null,
+        TelemetryClient.BakedDestination(TelemetryClient.ReportMetadataKey) ?? "null");
+    Check("an unprovisioned build has no baked feedback address", TelemetryClient.BakedDestination(TelemetryClient.FeedbackMetadataKey) is null);
+    Check("an unknown metadata key is not an address", TelemetryClient.BakedDestination("Not.A.Key") is null);
+
+    // Priority: what this machine was told wins over what the build shipped with.
+    const string localUrl = "https://example.com/hook/local";
+    Check("a locally configured address resolves", TelemetryClient.ResolveDestination(localUrl, TelemetryClient.ReportMetadataKey) == localUrl);
+    Check("no local address and no baked one resolves to null",
+        TelemetryClient.ResolveDestination("", "StutterGuard.Absent") is null);
+    Check("an unusable local address does not shadow the build's",
+        TelemetryClient.ResolveDestination("ftp://nope/x", "StutterGuard.Absent") is null);
 
     // The destination is stored per machine and survives the journal round trip, like every other option.
     string rdir = Path.Combine(Path.GetTempPath(), "dpc-dest-" + Guid.NewGuid().ToString("N"));
@@ -5238,13 +5268,13 @@ Console.WriteLine("Reporting destination: per machine, never in the repository")
 
     // The preview is what a user pastes into a chat or an issue when asking for help, so the address shown
     // there must not contain their own credential. Both shapes have to be redacted, not just Discord's.
-    const string discordUrl = "https://discord.com/api/webhooks/123456789/abcdefTOKENabcdef";
+    string discordUrl = "https://discord.com/api/" + "webhooks/" + "111111111111111111/" + "FAKEtokenFAKE";
     const string genericUrl = "https://example.com/hook/secret-token";
     string redDiscord = TelemetryClient.RedactDestination(discordUrl);
     string redGeneric = TelemetryClient.RedactDestination(genericUrl);
     Check("a Discord webhook keeps its id and loses its token",
-        redDiscord == "https://discord.com/api/webhooks/123456789/\u2026", redDiscord);
-    Check("...which is not the token anyone could post to", !redDiscord.Contains("abcdefTOKEN", StringComparison.Ordinal));
+        redDiscord == "https://discord.com/api/" + "webhooks/111111111111111111/\u2026", redDiscord);
+    Check("...which is not the token anyone could post to", !redDiscord.Contains("FAKEtoken", StringComparison.Ordinal));
     Check("any other address loses its last path segment",
         redGeneric == "https://example.com/hook/\u2026", redGeneric);
     Check("...and the secret with it", !redGeneric.Contains("secret-token", StringComparison.Ordinal));

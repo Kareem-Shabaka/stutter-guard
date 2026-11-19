@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using DpcTweaker.Core.Infra;
 
@@ -49,6 +50,45 @@ public static class TelemetryClient
 
     /// <summary>The trimmed destination, or null when the string is not usable (see <see cref="IsUsableDestination"/>).</summary>
     public static string? NormaliseDestination(string? url) => IsUsableDestination(url) ? url!.Trim() : null;
+
+    /// <summary>
+    /// A destination supplied at build time by the person making the build, or null.
+    /// <para>
+    /// This exists so a release can carry a working address without the address ever entering the
+    /// repository. MSBuild puts it in the assembly as <see cref="AssemblyMetadataAttribute"/> and the value
+    /// comes from <c>BuildSecrets.props</c>, which is ignored by git. A URL written into a source file is a
+    /// credential in a public repository, which is how two previous webhooks were found and deleted; a URL
+    /// that arrives through an untracked props file cannot be found that way.
+    /// </para>
+    /// <para>
+    /// It is still inside the built binary, and anyone who downloads that binary can read it. That is
+    /// unavoidable for a client-side destination, so a baked address should be treated as semi-public:
+    /// expect it to be abused eventually, and do not put anything in one that must stay private.
+    /// </para>
+    /// </summary>
+    public static string? BakedDestination(string key)
+    {
+        try
+        {
+            foreach (var a in typeof(TelemetryClient).Assembly.GetCustomAttributes(typeof(AssemblyMetadataAttribute), false))
+                if (a is AssemblyMetadataAttribute m && string.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase))
+                    return NormaliseDestination(m.Value);
+        }
+        catch { /* no metadata on this build: treated as "not provisioned", never as an error */ }
+        return null;
+    }
+
+    /// <summary>Metadata keys a build may define. Anything else is ignored.</summary>
+    public const string ReportMetadataKey = "StutterGuard.ReportWebhook";
+    public const string FeedbackMetadataKey = "StutterGuard.FeedbackWebhook";
+
+    /// <summary>
+    /// Where a report should go, in priority order: what this machine was told, then what the build was
+    /// given, then nothing. Local first on purpose - a user who sets their own address must not be silently
+    /// overridden by whatever the binary shipped with.
+    /// </summary>
+    public static string? ResolveDestination(string? local, string metadataKey) =>
+        NormaliseDestination(local) ?? BakedDestination(metadataKey);
 
     /// <summary>
     /// The destination as it may be shown: scheme, host and the path down to the secret, with the secret

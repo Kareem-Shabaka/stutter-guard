@@ -19,6 +19,15 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!-- A build-provisioned reporting address. The value comes from BuildSecrets.props, which is ignored by
+       git; with that file absent nothing is baked in and the app asks for an address at first use. -->
+  <ItemGroup Condition="'$(StutterGuardReportWebhook)' != ''">
+    <AssemblyMetadata Include="StutterGuard.ReportWebhook" Value="$(StutterGuardReportWebhook)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(StutterGuardFeedbackWebhook)' != ''">
+    <AssemblyMetadata Include="StutterGuard.FeedbackWebhook" Value="$(StutterGuardFeedbackWebhook)" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Assets\DpcTimerRes.exe" LogicalName="DpcTimerRes.exe" />
     <EmbeddedResource Include="Catalog\services.json" LogicalName="services.json" />

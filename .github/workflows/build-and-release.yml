@@ -31,6 +31,30 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # The reporting address is provisioned here from repository secrets and written to BuildSecrets.props,
+      # which is git-ignored. It therefore never enters the source tree, where a public-repository scanner
+      # would find it: that is exactly how two earlier webhook URLs were discovered and deleted by Discord on
+      # 2026-11-15. A fork or a plain push without the secrets provisions nothing, and the app asks the user
+      # for an address at first use instead.
+      - name: Provision reporting address (optional)
+        shell: pwsh
+        env:
+          REPORT_HOOK: ${{ secrets.STUTTERGUARD_REPORT_WEBHOOK }}
+          FEEDBACK_HOOK: ${{ secrets.STUTTERGUARD_FEEDBACK_WEBHOOK }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:REPORT_HOOK) -and [string]::IsNullOrWhiteSpace($env:FEEDBACK_HOOK)) {
+            Write-Host "No reporting address configured for this build; the app asks for one at first use."
+            exit 0
+          }
+          # Plain text, no XML library, so this behaves the same on PowerShell 5.1 and 7. The values are
+          # read from the environment straight into the file and are never echoed.
+          function Esc($s) { if ($null -eq $s) { return "" } return $s.Replace("&","&amp;").Replace("<","&lt;").Replace(">","&gt;") }
+          $xml = "<Project>`n  <PropertyGroup>`n" +
+                 "    <StutterGuardReportWebhook>" + (Esc $env:REPORT_HOOK) + "</StutterGuardReportWebhook>`n" +
+                 "    <StutterGuardFeedbackWebhook>" + (Esc $env:FEEDBACK_HOOK) + "</StutterGuardFeedbackWebhook>`n" +
+                 "  </PropertyGroup>`n</Project>`n"
+          [System.IO.File]::WriteAllText((Join-Path $PWD "BuildSecrets.props"), $xml, (New-Object System.Text.UTF8Encoding($false)))
+          Write-Host "Reporting address provisioned from repository secrets (values not printed)."
       - name: Run Self Tests
         run: dotnet run --project tests/DpcTweaker.SelfTest -c Release
 

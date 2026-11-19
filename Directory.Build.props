@@ -1,4 +1,9 @@
 <Project>
+  <!-- Local-only build inputs: a reporting address, when whoever built this has one. Git-ignored, so the
+       address is not in the repository; absent on a fresh clone, where nothing is baked in. Imported as
+       an optional file so a build without it is not an error. -->
+  <Import Project="$(MSBuildThisFileDirectory)BuildSecrets.props" Condition="Exists('$(MSBuildThisFileDirectory)BuildSecrets.props')" />
+
   <!-- One place to bump the version for every project in the solution. -->
   <PropertyGroup>
     <Version>1.4.0</Version>
