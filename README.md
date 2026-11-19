@@ -212,6 +212,8 @@ path Windows keeps placing games and nothing else is required.
 **Does it phone home?**
 Never on its own. The hardware report and feedback are off until you press the button, and both show
 you the exact payload - destination, full text, every attachment and its size - before sending anything.
+No destination is built into the program: an address is configured once on your machine, and with none set
+the buttons say so and the report is saved to a file instead.
 
 **Windows 10?**
 Yes, 10 and 11, x64.

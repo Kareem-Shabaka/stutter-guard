@@ -28,9 +28,15 @@ background. The only outbound requests are ones a button starts:
 
 | Action | Destination | Data |
 | :--- | :--- | :--- |
-| **Submit hardware report** | A webhook operated by the author | The hardware report shown in the preview, verbatim |
-| **Send feedback** | The same webhook | The text and attachments shown in the preview |
+| **Submit hardware report** | An address configured on this machine (empty by default) | The hardware report shown in the preview, verbatim |
+| **Send feedback** | The same address | The text and attachments shown in the preview |
 | **Download a test file** (during the interrupt check, only if ticked) | `speed.cloudflare.com` | None sent; the response is discarded unread |
+
+No destination is compiled into the program. An address is asked for once, stored in the local journal, and
+only ever used for a report you pressed a button to send; with none set, the buttons say so and the report is
+saved to a file instead. This is deliberate: two webhook URLs used to be in `Reports/TelemetryClient.cs`, a
+public-repository scanner found them on 2026-11-15, and the service deleted both permanently. A credential in
+a repository is a leaked credential, and it also ships inside every binary built from that source.
 
 Every one of those shows the exact payload before sending, and each is off unless you press it.
 

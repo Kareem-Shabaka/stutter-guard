@@ -141,6 +141,19 @@ public sealed class AppOptions
 
     public bool UserChosen { get; set; }
 
+    /// <summary>
+    /// Where an optional report is uploaded, on this machine only. Empty by default.
+    /// <para>
+    /// Deliberately not a constant in the code: a webhook URL is a credential, and one committed to a public
+    /// repository is a leaked credential. Two of them lived in <c>Reports/TelemetryClient.cs</c>, a scanner
+    /// found them in this project's GitHub tree on 2026-11-15, and Discord deleted both permanently. They
+    /// were also inside every binary built from that source, so the leak could not be undone by editing the
+    /// file either. This value is stored in the local journal and never leaves the machine except as the
+    /// destination of a report the user has approved.
+    /// </para>
+    /// </summary>
+    public string ReportWebhookUrl { get; set; } = "";
+
     /// <summary>A copy with some fields changed (so a screen that owns one option never drops the others).</summary>
     public AppOptions With(Action<AppOptions> change)
     {

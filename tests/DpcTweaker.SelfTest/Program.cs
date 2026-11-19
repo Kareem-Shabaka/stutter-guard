@@ -5161,6 +5161,104 @@ Console.WriteLine("Continuity: the new power rows are undone by the generated sc
         j.OriginalsFor("power.cpu.amd-overlay").Single().Target.Split('|').Length == 4);
     try { Directory.Delete(dir, true); } catch { }
 }
+Console.WriteLine("Reporting destination: per machine, never in the repository");
+{
+    // The two webhook URLs that used to live in TelemetryClient were found in this project's public
+    // GitHub tree by a scanner on 2026-11-15 and deleted by Discord. A credential in a public repo is a
+    // leaked credential, and it also ships inside every binary built from that source, so the fix is
+    // that no destination is compiled in at all.
+    Check("an https URL with a host is usable", TelemetryClient.IsUsableDestination("https://discord.com/api/webhooks/1/x"));
+    Check("null is not usable", !TelemetryClient.IsUsableDestination(null));
+    Check("empty is not usable", !TelemetryClient.IsUsableDestination("   "));
+    Check("plain http is refused: the payload can carry a machine name and a log",
+        !TelemetryClient.IsUsableDestination("http://example.com/hook"));
+    Check("a bare word is not usable", !TelemetryClient.IsUsableDestination("example.com/hook"));
+    Check("surrounding whitespace is trimmed by NormaliseDestination",
+        TelemetryClient.NormaliseDestination("  https://example.com/hook  ") == "https://example.com/hook");
+    Check("...and an unusable address normalises to null", TelemetryClient.NormaliseDestination("ftp://x/y") is null);
+
+    // The regression that matters: no destination may be compiled into the shipped assembly. This reads
+    // the built Core.dll, so it fails on the commit that reintroduces one rather than on a user's report.
+    var asm = typeof(TelemetryClient).Assembly.Location;
+    bool scanned = false;
+    var found = new List<string>();
+    if (!string.IsNullOrEmpty(asm) && File.Exists(asm))
+    {
+        scanned = true;
+        var bytes = File.ReadAllBytes(asm);
+        string ascii = Encoding.ASCII.GetString(bytes);
+        string utf16 = Encoding.Unicode.GetString(bytes);
+        foreach (string needle in new[] { "discord.com", "api/webhooks", "https://hooks.slack.com" })
+            if (ascii.Contains(needle, StringComparison.OrdinalIgnoreCase) || utf16.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                found.Add(needle);
+    }
+    Check("the built Core assembly could be scanned", scanned, asm ?? "(no location)");
+    Check("no webhook URL is compiled in", found.Count == 0,
+        found.Count == 0 ? "" : "found: " + string.Join(", ", found));
+
+    // The destination is stored per machine and survives the journal round trip, like every other option.
+    string rdir = Path.Combine(Path.GetTempPath(), "dpc-dest-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(rdir);
+    string savedDir = Paths.DataDir;
+    Paths.DataDir = rdir;
+    try
+    {
+        var j = new Journal(Path.Combine(rdir, "journal.json"));
+        var profile = new SystemProfile
+        {
+            Windows = new WindowsInfo("Windows 11 Pro", "26H2", 26300, 9711, "Professional"),
+            CpuName = "x", CpuVendor = "AMD",
+            Cpu = Topo(Enumerable.Range(0, 4).Select(c => (new[] { c * 2, c * 2 + 1 }, (byte)0)), new[] { (0xFFUL, 32u << 20) }),
+            FormFactor = FormFactor.Desktop, FormFactorEvidence = "",
+            Gpus = Array.Empty<GpuInfo>(), Security = new SecurityInfo(0, false, false), Software = new SoftwareInfo(),
+        };
+        var o = AppOptions.DefaultsFor(profile);
+        Check("a fresh install has no destination", o.ReportWebhookUrl == "");
+        o.ReportWebhookUrl = "https://example.com/hook/abc";
+        o.Save(j);
+        var back = AppOptions.Load(j, profile);
+        Check("the destination survives reload", back.ReportWebhookUrl == "https://example.com/hook/abc", back.ReportWebhookUrl);
+        var copy = back.With(x => x.Preset = TweakPreset.Safe);
+        Check("...and a With() copy keeps it", copy.ReportWebhookUrl == "https://example.com/hook/abc");
+
+        // A file written before this field existed must still load, with an empty destination.
+        j.SetState("options", "{\"PlanTarget\":\"TunedUltimate\",\"PowerProfile\":\"Full\",\"ApplyOnBattery\":false," +
+                              "\"CState\":\"Light\",\"Preset\":\"Safe\",\"TimerResolution\":5000,\"Msi\":\"Safe\"," +
+                              "\"Cleanup\":\"Safe\",\"KeepValidPins\":true,\"HybridDevices\":\"EcoresForNetAudio\",\"UserChosen\":true}");
+        j.Save();
+        var legacy = AppOptions.Load(j, profile);
+        Check("an options file from before the field still loads", legacy.UserChosen);
+        Check("...with no destination, not a guess", legacy.ReportWebhookUrl == "");
+    }
+    finally
+    {
+        Paths.DataDir = savedDir;
+        try { Directory.Delete(rdir, true); } catch { }
+    }
+
+    // The preview is what a user pastes into a chat or an issue when asking for help, so the address shown
+    // there must not contain their own credential. Both shapes have to be redacted, not just Discord's.
+    const string discordUrl = "https://discord.com/api/webhooks/123456789/abcdefTOKENabcdef";
+    const string genericUrl = "https://example.com/hook/secret-token";
+    string redDiscord = TelemetryClient.RedactDestination(discordUrl);
+    string redGeneric = TelemetryClient.RedactDestination(genericUrl);
+    Check("a Discord webhook keeps its id and loses its token",
+        redDiscord == "https://discord.com/api/webhooks/123456789/\u2026", redDiscord);
+    Check("...which is not the token anyone could post to", !redDiscord.Contains("abcdefTOKEN", StringComparison.Ordinal));
+    Check("any other address loses its last path segment",
+        redGeneric == "https://example.com/hook/\u2026", redGeneric);
+    Check("...and the secret with it", !redGeneric.Contains("secret-token", StringComparison.Ordinal));
+    Check("a single-segment address is shown as it is",
+        TelemetryClient.RedactDestination("https://example.com/hook") == "https://example.com/hook");
+    Check("an address it cannot parse is returned unchanged",
+        TelemetryClient.RedactDestination("not a url") == "not a url");
+
+    // And what the user reviews carries the redacted form, because that is what the builders put in.
+    var shown = new TelemetryPayload(redGeneric, "summary", "REPORT", "scan-report.txt", null, null);
+    string preview = TelemetryClient.Preview(shown);
+    Check("the preview names the configured destination", preview.Contains("example.com"), preview.Split('\n')[1]);
+    Check("...without the token part of it", !preview.Contains("secret-token"), preview.Split('\n')[1]);
+}
 Console.WriteLine($"{passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 /// <summary>

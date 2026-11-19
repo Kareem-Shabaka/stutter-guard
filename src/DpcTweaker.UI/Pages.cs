@@ -557,13 +557,50 @@ public sealed class HomePageViewModel : PageViewModel
         }
     }
 
+    /// <summary>
+    /// The address an upload goes to, or null when there is none and none was supplied.
+    /// <para>
+    /// Nothing is compiled in. Two webhook URLs used to be, a public-repository scanner found them on
+    /// 2026-11-15, and Discord deleted both permanently - so the address is asked for once and kept on this
+    /// machine. Cancelling is not an error: the caller falls back to saving the report to a file, which is
+    /// the same information without the upload.
+    /// </para>
+    /// </summary>
+    private string? AskForDestination(string what)
+    {
+        var engine = _main.Engine;
+        if (engine is null) return null;
+        if (TelemetryClient.NormaliseDestination(engine.Options.ReportWebhookUrl) is { } known) return known;
+
+        string? entered = _main.Ui.Prompt("Where should " + what + " go?",
+            "This build has no reporting address configured, so nothing can be uploaded yet.\n\n" +
+            "Paste an https address to send it to your own channel - a Discord webhook URL works. " +
+            "Press Cancel and it is saved to a file on this PC instead; nothing is uploaded either way.",
+            "");
+        if (TelemetryClient.NormaliseDestination(entered) is { } chosen)
+        {
+            engine.SetOptions(engine.Options.With(o => o.ReportWebhookUrl = chosen));
+            return chosen;
+        }
+        if (!string.IsNullOrWhiteSpace(entered))
+            _main.Ui.Inform("That address can't be used",
+                "\"" + entered.Trim() + "\" is not an https address with a host, so nothing was sent.");
+        return null;
+    }
+
     private async Task SubmitReportAsync()
     {
         var engine = _main.Engine;
         if (engine is null) return;
+        if (AskForDestination("the hardware report") is not { } destination)
+        {
+            SaveReport();
+            Message = "Not uploaded: no reporting address is set. Saved a copy instead.";
+            return;
+        }
         // Build the payload first, then show it in full. Whatever the user approves here is the exact
         // object that gets posted, so the preview cannot drift from what is actually sent.
-        var payload = TelemetryClient.BuildDataReportPayload(engine);
+        var payload = TelemetryClient.BuildDataReportPayload(engine, destination);
         if (!_main.Ui.Review("Review the hardware report before sending",
             "This is everything that will be sent to the developer, in full. Nothing is sent until you press Send.",
             TelemetryClient.Preview(payload)))
@@ -573,7 +610,7 @@ public sealed class HomePageViewModel : PageViewModel
         _main.SetGlobalBusy(true);
         try
         {
-            var (ok, msg) = await TelemetryClient.SendDataReportAsync(payload);
+            var (ok, msg) = await TelemetryClient.SendDataReportAsync(payload, destination);
             Message = msg;
             if (ok) _main.Ui.Inform("Report Submitted", msg);
             else _main.Ui.Inform("Submission Failed", msg);
@@ -589,6 +626,16 @@ public sealed class HomePageViewModel : PageViewModel
         var engine = _main.Engine;
         if (engine is null) return;
 
+        // Asked before the message is written, not after: being told there is nowhere to send a paragraph
+        // you have just typed is worse than being told first.
+        if (AskForDestination("your feedback") is not { } destination)
+        {
+            _main.Ui.Inform("Nothing was sent",
+                "No reporting address is set, so feedback cannot be uploaded. The hardware report can still be saved " +
+                "with Save report on Home, and issues can be reported at github.com/Kareem-Shabaka/stutter-guard/issues.");
+            return;
+        }
+
         string? text = _main.Ui.Prompt(
             "Send Feedback / Report an Issue",
             "Share your feedback, game results, feature ideas, or report a bug. Your hardware scan report is included automatically so the developer can optimize for your rig:\n\n(Optional: you may also include your Discord tag or email if you want a response)",
@@ -597,7 +644,7 @@ public sealed class HomePageViewModel : PageViewModel
         if (string.IsNullOrWhiteSpace(text)) return;
 
         // Same rule as the hardware report: build once, show it, send exactly what was shown.
-        var payload = TelemetryClient.BuildFeedbackPayload(engine, text);
+        var payload = TelemetryClient.BuildFeedbackPayload(engine, text, destination);
         if (!_main.Ui.Review("Review your feedback before sending",
             "This is everything that will be sent, in full, including your message and any attached files. Nothing is sent until you press Send.",
             TelemetryClient.Preview(payload)))
@@ -607,7 +654,7 @@ public sealed class HomePageViewModel : PageViewModel
         _main.SetGlobalBusy(true);
         try
         {
-            var (ok, msg) = await TelemetryClient.SendFeedbackAsync(payload);
+            var (ok, msg) = await TelemetryClient.SendFeedbackAsync(payload, destination);
             Message = msg;
             if (ok) _main.Ui.Inform("Feedback Sent", msg);
             else _main.Ui.Inform("Submission Failed", msg);

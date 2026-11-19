@@ -20,40 +20,72 @@ public sealed record TelemetryPayload(
 }
 
 /// <summary>
-/// Submits optional anonymous hardware reports and user bug reports to the developer's Discord channels.
+/// Uploads an optional report, when - and only when - a destination has been configured on this machine.
 /// <para>
-/// The webhook URLs are written out in full rather than obfuscated. A base64 string in a binary looks like
-/// something hidden, and this app's whole case rests on being inspectable: anyone can read the destination
-/// below and see where a report goes. It is a webhook, not an invite, and it only receives what
-/// <see cref="TelemetryPayload"/> shows.
+/// There is deliberately no URL in this file. Two were, and both were deleted by Discord: a webhook URL is
+/// a credential, and one committed to a public repository is a leaked credential. A scanner found them in
+/// this project's GitHub tree on 2026-11-15, and that is the documented reason they stopped working. They
+/// also ship inside every binary built from that source, so a local copy cannot be un-leaked either.
+/// </para>
+/// <para>
+/// So the destination is per machine and stored in the local options, never in the repository. What the app
+/// still guarantees is the part that matters to a user: the payload is built once, previewed in full, and
+/// the object approved is the object posted.
 /// </para>
 /// </summary>
 public static class TelemetryClient
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
-    public const string DataWebhookUrl =
-        "https://discord.com/api/webhooks/1569861643381510144/1E-Sk9P1YiMJNZEb--qj-zr5cu8C2TTCCenLGFqyyT9dQZJrABlHwimNa0bMLk0ovy9R";
+    /// <summary>
+    /// Whether a string can be used as a destination: an absolute https URL with a host, and nothing else
+    /// asked of it. https is not negotiable - the payload can contain a machine name, a task author and a
+    /// log file, and none of that goes over plaintext.
+    /// </summary>
+    public static bool IsUsableDestination(string? url) =>
+        Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var u)
+        && u.Scheme == Uri.UriSchemeHttps
+        && !string.IsNullOrEmpty(u.Host);
 
-    public const string BugWebhookUrl =
-        "https://discord.com/api/webhooks/1569861762348486788/JuPyo-VI91GICa6RrOK5LkXZd7iG0INCVH48H4JiDTgBMKcFYR6528v4oL-ob-FPeUdR";
+    /// <summary>The trimmed destination, or null when the string is not usable (see <see cref="IsUsableDestination"/>).</summary>
+    public static string? NormaliseDestination(string? url) => IsUsableDestination(url) ? url!.Trim() : null;
 
-    /// <summary>Host and path, without the token part of the URL, for display next to a preview.</summary>
-    private static string DisplayDestination(string url)
+    /// <summary>
+    /// The destination as it may be shown: scheme, host and the path down to the secret, with the secret
+    /// itself replaced. The preview is what a user copies into a chat or an issue when asking for help, so
+    /// printing the whole address there would publish their own credential - which is the mistake this
+    /// class is being fixed for.
+    /// <para>
+    /// A Discord webhook keeps its numeric id visible, because the id is not the secret and it is what
+    /// identifies the channel. Every other shape keeps every path segment except the last.
+    /// </para>
+    /// </summary>
+    public static string RedactDestination(string url)
     {
+        const string mask = "/\u2026";
         int i = url.IndexOf("/api/webhooks/", StringComparison.Ordinal);
-        if (i < 0) return url;
-        string prefix = url[..(i + "/api/webhooks/".Length)];
-        string rest = url[(i + "/api/webhooks/".Length)..];
-        int slash = rest.IndexOf('/');
-        return slash < 0 ? prefix + rest : prefix + rest[..slash] + "/…";
-    }
+        if (i >= 0)
+        {
+            string prefix = url[..(i + "/api/webhooks/".Length)];
+            string rest = url[(i + "/api/webhooks/".Length)..];
+            int slash = rest.IndexOf('/');
+            return slash < 0 ? prefix + rest : prefix + rest[..slash] + mask;
+        }
 
+        // Any other address: keep scheme + host + every segment but the last. A single-segment path is
+        // shown as it is, because masking that would hide where the report goes without hiding a secret.
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return url;
+        var segments = u.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length <= 1) return u.GetLeftPart(UriPartial.Path);
+        return u.GetLeftPart(UriPartial.Authority) + "/" + string.Join("/", segments[..^1]) + mask;
+    }
     private static string GpuText(TweakEngine engine) =>
         engine.Profile.Gpus.Count > 0 ? string.Join(", ", engine.Profile.Gpus.Select(g => g.Label)) : "None detected";
 
-    /// <summary>The hardware report payload: the Discord summary line plus the scan report as a file.</summary>
-    public static TelemetryPayload BuildDataReportPayload(TweakEngine engine)
+    /// <summary>The hardware report payload: the summary line plus the scan report as a file.</summary>
+    /// <param name="destination">Where it will be sent. Carried into the payload so the preview shows the
+    /// real address rather than a placeholder, and so what is reviewed is what is sent.</param>
+    public static TelemetryPayload BuildDataReportPayload(TweakEngine engine, string destination)
     {
         var p = engine.Profile;
         string reportText = ScanReport.Build(engine);
@@ -71,12 +103,12 @@ public static class TelemetryClient
         summary.AppendLine($"- **Timer:** {(p.TimerResolution is { } tr ? $"{tr.Current / 10000.0:0.000} ms" : "Unknown")} | **WHEA:** {p.WheaErrors14Days ?? 0} in 14d");
         summary.AppendLine($"- **Core Benchmark:** {benchText}");
 
-        return new TelemetryPayload(DisplayDestination(DataWebhookUrl), summary.ToString().TrimEnd(), reportText,
+        return new TelemetryPayload(RedactDestination(destination), summary.ToString().TrimEnd(), reportText,
             "scan-report.txt", null, null);
     }
 
     /// <summary>The feedback payload: the user's message plus the same hardware report, and today's log if present.</summary>
-    public static TelemetryPayload BuildFeedbackPayload(TweakEngine engine, string userMessage, string? userContact = null)
+    public static TelemetryPayload BuildFeedbackPayload(TweakEngine engine, string userMessage, string destination, string? userContact = null)
     {
         var p = engine.Profile;
         string reportText = ScanReport.Build(engine);
@@ -101,7 +133,7 @@ public static class TelemetryClient
         }
         catch { }
 
-        return new TelemetryPayload(DisplayDestination(BugWebhookUrl), summary.ToString().TrimEnd(), reportText,
+        return new TelemetryPayload(RedactDestination(destination), summary.ToString().TrimEnd(), reportText,
             "scan-report.txt", logName, logBytes);
     }
 
@@ -147,6 +179,13 @@ public static class TelemetryClient
 
             using var resp = await Http.PostAsync(url, form, ct);
             if (resp.IsSuccessStatusCode) return (true, "Sent. Thank you for helping improve Stutter Guard.");
+            // A 404 here is the specific failure this app has already lived through: the service deletes a
+            // webhook that has been posted publicly, permanently, and nothing the user does can revive it.
+            // Reporting "status NotFound" would send them looking for a problem on their own machine.
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return (false, "That destination no longer exists (HTTP 404). A webhook is deleted permanently once it has " +
+                               "been posted publicly, and two this app used to ship were deleted that way. Set a new address and " +
+                               "try again - nothing was sent.");
             return (false, $"Submission returned status {resp.StatusCode}.");
         }
         catch (OperationCanceledException) { return (false, "Submission was cancelled."); }
@@ -154,9 +193,9 @@ public static class TelemetryClient
     }
 
     /// <summary>Sends a payload that was already shown to the user. Sending anything else would be a lie.</summary>
-    public static Task<(bool ok, string message)> SendDataReportAsync(TelemetryPayload p, CancellationToken ct = default) =>
-        PostAsync(p, withLog: false, DataWebhookUrl, ct);
+    public static Task<(bool ok, string message)> SendDataReportAsync(TelemetryPayload p, string destination, CancellationToken ct = default) =>
+        PostAsync(p, withLog: false, destination, ct);
 
-    public static Task<(bool ok, string message)> SendFeedbackAsync(TelemetryPayload p, CancellationToken ct = default) =>
-        PostAsync(p, withLog: true, BugWebhookUrl, ct);
+    public static Task<(bool ok, string message)> SendFeedbackAsync(TelemetryPayload p, string destination, CancellationToken ct = default) =>
+        PostAsync(p, withLog: true, destination, ct);
 }
