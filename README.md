@@ -22,7 +22,7 @@ runs, so you can revert all of it, even from Safe Mode.**
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
-![LatencyMon per-CPU interrupt distribution with Stutter Guard active](docs/images/app-214811.png)
+![Stutter Guard Interrupts tab showing per-core topology plan for GPU, USB, audio, and NIC RSS](docs/images/app-interrupts.png)
 
 ---
 
