@@ -1,0 +1,38 @@
+name: Hardware / Benchmark Result
+description: Share measured gaming frametime, LatencyMon, or DAW/ASIO audio results from your machine.
+labels: ["hardware-report"]
+body:
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU, GPU & Audio Interface
+      placeholder: "e.g. Intel i7-14700K, RX 9070 XT, Focusrite Scarlett 2i2"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows version & Stutter Guard version
+      placeholder: "e.g. Windows 11 24H2, Stutter Guard 1.4.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workload
+    attributes:
+      label: Primary workload
+      options:
+        - Gaming (frametimes / 1% lows)
+        - Real-time audio / DAW (ASIO dropouts / LatencyMon)
+        - Both gaming and audio
+    validations:
+      required: true
+
+  - type: textarea
+    id: results
+    attributes:
+      label: Measured before / after results
+      description: Share your instrument (CapFrameX, PresentMon, LatencyMon, WakeProbe, DAW buffer size) and observed numbers.
+    validations:
+      required: true

@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a bug, unexpected tweak behaviour, or UI issue.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Stutter Guard version
+      placeholder: "e.g. 1.4.1"
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware & Windows version
+      description: CPU, GPU, audio interface (if relevant), and Windows build (winver).
+      placeholder: "e.g. Ryzen 7 9800X3D, RTX 4080, Windows 11 24H2 (26100)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe what you did, what you expected, and what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Scan report or log (optional)
+      description: Use Home -> Save report to export scan-report.txt, or paste relevant lines from %ProgramData%\Stutter Guard\logs\.
+      render: text

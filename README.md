@@ -137,7 +137,7 @@ Windows 10 or 11, x64.
 
 ---
 
-## Why interrupt placement is the lever
+## How CPU interrupt affinity, MSI mode, and NIC RSS reduce stutter
 
 Windows routes a device's interrupt using two documented mechanisms: the device's *Affinity Policy* and
 its *MSI* properties, both read when the device starts. One affinity mask applies to all of a device's
@@ -163,7 +163,7 @@ where it is; only the rest are placed.
 
 ---
 
-## Two architecture paths, stated rather than implied
+## Two Windows scheduling paths: Tuned Ultimate vs Balanced
 
 | Path | Choose it when | What the app does |
 | :--- | :--- | :--- |
@@ -175,7 +175,7 @@ commits you to.
 
 ---
 
-## Supported hardware
+## Supported CPUs and hardware (AMD X3D, Intel hybrid, single-CCD)
 
 | Family | Examples | Placement |
 | :--- | :--- | :--- |
@@ -288,7 +288,7 @@ docs/                  measurement method, architecture, release notes
 
 ## License and support
 
-GPL-3.0. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Commercial licensing on request.
+GPL-3.0. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Commercial licensing on request. Questions, hardware scans, and gaming/DAW benchmark results are welcome in [Discussions](https://github.com/Kareem-Shabaka/stutter-guard/discussions).
 
 If this saved you a weekend of LatencyMon logs, you can
 [sponsor development](https://github.com/sponsors/Kareem-Shabaka). Sponsorship buys time to measure on
