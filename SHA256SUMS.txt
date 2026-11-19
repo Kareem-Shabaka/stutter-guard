@@ -22,12 +22,18 @@
 # `build.cmd --verify-repro`, which deletes every obj/ and bin/ between the two publishes so they cannot
 # share results.
 #
-#   v1.3.0 tree:  65,447,000 bytes  851FA3465EA11D59B141C3FEF8266E9352BE30FEA8477EC80B7D6B4F403D8880
-#   v1.4.0 tree:  65,456,984 bytes  4618F79B913F5548244EA6EFFF0DC8CF112187E48CA670EE27BD2025291C6FE0
+# WHAT IS NOT CLAIMED, and was measured to be false: that the SAME commit produces the same bytes at a
+# different time. Commit b99fb44 (v1.4.0) was published cleanly twice on 2026-11-19 and gave two different
+# files - 65,456,984 bytes / 4618F79B... at 05:56, and 65,456,986 bytes / D87906C1... at 06:11. Each pair
+# was internally identical (the switch above passed on both runs, and again on a re-run), so the property
+# is "a clean pair in one stretch of time is one file", not "a commit has a hash". The 2-byte size change
+# is the same drift this file recorded before between two commits whose only difference was markdown, and
+# it is still unexplained: no source path, timestamp or commit id was found to be embedded.
 #
-# The v1.4.0 figure is that working tree's own clean-build hash, and it equals the file its own
-# `dotnet publish` produced. It is NOT a release asset's hash: the build job publishes its own bytes and
-# attaches their hash beside them.
+# THE CONSEQUENCE, which is why no absolute figure is stated here: a hash of your own build verifies the
+# bytes in front of you and nothing else. The v1.4.0 release asset (65,462,615 bytes) was verified against
+# the .sha256 attached to that release by downloading it, and that check passed; it is a third value again,
+# because a different runner is a different build.
 #
 # WHAT IS NOT CLAIMED: that a release's bytes equal a build of your own. They do not have to, and the
 # absolute figure moves between working trees: cleaning and publishing commit c59b29b gave 65,446,991
