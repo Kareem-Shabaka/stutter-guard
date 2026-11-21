@@ -3,8 +3,10 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0%20(LTS)-purple.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078d4.svg)](https://microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-1.4.1-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
+[![Version](https://img.shields.io/badge/Version-1.4.2-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Tests](https://img.shields.io/badge/self--tests-1%2C476%20passing-success.svg)](tests/DpcTweaker.SelfTest)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Patreon](https://img.shields.io/badge/Patreon-Support-FF424D?logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
 
 ## Average FPS is not what decides whether a game feels smooth - or whether real-time audio stays glitch-free.
 
@@ -18,7 +20,9 @@ network) to a dedicated first-thread core - keeping CPU 0/1 clear on every syste
 V-Cache CCD or P-cores free of devices on split-topology CPUs. Every change is journalled before it
 runs, so you can revert all of it, even from Safe Mode.**
 
-### [Download Stutter Guard 1.4.1](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
+[![Download Stutter Guard 1.4.2](https://img.shields.io/badge/Download-Stutter%20Guard%201.4.2-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
+[![Sponsor Stutter Guard](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
@@ -81,6 +85,25 @@ no interrupt and no DPC at all. **No DPC reached 250 µs** out of 2,775,336.
 *The result that plan produces. That is the target rather than the problem: the case this app is for is
 the one where a ready thread on a busy core waits 782 µs instead of 8.9 µs - a factor of about 90,
 measured, with the method below.*
+
+---
+
+## Independent community results
+
+Reports published by users on separate hardware, with direct links to each original thread:
+
+| System | Workload / Instrument | Reported Result | Source |
+| :--- | :--- | :--- | :--- |
+| **Ryzen 7 9800X3D** (single CCD), X870E, **RTX 5090**, Realtek 5GbE, 1000 Hz dongle, Win 11 25H2 | **LatencyMon** (idle, 1000 Hz gamepad on) & **CapFrameX** (6-run sessions vs. calibrated noise floor, *Forza Horizon 6* 4K) | CPU 0 DPC share **95.2% → 6.1%** (0 ISRs on CPU 0); Interrupt-to-DPC peak **502.9 → 90.7 µs (-82.0%)**; `ndis.sys` **271.7 → 60.2 µs (-77.8%)**; *FH6* 4K 0.1% Low **68.1 → 74.8 FPS (+9.8%)** stock and **76.2 → 80.7 FPS** OC; 0 regressions in 3DMark | [@DzmitryB — Issue #1](https://github.com/Kareem-Shabaka/stutter-guard/issues/1) |
+| **Ryzen 7 9800X3D** + **8000 Hz** keyboard & mouse | **LatencyMon** | Interrupt latency **~60 µs → ~10 µs**; highest interrupt latency **645 µs → 110 µs (-82.9%)** | [u/Gijs007 — r/overclocking](https://www.reddit.com/r/overclocking/comments/1xt3flf/comment/19shx4waw6s4i/) |
+| Fresh debloated Windows 11 install | **LatencyMon** & in-game **1% Lows** | Average interrupt latency **280 → ~50 µs**; DPC execution **330 → ~220 µs**; ISR **15 → 5 µs**; **~5% improvement in 1% lows** across games | [u/Educational-Lynx1413 — r/overclocking](https://www.reddit.com/r/overclocking/comments/1xtyfmk/comment/19siw2uzyl0wy/) |
+| Dual-CCD Ryzen + USB audio / hardware interface (already 80% manually tuned + Process Lasso) | **Real-time Audio / DAW** & `Wdf01000.sys` | Per-controller USB pinning reined in `wdf.sys` spikes; lowered audio software buffer from **3072 → 2048** with zero pops or crackling | [u/magicmasta — r/overclocking](https://www.reddit.com/r/overclocking/comments/1xt3flf/comment/19shyicz056g0/) |
+
+> *"I had already manually done 80% of what this tool advises, but the CPU DPC benchmark and subsequent driver-CPU pairing based on those results actually reigned in my `wdf.sys` problem... I finally was able to lower my largest audio software buffer in my signal chain from 3072 → 2048 without triggering pops/crackling."* — [u/magicmasta](https://www.reddit.com/r/overclocking/comments/1xt3flf/comment/19sgvh2yjr1lu/)
+
+> *"IT IS OPEN SOURCE. You can read every line... I did exactly that, at commit `8c783a4`, and it took me MINUTES. No hidden network calls, nothing sent without you pressing a button, Defender / firewall / Windows Update untouched, storage controllers left out of the affinity changes, no injection, no credential access."* — [u/Gen3tics (independent source audit)](https://www.reddit.com/r/overclocking/comments/1xtyfmk/comment/19sjohm6bxdk5/)
+
+Have before/after LatencyMon, CapFrameX, or DAW buffer numbers on different hardware? Share them in [Discussions #2](https://github.com/Kareem-Shabaka/stutter-guard/discussions/2).
 
 ---
 
@@ -238,8 +261,9 @@ What it measures and changes, and where that stops:
   and nothing beyond that is claimed.
 - **Placement, not compositor work.** Each attached display is composited at its own cadence, so a
   mixed-refresh-rate setup costs GPU work that no interrupt mask changes. The app reports the cost.
-- **One CPU and one GPU pair** (9950X3D, RX 9070 XT) stand behind the figures above. The mechanism is
-  documented by Microsoft and applies generally; the 782 µs magnitude is specific to that hardware.
+- **Reference figures vs. community reports.** The 782 µs → 8.9 µs wake-latency figure was measured on
+  one reference pair (9950X3D, RX 9070 XT). Community reports above cover additional hardware (including
+  9800X3D + RTX 5090 and 8000 Hz peripherals); magnitudes remain hardware- and driver-dependent.
 
 ---
 
@@ -274,7 +298,8 @@ docs/                  measurement method, architecture, release notes
 
 ## Releases
 
-- [v1.4.1](docs/releases/RELEASE_NOTES_v1.4.1.md) - current
+- [v1.4.2](docs/releases/RELEASE_NOTES_v1.4.2.md) - current
+- [v1.4.1](docs/releases/RELEASE_NOTES_v1.4.1.md)
 - [v1.4.0](docs/releases/RELEASE_NOTES_v1.4.0.md) - superseded (see 1.4.1)
 - [v1.3.0](docs/releases/RELEASE_NOTES_v1.3.0.md)
 - [v1.2.0](docs/releases/RELEASE_NOTES_v1.2.0.md)
@@ -282,13 +307,20 @@ docs/                  measurement method, architecture, release notes
 
 ---
 
-## License and support
+## Support and sponsorship
 
-GPL-3.0. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Commercial licensing on request. Questions, hardware scans, and gaming/DAW benchmark results are welcome in [Discussions](https://github.com/Kareem-Shabaka/stutter-guard/discussions).
+Stutter Guard is free and open source under GPL-3.0, with no telemetry, no account, and no paywall.
 
-If this saved you a weekend of LatencyMon logs, you can
-[sponsor development](https://github.com/sponsors/Kareem-Shabaka). Sponsorship buys time to measure on
-hardware other than one machine - the largest gap this project has.
+Sponsorship funds independent test hardware (Intel hybrid, NVIDIA GPUs, and audio interfaces), Windows
+driver-regression testing, and ongoing maintenance. Commercial licensing for closed-source distribution or
+bundled deployment is also available on request — see [COPYRIGHT](COPYRIGHT).
+
+[![Sponsor Stutter Guard on GitHub](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
+
+## License and discussions
+
+GPL-3.0. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Questions, hardware scans, and gaming/DAW benchmark results are welcome in [Discussions](https://github.com/Kareem-Shabaka/stutter-guard/discussions).
 
 ## Acknowledgments
 

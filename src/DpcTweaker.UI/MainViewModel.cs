@@ -51,6 +51,7 @@ public sealed class MainViewModel : ObservableObject
             if (Ui.Confirm("Restart now", "Restart Windows now? Save your work first.")) Ui.Restart();
         });
         OpenSupportCommand = new RelayCommand(() => Ui.Open("https://github.com/sponsors/Kareem-Shabaka"));
+        OpenPatreonCommand = new RelayCommand(() => Ui.Open("https://patreon.com/StutterGuard"));
         OpenGitHubCommand = new RelayCommand(() => Ui.Open("https://github.com/Kareem-Shabaka/stutter-guard"));
     }
 
@@ -72,6 +73,7 @@ public sealed class MainViewModel : ObservableObject
 
     public RelayCommand RestartCommand { get; }
     public RelayCommand OpenSupportCommand { get; }
+    public RelayCommand OpenPatreonCommand { get; }
     public RelayCommand OpenGitHubCommand { get; }
 
     public bool RestorePointDone { get; set; }

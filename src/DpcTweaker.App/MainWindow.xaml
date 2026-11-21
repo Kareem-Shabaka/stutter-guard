@@ -556,6 +556,40 @@
                         </StackPanel>
                     </Border>
 
+                    <Border Style="{StaticResource Card}" BorderBrush="#D81B60" BorderThickness="1.5" Margin="0,4,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="Support ongoing development" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,3" />
+                                <TextBlock Style="{StaticResource Secondary}" TextWrapping="Wrap"
+                                           Text="Stutter Guard is free and open source under GPL-3.0. Sponsorship funds independent test hardware, driver-regression testing, and ongoing maintenance." />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Padding="14,8" Margin="0,0,8,0"
+                                        Style="{StaticResource PatreonButtonStyle}"
+                                        Command="{Binding DataContext.OpenPatreonCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ToolTip="Support Stutter Guard on Patreon (no GitHub account needed)">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#x2665;" Foreground="White" Margin="0,0,6,0" FontWeight="Bold" />
+                                        <TextBlock Text="Support on Patreon" Foreground="White" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Padding="14,8"
+                                        Style="{StaticResource SponsorButtonStyle}"
+                                        Command="{Binding DataContext.OpenSupportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ToolTip="Open GitHub Sponsors in your browser">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#x2665;" Foreground="White" Margin="0,0,6,0" FontWeight="Bold" />
+                                        <TextBlock Text="GitHub Sponsors" Foreground="White" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
                     <WrapPanel Margin="0,6,0,0">
                         <Button Content="Save scan report" Command="{Binding SaveReportCommand}" Padding="14,6" Margin="0,0,8,6" />
                         <Button Content="Scan again" Command="{Binding RescanCommand}" Padding="14,6" Margin="0,0,8,6" />
@@ -777,14 +811,27 @@
             <!-- Support & GitHub Sidebar Card -->
             <Border DockPanel.Dock="Bottom" Margin="0,12,0,0" Padding="12" CornerRadius="8"
                     Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    BorderBrush="#D81B60" BorderThickness="1.5">
                 <StackPanel>
-                    <TextBlock Text="Support Stutter Guard" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,3" />
-                    <TextBlock Text="Free &amp; open source. Help support ongoing development!" Opacity="0.75" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
-                    <Button Command="{Binding OpenSupportCommand}" Padding="8,5" HorizontalAlignment="Stretch" Margin="0,0,0,6">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="&#x2665;" Foreground="#E91E63" FontSize="13" FontWeight="Bold" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Support Stutter Guard" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="Free, open source, zero telemetry. Sponsorship funds hardware testing and updates." Opacity="0.8" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+                    <Button Command="{Binding OpenPatreonCommand}" Style="{StaticResource PatreonButtonStyle}"
+                            Padding="10,7" HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                            ToolTip="Support Stutter Guard on Patreon">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <TextBlock Text="&#x2665;" Foreground="#E91E63" Margin="0,0,6,0" FontWeight="Bold" />
-                            <TextBlock Text="Support / Sponsor" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Text="&#x2665;" Foreground="White" Margin="0,0,6,0" FontWeight="Bold" />
+                            <TextBlock Text="Support on Patreon" FontSize="12.5" FontWeight="SemiBold" Foreground="White" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{Binding OpenSupportCommand}" Style="{StaticResource SponsorButtonStyle}"
+                            Padding="10,6" HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                            ToolTip="Open GitHub Sponsors in your browser">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <TextBlock Text="&#x2665;" Foreground="White" Margin="0,0,6,0" FontWeight="Bold" />
+                            <TextBlock Text="GitHub Sponsors" FontSize="12" FontWeight="SemiBold" Foreground="White" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding OpenGitHubCommand}" Padding="8,4" HorizontalAlignment="Stretch">
