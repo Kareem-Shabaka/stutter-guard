@@ -6,6 +6,7 @@
 [![Version](https://img.shields.io/badge/Version-1.4.2-brightgreen.svg)](https://github.com/Kareem-Shabaka/stutter-guard/releases)
 [![Tests](https://img.shields.io/badge/self--tests-1%2C476%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Patreon](https://img.shields.io/badge/Patreon-Support-FF424D?logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
 
 ## Average FPS is not what decides whether a game feels smooth - or whether real-time audio stays glitch-free.
 
@@ -21,6 +22,7 @@ runs, so you can revert all of it, even from Safe Mode.**
 
 [![Download Stutter Guard 1.4.2](https://img.shields.io/badge/Download-Stutter%20Guard%201.4.2-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
 [![Sponsor Stutter Guard](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
@@ -314,6 +316,7 @@ driver-regression testing, and ongoing maintenance. Commercial licensing for clo
 bundled deployment is also available on request — see [COPYRIGHT](COPYRIGHT).
 
 [![Sponsor Stutter Guard on GitHub](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
+[![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
 
 ## License and discussions
 
