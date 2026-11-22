@@ -3,6 +3,3 @@ contact_links:
   - name: Discussions — Questions & Hardware Results
     url: https://github.com/Kareem-Shabaka/stutter-guard/discussions
     about: Ask questions, share your CPU/GPU/DAW results, or discuss tuning paths.
-  - name: Security Policy
-    url: https://github.com/Kareem-Shabaka/stutter-guard/security/policy
-    about: Report a security issue privately.

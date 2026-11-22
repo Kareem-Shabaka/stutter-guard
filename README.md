@@ -296,7 +296,6 @@ docs/                  measurement method, architecture, release notes
 ```
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) - build, test, and the `Evidence` / `TweakCost` contract.
-- [SECURITY.md](SECURITY.md) - private disclosure, and exactly what this app can reach.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - the transaction shape and why it is built that way.
 - [docs/MEASUREMENT.md](docs/MEASUREMENT.md) - every figure above, its method, and its limits.
 
