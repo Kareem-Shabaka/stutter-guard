@@ -7,6 +7,7 @@
 [![Tests](https://img.shields.io/badge/self--tests-1%2C476%20passing-success.svg)](tests/DpcTweaker.SelfTest)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
 [![Patreon](https://img.shields.io/badge/Patreon-Support-FF424D?logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
+[![YouTube](https://img.shields.io/badge/YouTube-48s%20Overview-FF0000?logo=youtube&logoColor=white)](https://youtu.be/hSQf3agqU3s)
 
 ## Average FPS is not what decides whether a game feels smooth - or whether real-time audio stays glitch-free.
 
@@ -23,10 +24,15 @@ runs, so you can revert all of it, even from Safe Mode.**
 [![Download Stutter Guard 1.4.2](https://img.shields.io/badge/Download-Stutter%20Guard%201.4.2-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Kareem-Shabaka/stutter-guard/releases/latest)
 [![Sponsor Stutter Guard](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
 [![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
+[![Watch 48s Overview](https://img.shields.io/badge/Watch-48s%20Overview-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/hSQf3agqU3s)
 
 One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .NET runtime, no account.
 
 ![Stutter Guard Interrupts tab showing per-core topology plan for GPU, USB, audio, and NIC RSS](docs/images/app-interrupts.png)
+
+### 48-second overview (with cited community benchmarks)
+
+[![Watch the 48-second Stutter Guard overview on YouTube](docs/images/video-overview-thumb.png)](https://youtu.be/hSQf3agqU3s)
 
 ---
 
@@ -317,6 +323,7 @@ bundled deployment is also available on request — see [COPYRIGHT](COPYRIGHT).
 
 [![Sponsor Stutter Guard on GitHub](https://img.shields.io/badge/Sponsor%20on%20GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Kareem-Shabaka)
 [![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/StutterGuard)
+[![Watch 48s Overview](https://img.shields.io/badge/Watch-48s%20Overview-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/hSQf3agqU3s)
 
 ## License and discussions
 
