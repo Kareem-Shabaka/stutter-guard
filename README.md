@@ -40,10 +40,10 @@ One self-contained `.exe`, about 65 MB, Windows 10 or 11 x64. No installer, no .
 
 | | Measures | Changes | Proves it helped | Reversible |
 | :--- | :---: | :---: | :---: | :---: |
+| **Stutter Guard** | **yes** | **yes** | **yes, per row** | **completely** |
 | LatencyMon | **yes** | no | - | - |
 | Process Lasso / IRQControl | no | **yes** | no | partially |
 | "Optimiser" suites | no | **yes** | no | rarely |
-| **Stutter Guard** | **yes** | **yes** | **yes, per row** | **completely** |
 
 Most tools do one half of the job. Monitors tell you something is wrong and change nothing. Tweakers
 change things and cannot tell you whether it worked. Stutter Guard measures per core, moves devices
